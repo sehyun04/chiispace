@@ -19,9 +19,26 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 
 | 남의 것 | 우리 것 |
 |---|---|
-| `kasa-pty` (rev 고정) | `src-tauri/src/lib.rs` — PTY ↔ 웹뷰 다리 |
+| `kasa-pty` (rev 고정) | `src-tauri/src/lib.rs` — PTY ↔ 웹뷰 다리, pane 상태 |
+| | `src-tauri/src/workspace.rs` — 파일트리 · git · 세션 |
+| | `ui/App.tsx` — 탭 · 배치 · 단축키 |
+| | `ui/layout.ts` — pane 배치 트리 |
 | | `ui/Term.tsx` — xterm.js 배선 |
-| | `ui/App.tsx`, `ui/app.css`, `ui/theme.css` — 워크스페이스 껍데기 |
+| | `ui/Tree.tsx` — 파일트리 |
+| | `ui/app.css`, `ui/theme.css` — 치이카와 테마 |
+
+## 단축키
+
+| | |
+|---|---|
+| `Ctrl+Shift+D` / `E` | 좌우 / 상하 분할 |
+| `Ctrl+Shift+W` | pane 닫기 |
+| `Ctrl+Shift+←↑↓→` | pane 이동 |
+| `Ctrl+Shift+T` | 새 탭 |
+| `Ctrl+Shift+PgUp` / `PgDn` | 탭 이동 |
+| `Ctrl+Shift+C` / `V` | 복사 / 붙여넣기 |
+| `Ctrl+Shift+O` | 폴더 열기 |
+| `Ctrl` `+` / `-` / `0` | 글자 크기 |
 
 ## 실행
 
@@ -42,10 +59,14 @@ UI 폰트는 Galmuri11(OFL, `ui/assets/`). 터미널 글자는 시스템 등폭.
 ## 헤드리스 검증
 
 ```powershell
-$env:KASASPACE_AUTOSEND = "dir /w"      # 이 문자열 + Enter 를 터미널에 주입
-$env:KASASPACE_AUTOSEND_MS = "4000"
+$env:KASASPACE_ROOT     = "C:\path	oepo"   # 폴더를 연 채로 띄운다
+$env:KASASPACE_AUTOKEYS = "C-S-d,C-S-t,C-="     # 단축키를 순서대로 쏜다
+$env:KASASPACE_AUTOSEND = "dir /w"              # 이 문자열 + Enter 를 터미널에 주입
 scripts\shot.ps1 -Out shot.png
 ```
+
+`KASASPACE_AUTOKEYS` 는 진짜 `KeyboardEvent` 를 쏜다. 단축키 핸들러부터 그 뒤(배치
+트리 · 새 PTY · 리사이즈)까지 제품 경로를 그대로 탄다.
 
 `KASASPACE_AUTOSEND` 는 웹뷰의 `term.input()` 을 부른다. 사용자가 키를 친 것과 **같은
 경로**(`onData` → `pty_write`)를 타므로 배선 전체가 검증된다.
@@ -72,15 +93,19 @@ OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 �
 
 ## 지금 되는 것
 
-셸 한 장이 뜨고, 타이핑이 들어가고, 출력이 그려지고, 한글이 정상으로 나온다.
-사이드바에 로스터가 뜨고 색이 캐릭터별 `header_color` 를 따른다.
+- **pane 분할** — 좌우 · 상하, 경계선 드래그, 방향키로 포커스 이동
+- **탭** — 탭마다 자기 배치와 자기 폴더
+- **파일트리 + git** — 브랜치 · ahead/behind · 파일별 M/A/D/? · 접힌 폴더의 변경 표시
+- **pane 헤더** — 실행 중인 명령 이름, 에이전트 표시, 작업 중 바
+- **세션 복원** — 탭 · 배치 · 폴더 · 글자 크기
+- 복사/붙여넣기(bracketed paste 포함), 글자 크기, 링크 열기, 스크롤백 10000
+- 한글 입력·출력, 새 셸은 연 폴더에서 시작
 
 ## 아직 안 되는 것
 
-- **파일트리** — 사이드바에 자리만 잡혀 있다. 다음 차례
-- **git 상태** — 파일트리에 붙을 뱃지
-- **pane 분할** — `kasa_pty::layout` 에 BSP 트리(`split_leaf`/`leaf_rects`/`dividers`)가 이미 있다
-- **pane 간 에이전트 연결** — 이 레포의 본론
+- **pane 간 에이전트 연결** — 이 레포의 본론. `kasa-socket` 이 upstream 에 있다
+- **파일 클릭** — 지금은 아무 일도 안 한다. 에디터/뷰어가 필요하다
+- 창 분리(undock) · 설정 화면 · 테마 전환 · 터미널 내 검색
 - 캐릭터 스프라이트 — `desc.txt` 만 있고 이미지는 아직 없다
 
 ## 라이선스
