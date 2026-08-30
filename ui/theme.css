@@ -1,0 +1,50 @@
+/* 치이카와 테마.
+ *
+ * 색과 시각 언어는 kasaterm 의 theme-src-chiikawa 에서 왔다. 로스터의
+ * header_color 가 캐릭터별 포인트색이고, desc.txt 가 말하는 외형
+ * ("순백 서양배 모양 몸 · 두꺼운 따뜻한 갈색 테두리 · 분홍 볼터치")이
+ * 곧 이 UI 의 규칙이다 — 크림 바탕, 굵은 갈색 선, 둥근 모서리, 파스텔 포인트.
+ *
+ * 그래서 이건 어두운 터미널이 아니라 밝은 터미널이다. 의도된 것이다.
+ */
+
+@font-face {
+  font-family: "Galmuri11";
+  src: url("./assets/Galmuri11.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  /* 종이 */
+  --paper: #fbf5ea;
+  --paper-2: #f4eada;
+  --card: #fffdf8;
+
+  /* 잉크 — 검정이 아니라 따뜻한 갈색이다. 이게 치이카와 느낌의 핵심 */
+  --ink: #5b4433;
+  --ink-2: #8b7460;
+  --ink-3: #b5a18c;
+  --outline: #6b5442;
+  --line: #e0d0b6;
+
+  /* 캐릭터 포인트색 — roster.json 의 header_color 그대로 */
+  --blush: #f3bfc3; /* 볼터치 */
+  --sky: #6fb7e0; /* 하치와레 */
+  --lilac: #b8a7c9; /* 치이카와 */
+  --sun: #f2ce5b; /* 우사기 */
+  --aqua: #8fcfe0; /* 모몽가 */
+  --cocoa: #a87346; /* 쿠리만쥬 */
+
+  --radius: 16px;
+  --radius-sm: 10px;
+  --outline-w: 2px;
+
+  /* 손그림처럼 살짝 어긋난 그림자. blur 를 안 준 게 핵심 — 흐리면 종이 느낌이 죽는다 */
+  --drop: 3px 3px 0 var(--outline);
+  --drop-sm: 2px 2px 0 var(--outline);
+
+  --ui-font: "Galmuri11", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --mono-font: "Consolas", "D2Coding", "Courier New", monospace;
+
+  color-scheme: light;
+}

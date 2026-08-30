@@ -1,0 +1,200 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--ui-font);
+  font-size: 13px;
+  /* 픽셀 폰트라 안티에일리어싱을 끄면 훨씬 선명하다 */
+  -webkit-font-smoothing: none;
+  overflow: hidden;
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  gap: 12px;
+  padding: 12px;
+}
+
+/* ── 사이드바 ────────────────────────────────────────────── */
+
+.side {
+  background: var(--card);
+  border: var(--outline-w) solid var(--outline);
+  border-radius: var(--radius);
+  box-shadow: var(--drop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side-head {
+  padding: 12px 14px;
+  border-bottom: var(--outline-w) solid var(--outline);
+  background: var(--sky);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.02em;
+}
+
+/* 볼터치 두 점. 치이카와의 얼굴에서 온 유일한 장식이라 여기 말고는 안 쓴다 */
+.cheeks {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.cheeks i {
+  width: 7px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blush);
+  display: block;
+}
+
+.side-section {
+  padding: 12px 14px 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.tree {
+  padding: 0 8px 8px;
+  flex: 0 0 auto;
+}
+
+.empty {
+  margin: 4px 6px 10px;
+  padding: 14px 12px;
+  border: var(--outline-w) dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-3);
+  line-height: 1.7;
+  text-align: center;
+}
+
+.roster {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 10px;
+}
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+.member:hover {
+  background: var(--paper);
+}
+
+.member .pip {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--outline);
+  flex: none;
+}
+
+.member .who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member .school {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.member.lead .who::after {
+  content: "대장 곁";
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--sun);
+  color: var(--outline);
+  font-size: 10px;
+}
+
+/* ── 무대 ───────────────────────────────────────────────── */
+
+.stage {
+  min-width: 0;
+  display: flex;
+}
+
+.pane {
+  flex: 1;
+  min-width: 0;
+  background: var(--paper);
+  border: var(--outline-w) solid var(--outline);
+  border-radius: var(--radius);
+  box-shadow: var(--drop);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--card);
+  border-bottom: var(--outline-w) solid var(--outline);
+  color: var(--ink-2);
+}
+
+.pane-head .pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--outline);
+  background: var(--lilac);
+}
+
+.pane-head .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* xterm 은 자기 셀 수에 맞춰 자기 크기를 정한다. 컨테이너가 content 크기를
+ * 따라가면 그 값이 레이아웃을 거꾸로 밀어 pane 테두리가 창 밖으로 나간다.
+ * 그래서 자리를 절대 크기로 못박고, fit 은 이 상자를 기준으로 재게 한다. */
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.term-host {
+  position: absolute;
+  inset: 8px 6px 8px 10px;
+}
+.pane-body .xterm-viewport {
+  background: transparent !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
