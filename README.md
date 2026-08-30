@@ -1,68 +1,88 @@
 # kasaspace
 
-터미널을 한 칸으로 두는 작업환경.
+터미널을 한 칸으로 두는 작업환경. 치이카와 테마.
 
-**터미널은 만들지 않는다.** PTY 생성·VT 파싱·GPU 셀 렌더링은 전부
-[2rami/kasaterm](https://github.com/2rami/kasaterm) 의 엔진 크레이트를 그대로 당겨 쓴다.
-이 레포의 코드는 그 위에 올라가는 것 — 배치, 파일, git, 에이전트 배선 — 만 갖는다.
+**터미널은 만들지 않는다.** PTY 생성과 VT 파싱은
+[2rami/kasaterm](https://github.com/2rami/kasaterm) 의 `kasa-pty` 를 git 의존성으로 그대로
+당겨 쓰고, 화면은 웹뷰의 xterm.js 가 그린다. 이 레포의 코드는 그 위에 올라가는 것 —
+배치, 파일, git, 에이전트 배선 — 만 갖는다.
 
-| 남의 것 (git 의존성) | 하는 일 |
+```
+셸 ──▶ kasa-pty (PTY·ConPTY) ──▶ tap_bytes ──▶ Tauri 이벤트 ──▶ xterm.js
+                    ▲                                              │
+                    └──────────── pty_write ◀── onData ────────────┘
+```
+
+`kasa_pty::PtySession::tap_bytes_with_snapshot()` 은 구독 등록과 "지금 화면"(ANSI) 채취를
+락 하나 안에서 끝낸다. 둘로 나누면 그 사이 출력이 유실되거나 두 번 그려진다 — 엔진이
+xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
+
+| 남의 것 | 우리 것 |
 |---|---|
-| `kasa-pty` | `PtySession::start()` — 셸을 진짜 PTY 로 띄우고(Windows 는 ConPTY) 바이트를 VT 파서에 먹여 화면 스냅샷을 뱉는다 |
-| `kasa-cells` | wgpu 셀 렌더러. 글리프를 아틀라스에 한 번 굽고 셀당 인스턴스 하나로 그린다 |
-| `kasa-bridge` | `ScreenUpdate` / `Cell` / `Color` 공용 타입 |
-
-| 우리 것 | 하는 일 |
-|---|---|
-| `src/main.rs` | 창 · 이벤트 루프 · PTY 와 렌더러 배선 |
-| `src/render.rs` | wgpu 표면 + `Grid` 한 장을 인스턴스 배열로 펴기 |
-| `src/grid.rs` | diff(`ScreenUpdate`)를 덮어써 "지금 화면"을 유지 + 256색 팔레트 |
-| `src/keys.rs` | 키 -> PTY 바이트 |
+| `kasa-pty` (rev 고정) | `src-tauri/src/lib.rs` — PTY ↔ 웹뷰 다리 |
+| | `ui/Term.tsx` — xterm.js 배선 |
+| | `ui/App.tsx`, `ui/app.css`, `ui/theme.css` — 워크스페이스 껍데기 |
 
 ## 실행
 
-```
-cargo run --release
+```powershell
+npm install
+npm run tauri dev
 ```
 
-폰트는 Windows 는 Consolas(+ 맑은 고딕·이모지 폴백), macOS 는 Menlo 를 기본으로 잡는다.
-`KASASPACE_FONT` 로 주 폰트를 바꿀 수 있다. **등폭이어야 한다** — 셀 폭을 글자 하나로 재기 때문에
-가변폭을 물리면 격자가 통째로 어긋난다.
+## 테마
+
+`ui/theme.css` 한 파일이 색의 전부다. 값은 upstream 의 `theme-src-chiikawa/roster.json`
+에서 왔다 — 그건 색 테마가 아니라 **캐릭터 로스터**(21명, 페르소나 + `header_color`)이고,
+`desc.txt` 가 말하는 외형("순백 서양배 모양 몸 · 두꺼운 따뜻한 갈색 테두리 · 분홍 볼터치")이
+곧 UI 규칙이다. 그래서 이건 어두운 터미널이 아니라 **밝은 터미널**이다. 의도된 것이다.
+
+UI 폰트는 Galmuri11(OFL, `ui/assets/`). 터미널 글자는 시스템 등폭.
 
 ## 헤드리스 검증
 
-창에 포커스를 주지 않고 입력·종료까지 돌린다. OS 로 키를 쏘는 방식(SendKeys 류)은
-**포커스가 다른 창에 있으면 엉뚱한 앱에 타이핑된다** — 그래서 앱 안에 손잡이를 뒀다.
-
 ```powershell
-$env:KASASPACE_AUTOSEND    = "dir /w"   # 이 문자열 + Enter 를 PTY 에 주입
-$env:KASASPACE_AUTOSEND_MS = "2500"     # 몇 ms 뒤에 (기본 2000)
-$env:KASASPACE_AUTOQUIT_MS = "8000"     # 몇 ms 뒤에 스스로 종료
-cargo run --release
+$env:KASASPACE_AUTOSEND = "dir /w"      # 이 문자열 + Enter 를 터미널에 주입
+$env:KASASPACE_AUTOSEND_MS = "4000"
+scripts\shot.ps1 -Out shot.png
 ```
+
+`KASASPACE_AUTOSEND` 는 웹뷰의 `term.input()` 을 부른다. 사용자가 키를 친 것과 **같은
+경로**(`onData` → `pty_write`)를 타므로 배선 전체가 검증된다.
+
+OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 다른 창에 있으면 엉뚱한 앱에
+타이핑된다. 실제로 한 번 새어 나갔다.
+
+`scripts/shot.ps1` 이 넘어가는 함정 셋(전부 실제로 밟았다):
+
+- 디버그 빌드는 콘솔 서브시스템이라 창을 **둘** 만든다. `MainWindowHandle` 이 콘솔 쪽을
+  집으므로 제목으로 골라야 한다.
+- `EnumWindows` 콜백을 인라인 람다로 넘기면 열거 도중 GC 되어 결과가 0개로 나온다.
+- `SetProcessDPIAware()` 를 안 부르면 125% 배율에서 `GetWindowRect` 가 가상화된 좌표를
+  줘 창의 80%만 찍힌다. 멀쩡한 레이아웃을 깨진 것으로 오진하게 된다.
 
 ## 엔진을 같이 고칠 때
 
-`Cargo.toml` 아래쪽 `[patch]` 블록의 주석을 풀면 git 대신 옆 폴더의 kasaterm 작업 트리를 쓴다.
-커밋·push 없이 즉시 반영된다.
+`src-tauri/Cargo.toml` 아래쪽 `[patch]` 블록의 주석을 풀면 git 대신 옆 폴더의 kasaterm
+작업 트리를 쓴다. 엔진 rev 를 박아 둔 이유는 upstream `main` 이 활발히 움직이기 때문이다 —
+말없이 바뀌어 깨지는 것보다 의도적으로 올리는 편이 낫다.
 
-엔진 rev 는 일부러 박아 뒀다. upstream `main` 은 활발히 움직이고, 엔진이 말없이 바뀌면
-여기가 깨진다. 올릴 때는 의도적으로 올린다.
+⚠️ 로컬 kasaterm 클론의 `main` 은 upstream 과 크게 갈라져 있다. 엔진 API·LFS·테마를 확인할
+때 로컬 파일을 보면 **없는 것처럼 보인다**. `git show origin/main:<경로>` 로 봐야 한다.
 
 ## 지금 되는 것
 
-셸 한 장이 뜨고, 타이핑이 들어가고, 출력이 그려지고, 창 크기를 바꾸면 PTY 가 따라온다.
-색(256색·truecolor·bold/dim/inverse), 커서 블록, 한글·이모지 폴백, OSC 타이틀.
+셸 한 장이 뜨고, 타이핑이 들어가고, 출력이 그려지고, 한글이 정상으로 나온다.
+사이드바에 로스터가 뜨고 색이 캐릭터별 `header_color` 를 따른다.
 
 ## 아직 안 되는 것
 
-- **pane 분할** — 다음 단계. `kasa_pty::layout` 에 split 트리가 이미 있다
-- **스크롤백** — `PtySession::scroll()` 이 있는데 아직 휠에 안 물렸다
-- **마우스** — 클릭·드래그 선택·복사 붙여넣기 전부 없음
-- **한글 조합 중 표시** — IME preedit 을 화면에 안 그린다. 확정(commit)돼야 보인다
-- **와이드 글자 간격** — 한글이 2칸 슬롯 안에서 살짝 성기게 보인다
-- 파일트리 · git · 에이전트 배선 — 이 레포의 본론인데 아직 시작 안 함
+- **파일트리** — 사이드바에 자리만 잡혀 있다. 다음 차례
+- **git 상태** — 파일트리에 붙을 뱃지
+- **pane 분할** — `kasa_pty::layout` 에 BSP 트리(`split_leaf`/`leaf_rects`/`dividers`)가 이미 있다
+- **pane 간 에이전트 연결** — 이 레포의 본론
+- 캐릭터 스프라이트 — `desc.txt` 만 있고 이미지는 아직 없다
 
 ## 라이선스
 
-MIT. 엔진 크레이트는 kasaterm 것이고 각각 MIT / MIT OR Apache-2.0 이다.
+MIT. `kasa-pty` 는 kasaterm 것(MIT). Galmuri11 은 OFL(`ui/assets/OFL-Galmuri.txt`).
