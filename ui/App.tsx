@@ -16,10 +16,12 @@ type PaneStat = {
   cwd: string | null;
 };
 
+/** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
+type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
+
 /** 지금 포커스된 터미널. Term 이 포커스를 받을 때 window 에 올려 둔다. */
 type XTerm = { getSelection(): string; paste(t: string): void };
-const termOf = (): XTerm | undefined =>
-  (window as unknown as { __term?: XTerm }).__term;
+const termOf = (): XTerm | undefined => (window as unknown as { __term?: XTerm }).__term;
 
 const leader = roster.leader as Member;
 const members = roster.members as Member[];
@@ -32,19 +34,28 @@ const pct = (r: L.Rect) => ({
 });
 
 export default function App() {
-  const [layout, setLayout] = useState<L.Node | null>(() => L.leaf("%0"));
-  const [focus, setFocus] = useState("%0");
+  const [tabs, setTabs] = useState<Tab[]>([
+    { key: "t0", layout: L.leaf("%0"), root: null, focus: "%0" },
+  ]);
+  const [active, setActive] = useState(0);
   const [titles, setTitles] = useState<Record<string, string>>({});
-  const [root, setRoot] = useState<string | null>(null);
   const [git, setGit] = useState<GitInfo>(EMPTY_GIT);
+  const [fontSize, setFontSize] = useState(13);
+  const [stat, setStat] = useState<Record<string, PaneStat>>({});
   // 첫 pane 은 열 폴더가 정해진 뒤에 띄운다. 먼저 띄우면 셸이 홈에서 시작해
   // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
   const [booted, setBooted] = useState(false);
-  const [fontSize, setFontSize] = useState(13);
-  const [stat, setStat] = useState<Record<string, PaneStat>>({});
-  const nextId = useRef(1);
-  const stage = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect } | null>(null);
+  const nextPane = useRef(1);
+  const nextTab = useRef(1);
+  const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
+    null,
+  );
+
+  const cur = tabs[active] ?? tabs[0];
+  const patch = useCallback(
+    (fn: (t: Tab) => Tab) => setTabs((ts) => ts.map((t, i) => (i === active ? fn(t) : t))),
+    [active],
+  );
 
   const onTitle = useCallback((id: string, title: string) => {
     setTitles((t) => (t[id] === title ? t : { ...t, [id]: title }));
@@ -52,50 +63,73 @@ export default function App() {
 
   const split = useCallback(
     (dir: L.Dir) => {
-      const id = `%${nextId.current++}`;
-      setLayout((cur) => (cur ? L.splitLeaf(cur, focus, dir, id) : L.leaf(id)));
-      setFocus(id);
+      const id = `%${nextPane.current++}`;
+      patch((t) => ({
+        ...t,
+        layout: t.layout ? L.splitLeaf(t.layout, t.focus, dir, id) : L.leaf(id),
+        focus: id,
+      }));
     },
-    [focus],
+    [patch],
   );
 
-  const close = useCallback((id: string) => {
-    setLayout((cur) => (cur ? L.removeLeaf(cur, id) : cur));
+  const closePane = useCallback(
+    (id: string) => {
+      setTabs((ts) => ts.map((t) => (t.layout ? { ...t, layout: L.removeLeaf(t.layout, id) } : t)));
+    },
+    [],
+  );
+
+  const newTab = useCallback(() => {
+    const id = `%${nextPane.current++}`;
+    const root = cur?.root ?? null;
+    setTabs((ts) => {
+      setActive(ts.length);
+      return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id }];
+    });
+  }, [cur]);
+
+  const closeTab = useCallback((i: number) => {
+    setTabs((ts) => (ts.length <= 1 ? ts : ts.filter((_, k) => k !== i)));
+    setActive((a) => (a >= i && a > 0 ? a - 1 : a));
   }, []);
 
   const pick = useCallback(async () => {
     const picked = await invoke<string | null>("fs_pick");
-    if (picked) setRoot(picked);
-  }, []);
+    if (picked) patch((t) => ({ ...t, root: picked }));
+  }, [patch]);
 
-  // 부팅. 저장된 세션(배치·폴더)을 되살리되, 명령줄로 폴더를 지정했으면 그쪽이
-  // 이긴다 — 사용자가 방금 말한 것이 지난번 기억보다 우선이다.
+  // 부팅. 저장된 세션을 되살리되, 명령줄로 폴더를 지정했으면 그쪽이 이긴다 —
+  // 사용자가 방금 말한 것이 지난번 기억보다 우선이다.
   useEffect(() => {
     (async () => {
       const cli = await invoke<string | null>("initial_root").catch(() => null);
       const saved = await invoke<string | null>("state_load").catch(() => null);
-      let savedRoot: string | null = null;
       if (saved) {
         try {
           const s = JSON.parse(saved) as {
-            layout?: L.Node;
-            root?: string;
-            nextId?: number;
+            tabs?: Tab[];
+            active?: number;
+            nextPane?: number;
+            nextTab?: number;
             fontSize?: number;
           };
           if (s.fontSize) setFontSize(s.fontSize);
-          if (s.layout) {
-            setLayout(s.layout);
-            setFocus(L.leaves(s.layout)[0]);
-          }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
-          if (typeof s.nextId === "number") nextId.current = s.nextId;
-          savedRoot = s.root ?? null;
+          if (typeof s.nextPane === "number") nextPane.current = s.nextPane;
+          if (typeof s.nextTab === "number") nextTab.current = s.nextTab;
+          if (s.tabs?.length) {
+            setTabs(s.tabs);
+            setActive(Math.min(s.active ?? 0, s.tabs.length - 1));
+          }
         } catch {
           /* 깨진 세션 파일은 무시하고 기본값으로 시작한다 */
         }
       }
-      setRoot(cli ?? savedRoot);
+      if (cli) {
+        setTabs((ts) => ts.map((t, i) => (i === 0 ? { ...t, root: cli } : t)));
+        setActive(0);
+      }
       setBooted(true);
     })();
   }, []);
@@ -104,22 +138,29 @@ export default function App() {
   useEffect(() => {
     if (!booted) return;
     const h = setTimeout(() => {
-      const json = JSON.stringify({ layout, root, nextId: nextId.current, fontSize });
+      const json = JSON.stringify({
+        tabs,
+        active,
+        nextPane: nextPane.current,
+        nextTab: nextTab.current,
+        fontSize,
+      });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
-  }, [layout, root, fontSize, booted]);
+  }, [tabs, active, fontSize, booted]);
 
-  // git 상태는 파일이 바뀔 때마다 달라진다. 감시자를 붙이는 건 다음 일이고,
-  // 지금은 주기적으로 다시 묻는다 — git 한 번은 싸고, 4초면 사람이 느끼기에 즉시다.
+  // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
+  // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
+  const curRoot = cur?.root ?? null;
   useEffect(() => {
-    if (!root) {
+    if (!curRoot) {
       setGit(EMPTY_GIT);
       return;
     }
     let alive = true;
     const tick = () => {
-      invoke<GitInfo>("git_status", { root })
+      invoke<GitInfo>("git_status", { root: curRoot })
         .then((g) => alive && setGit(g))
         .catch(() => {});
     };
@@ -129,11 +170,10 @@ export default function App() {
       alive = false;
       clearInterval(h);
     };
-  }, [root]);
+  }, [curRoot]);
 
   // pane 이 무엇을 돌리는지는 프로세스 트리를 봐야 알 수 있고, 그건 이벤트로
-  // 오지 않는다. 엔진이 ps 호출을 500ms 로 캐시하므로 이 주기가 그보다 촘촘할
-  // 이유가 없다.
+  // 오지 않는다. 엔진이 ps 호출을 500ms 로 캐시하므로 이보다 촘촘할 이유가 없다.
   useEffect(() => {
     let alive = true;
     const tick = () => {
@@ -154,10 +194,13 @@ export default function App() {
     };
   }, []);
 
-  // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는 동작.
+  // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는
+  // 동작이다. 어느 탭에 있든 지워야 한다.
   useEffect(() => {
     const un = listen<string>("pty:exit", (ev) => {
-      setLayout((cur) => (cur ? L.removeLeaf(cur, ev.payload) : cur));
+      setTabs((ts) =>
+        ts.map((t) => (t.layout ? { ...t, layout: L.removeLeaf(t.layout, ev.payload) } : t)),
+      );
     });
     return () => {
       un.then((f) => f());
@@ -166,10 +209,18 @@ export default function App() {
 
   // 포커스가 있던 pane 이 사라졌으면 아무 데나가 아니라 남은 첫 pane 으로.
   useEffect(() => {
-    if (!layout) return;
-    const ids = L.leaves(layout);
-    if (!ids.includes(focus)) setFocus(ids[0]);
-  }, [layout, focus]);
+    setTabs((ts) => {
+      let moved = false;
+      const next = ts.map((t) => {
+        if (!t.layout) return t;
+        const ids = L.leaves(t.layout);
+        if (ids.includes(t.focus)) return t;
+        moved = true;
+        return { ...t, focus: ids[0] };
+      });
+      return moved ? next : ts;
+    });
+  }, [tabs]);
 
   // 캡처 단계로 잡아야 한다. xterm 은 숨은 textarea 에서 키를 받으므로
   // 버블 단계에서는 이미 셸로 흘러간 뒤다.
@@ -178,16 +229,14 @@ export default function App() {
       // 글자 크기는 Shift 없이. 브라우저·에디터가 다 Ctrl +/-/0 이라 손이 그리 간다.
       if (e.ctrlKey && !e.shiftKey && !e.altKey) {
         const z: Record<string, number> = { "=": 1, "+": 1, "-": -1, _: -1 };
-        if (e.key in z) {
-          setFontSize((f) => Math.min(28, Math.max(8, f + z[e.key])));
-        } else if (e.key === "0") {
-          setFontSize(13);
-        } else return;
+        if (e.key in z) setFontSize((f) => Math.min(28, Math.max(8, f + z[e.key])));
+        else if (e.key === "0") setFontSize(13);
+        else return;
         e.preventDefault();
         e.stopPropagation();
         return;
       }
-      if (!e.ctrlKey || !e.shiftKey || !layout) return;
+      if (!e.ctrlKey || !e.shiftKey) return;
       const k = e.key.toLowerCase();
       const dirs: Record<string, "left" | "right" | "up" | "down"> = {
         arrowleft: "left",
@@ -198,8 +247,11 @@ export default function App() {
       let handled = true;
       if (k === "d") split("h");
       else if (k === "e") split("v");
-      else if (k === "w") close(focus);
+      else if (k === "w") closePane(cur.focus);
+      else if (k === "t") newTab();
       else if (k === "o") void pick();
+      else if (k === "pageup") setActive((a) => (a - 1 + tabs.length) % tabs.length);
+      else if (k === "pagedown") setActive((a) => (a + 1) % tabs.length);
       else if (k === "c") {
         // 선택이 없으면 아무 일도 안 한다. 터미널에서 Ctrl+Shift+C 는 복사지
         // 인터럽트가 아니다 — 그건 Ctrl+C 고, 그쪽은 셸로 그냥 흘려보낸다.
@@ -212,10 +264,9 @@ export default function App() {
           .readText()
           .then((txt) => txt && termOf()?.paste(txt))
           .catch(() => {});
-      }
-      else if (dirs[k]) {
-        const next = L.neighbor(layout, focus, dirs[k]);
-        if (next) setFocus(next);
+      } else if (dirs[k] && cur.layout) {
+        const next = L.neighbor(cur.layout, cur.focus, dirs[k]);
+        if (next) patch((t) => ({ ...t, focus: next }));
       } else handled = false;
 
       if (handled) {
@@ -225,19 +276,24 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [layout, focus, split, close, pick]);
+  }, [cur, tabs.length, split, closePane, newTab, pick, patch]);
 
-  // 경계선 드래그. 무대 전체를 기준으로 비율을 다시 계산한다.
+  // 경계선 드래그. 기준 상자는 그 경계선이 속한 무대다 — 탭마다 무대가 따로 있어
+  // ref 하나로는 어느 무대인지 알 수 없다.
   useEffect(() => {
     const move = (e: MouseEvent) => {
       const d = drag.current;
-      const box = stage.current?.getBoundingClientRect();
-      if (!d || !box) return;
+      if (!d) return;
+      const box = d.box.getBoundingClientRect();
       const f =
         d.dir === "h"
           ? ((e.clientX - box.left) / box.width - d.parent.x) / d.parent.w
           : ((e.clientY - box.top) / box.height - d.parent.y) / d.parent.h;
-      setLayout((cur) => (cur ? L.setRatio(cur, d.path, f) : cur));
+      setTabs((ts) =>
+        ts.map((t, i) =>
+          i === active && t.layout ? { ...t, layout: L.setRatio(t.layout, d.path, f) } : t,
+        ),
+      );
     };
     const up = () => {
       if (drag.current) document.body.classList.remove("dragging");
@@ -249,10 +305,7 @@ export default function App() {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     };
-  }, []);
-
-  const slots = layout ? L.rects(layout) : [];
-  const seams = layout ? L.seams(layout) : [];
+  }, [active]);
 
   return (
     <div className="app">
@@ -268,14 +321,14 @@ export default function App() {
         <div className="side-section">
           <span>폴더</span>
           <button className="mini" onClick={pick}>
-            {root ? "바꾸기" : "열기"}
+            {curRoot ? "바꾸기" : "열기"}
           </button>
         </div>
 
-        {root ? (
+        {curRoot ? (
           <>
             <div className="repo">
-              <span className="repo-name">{root.split("/").pop()}</span>
+              <span className="repo-name">{curRoot.split("/").pop()}</span>
               {git.branch ? (
                 <span className="branch">
                   {git.branch}
@@ -284,7 +337,7 @@ export default function App() {
                 </span>
               ) : null}
             </div>
-            <Tree root={root} git={git} />
+            <Tree root={curRoot} git={git} />
           </>
         ) : (
           <div className="tree">
@@ -307,78 +360,122 @@ export default function App() {
         </div>
 
         <div className="keys">
-          <b>Ctrl+Shift+D</b> 좌우 분할 · <b>E</b> 상하 분할
+<b>Ctrl+Shift</b> 로
           <br />
-          <b>Ctrl+Shift+W</b> pane 닫기 · <b>←↑↓→</b> 이동
+          <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 이동
           <br />
-          <b>Ctrl+Shift+C/V</b> 복사·붙여넣기 · <b>O</b> 폴더
+          <b>T</b> 새 탭 · <b>PgUp</b>/<b>PgDn</b> 탭
           <br />
-          <b>Ctrl +/-/0</b> 글자 크기
+          <b>C</b>/<b>V</b> 복사·붙여넣기 · <b>O</b> 폴더
+          <br />
+          <b>Ctrl</b> <b>+</b>/<b>-</b>/<b>0</b> 글자 크기
         </div>
       </aside>
 
-      <main className="stage" ref={stage}>
-        {booted &&
-          slots.map((s) => (
-          <div key={s.id} className="slot" style={pct(s.rect)}>
-            <section
-              className={focus === s.id ? "pane on" : "pane"}
-              onMouseDown={() => setFocus(s.id)}
+      <div className="main">
+        <div className="tabbar">
+          {tabs.map((t, i) => (
+            <div
+              key={t.key}
+              className={i === active ? "tab on" : "tab"}
+              onMouseDown={() => setActive(i)}
             >
-              <header className="pane-head">
-                <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
-                <span className="title">{label(s.id, stat, titles)}</span>
-                {stat[s.id]?.agent ? (
-                  <span className="chip">{stat[s.id]?.agent}</span>
-                ) : null}
+              <span className="tab-name">{t.root?.split("/").pop() ?? "shell"}</span>
+              {tabs.length > 1 ? (
                 <button
                   className="x"
                   onMouseDown={(e) => e.stopPropagation()}
-                  onClick={() => close(s.id)}
+                  onClick={() => closeTab(i)}
                 >
                   ×
                 </button>
-              </header>
-              {stat[s.id]?.busy ? <div className="busy" /> : null}
-              <Term
-                id={s.id}
-                focused={focus === s.id}
-                onTitle={onTitle}
-                cwd={root ?? undefined}
-                fontSize={fontSize}
-              />
-              </section>
+              ) : null}
             </div>
           ))}
+          <button className="tab add" onClick={newTab} title="새 탭 (Ctrl+Shift+T)">
+            +
+          </button>
+        </div>
 
-        {seams.map((sm) => (
-          <div
-            key={sm.path.join("-") || "root"}
-            className={sm.dir === "h" ? "seam vert" : "seam horz"}
-            style={pct(sm.rect)}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              document.body.classList.add("dragging");
-              drag.current = { path: sm.path, dir: sm.dir, parent: sm.parent };
-            }}
-          />
-        ))}
+        {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.
+            display:none 이 아니라 visibility:hidden 인 것이 핵심 — 상자 크기가
+            남아 있어야 xterm 이 자기 칸 수를 옳게 재고, 탭으로 돌아왔을 때
+            화면이 멀쩡하다. */}
+        <div className="pages">
+          {booted &&
+            tabs.map((t, ti) => (
+              <div key={t.key} className={ti === active ? "page" : "page off"}>
+                <div className="stage">
+                  {(t.layout ? L.rects(t.layout) : []).map((s) => (
+                    <div key={s.id} className="slot" style={pct(s.rect)}>
+                      <section
+                        className={ti === active && t.focus === s.id ? "pane on" : "pane"}
+                        onMouseDown={() =>
+                          setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: s.id } : x)))
+                        }
+                      >
+                        <header className="pane-head">
+                          <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
+                          <span className="title">{label(s.id, stat, titles)}</span>
+                          {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}
+                          <button
+                            className="x"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => closePane(s.id)}
+                          >
+                            ×
+                          </button>
+                        </header>
+                        {stat[s.id]?.busy ? <div className="busy" /> : null}
+                        <Term
+                          id={s.id}
+                          focused={ti === active && t.focus === s.id}
+                          onTitle={onTitle}
+                          cwd={t.root ?? undefined}
+                          fontSize={fontSize}
+                        />
+                      </section>
+                    </div>
+                  ))}
 
-        {!layout && (
-          <div className="stage-empty">
-            <p>셸이 다 닫혔어</p>
-            <button
-              onClick={() => {
-                const id = `%${nextId.current++}`;
-                setLayout(L.leaf(id));
-                setFocus(id);
-              }}
-            >
-              새 셸 열기
-            </button>
-          </div>
-        )}
-      </main>
+                  {(t.layout ? L.seams(t.layout) : []).map((sm) => (
+                    <div
+                      key={sm.path.join("-") || "root"}
+                      className={sm.dir === "h" ? "seam vert" : "seam horz"}
+                      style={pct(sm.rect)}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        document.body.classList.add("dragging");
+                        drag.current = {
+                          path: sm.path,
+                          dir: sm.dir,
+                          parent: sm.parent,
+                          box: e.currentTarget.parentElement as HTMLElement,
+                        };
+                      }}
+                    />
+                  ))}
+
+                  {!t.layout && (
+                    <div className="stage-empty">
+                      <p>셸이 다 닫혔어</p>
+                      <button
+                        onClick={() => {
+                          const id = `%${nextPane.current++}`;
+                          setTabs((ts) =>
+                            ts.map((x, i) => (i === ti ? { ...x, layout: L.leaf(id), focus: id } : x)),
+                          );
+                        }}
+                      >
+                        새 셸 열기
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -394,7 +491,7 @@ function label(
   if (p) return p;
   const t = titles[id];
   if (!t) return "shell";
-  return t.split(/[\/]/).pop() || t;
+  return t.split(/[\\/]/).pop() || t;
 }
 
 function Row({ m, lead }: { m: Member; lead?: boolean }) {

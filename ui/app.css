@@ -22,7 +22,7 @@ body {
 .app {
   height: 100%;
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 232px minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
 }
@@ -245,12 +245,94 @@ body {
 
 /* ── 무대 ───────────────────────────────────────────────── */
 
+/* 오른쪽 전체 — 탭 줄 + 페이지들 */
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tabbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+  overflow-x: auto;
+  padding-left: 5px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 190px;
+  padding: 6px 10px;
+  background: var(--paper);
+  color: var(--ink-2);
+  border: var(--outline-w) solid var(--outline);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--drop-sm);
+  cursor: pointer;
+}
+.tab.on {
+  background: var(--sky);
+  color: #fff;
+}
+.tab .tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab .x {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+.tab .x:hover {
+  opacity: 1;
+}
+
+.tab.add {
+  font: inherit;
+  padding: 6px 12px;
+  color: var(--ink-2);
+  background: var(--card);
+}
+.tab.add:hover {
+  background: var(--blush);
+}
+
+.pages {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.page {
+  position: absolute;
+  inset: 0;
+}
+/* display:none 이 아니라 visibility:hidden 이어야 한다. 상자 크기가 남아 있어야
+ * xterm 이 자기 칸 수를 옳게 재고, 탭으로 돌아왔을 때 화면이 멀쩡하다. */
+.page.off {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* 무대는 좌표계다. pane 은 배치 트리가 준 비율(0..1)을 % 로 받아 절대 배치된다.
  * 트리 모양대로 DOM 을 중첩하면 분할할 때마다 기존 pane 이 깊어지면서 React 가
  * 언마운트해 버린다 — PTY 가 그때마다 죽는다. 그래서 평평하게 깔고 위치만 준다. */
 .stage {
-  position: relative;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
 }
 
 .slot {
