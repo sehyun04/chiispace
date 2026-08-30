@@ -5,6 +5,8 @@
 //! 쪽이 우리 내부 구조에 묶이지 않고, 엔진도 이 용도를 상정하고 만들어져 있다
 //! (`tap_bytes_with_snapshot` 주석 참고).
 
+mod workspace;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -149,8 +151,16 @@ pub fn run() {
             arm_autosend(app.handle());
             Ok(())
         })
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            pty_open, pty_write, pty_resize, pty_close
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close,
+            workspace::initial_root,
+            workspace::fs_list,
+            workspace::fs_pick,
+            workspace::git_status,
         ])
         .run(tauri::generate_context!())
         .expect("tauri 앱 기동 실패");

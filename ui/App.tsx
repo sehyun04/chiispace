@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import roster from "./roster.json";
 import { Term } from "./Term";
+import { Tree, EMPTY_GIT, type GitInfo } from "./Tree";
 import * as L from "./layout";
 
 type Member = { name: string; slug: string; school: string; header_color: string };
@@ -20,6 +22,11 @@ export default function App() {
   const [layout, setLayout] = useState<L.Node | null>(() => L.leaf("%0"));
   const [focus, setFocus] = useState("%0");
   const [titles, setTitles] = useState<Record<string, string>>({});
+  const [root, setRoot] = useState<string | null>(null);
+  const [git, setGit] = useState<GitInfo>(EMPTY_GIT);
+  // 첫 pane 은 열 폴더가 정해진 뒤에 띄운다. 먼저 띄우면 셸이 홈에서 시작해
+  // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
+  const [booted, setBooted] = useState(false);
   const nextId = useRef(1);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect } | null>(null);
@@ -40,6 +47,40 @@ export default function App() {
   const close = useCallback((id: string) => {
     setLayout((cur) => (cur ? L.removeLeaf(cur, id) : cur));
   }, []);
+
+  const pick = useCallback(async () => {
+    const picked = await invoke<string | null>("fs_pick");
+    if (picked) setRoot(picked);
+  }, []);
+
+  // `kasaspace <경로>` 로 띄웠으면 그 폴더를 열어 둔 채 시작한다.
+  useEffect(() => {
+    invoke<string | null>("initial_root")
+      .then((p) => p && setRoot(p))
+      .catch(() => {})
+      .finally(() => setBooted(true));
+  }, []);
+
+  // git 상태는 파일이 바뀔 때마다 달라진다. 감시자를 붙이는 건 다음 일이고,
+  // 지금은 주기적으로 다시 묻는다 — git 한 번은 싸고, 4초면 사람이 느끼기에 즉시다.
+  useEffect(() => {
+    if (!root) {
+      setGit(EMPTY_GIT);
+      return;
+    }
+    let alive = true;
+    const tick = () => {
+      invoke<GitInfo>("git_status", { root })
+        .then((g) => alive && setGit(g))
+        .catch(() => {});
+    };
+    tick();
+    const h = setInterval(tick, 4000);
+    return () => {
+      alive = false;
+      clearInterval(h);
+    };
+  }, [root]);
 
   // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는 동작.
   useEffect(() => {
@@ -74,6 +115,7 @@ export default function App() {
       if (k === "d") split("h");
       else if (k === "e") split("v");
       else if (k === "w") close(focus);
+      else if (k === "o") void pick();
       else if (dirs[k]) {
         const next = L.neighbor(layout, focus, dirs[k]);
         if (next) setFocus(next);
@@ -86,7 +128,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [layout, focus, split, close]);
+  }, [layout, focus, split, close, pick]);
 
   // 경계선 드래그. 무대 전체를 기준으로 비율을 다시 계산한다.
   useEffect(() => {
@@ -126,14 +168,36 @@ export default function App() {
           </span>
         </div>
 
-        <div className="side-section">폴더</div>
-        <div className="tree">
-          <div className="empty">
-            아직 연 폴더가 없어
-            <br />
-            (파일트리는 다음 차례)
-          </div>
+        <div className="side-section">
+          <span>폴더</span>
+          <button className="mini" onClick={pick}>
+            {root ? "바꾸기" : "열기"}
+          </button>
         </div>
+
+        {root ? (
+          <>
+            <div className="repo">
+              <span className="repo-name">{root.split("/").pop()}</span>
+              {git.branch ? (
+                <span className="branch">
+                  {git.branch}
+                  {git.ahead ? <b>↑{git.ahead}</b> : null}
+                  {git.behind ? <b>↓{git.behind}</b> : null}
+                </span>
+              ) : null}
+            </div>
+            <Tree root={root} git={git} />
+          </>
+        ) : (
+          <div className="tree">
+            <div className="empty">
+              아직 연 폴더가 없어
+              <br />
+              <b>Ctrl+Shift+O</b>
+            </div>
+          </div>
+        )}
 
         <div className="side-section">
           {roster.label} · {roster.user_title}
@@ -146,18 +210,15 @@ export default function App() {
         </div>
 
         <div className="keys">
-          <b>Ctrl+Shift+D</b> 좌우 분할
+          <b>Ctrl+Shift+D</b> 좌우 분할 · <b>E</b> 상하 분할
           <br />
-          <b>Ctrl+Shift+E</b> 상하 분할
-          <br />
-          <b>Ctrl+Shift+W</b> pane 닫기
-          <br />
-          <b>Ctrl+Shift+←↑↓→</b> 이동
+          <b>Ctrl+Shift+W</b> pane 닫기 · <b>←↑↓→</b> 이동
         </div>
       </aside>
 
       <main className="stage" ref={stage}>
-        {slots.map((s) => (
+        {booted &&
+          slots.map((s) => (
           <div key={s.id} className="slot" style={pct(s.rect)}>
             <section
               className={focus === s.id ? "pane on" : "pane"}
@@ -166,14 +227,23 @@ export default function App() {
               <header className="pane-head">
                 <span className="pip" />
                 <span className="title">{titles[s.id] ?? "shell"}</span>
-                <button className="x" onMouseDown={(e) => e.stopPropagation()} onClick={() => close(s.id)}>
+                <button
+                  className="x"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={() => close(s.id)}
+                >
                   ×
                 </button>
               </header>
-              <Term id={s.id} focused={focus === s.id} onTitle={onTitle} />
-            </section>
-          </div>
-        ))}
+              <Term
+                id={s.id}
+                focused={focus === s.id}
+                onTitle={onTitle}
+                cwd={root ?? undefined}
+              />
+              </section>
+            </div>
+          ))}
 
         {seams.map((sm) => (
           <div

@@ -44,10 +44,13 @@ export function Term({
   id,
   focused,
   onTitle,
+  cwd,
 }: {
   id: string;
   focused: boolean;
   onTitle: (id: string, title: string) => void;
+  /** 연 폴더가 있으면 새 셸은 거기서 시작한다 — 매번 cd 를 치게 하지 않으려고. */
+  cwd?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
@@ -75,7 +78,7 @@ export function Term({
 
     // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이 곧바로
     // 리사이즈를 맞으며 첫 화면을 다시 그린다 — 좁은 pane 일수록 눈에 띈다.
-    invoke("pty_open", { id, cols: t.cols, rows: t.rows }).catch((e) =>
+    invoke("pty_open", { id, cols: t.cols, rows: t.rows, cwd }).catch((e) =>
       t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );
 
@@ -116,6 +119,9 @@ export function Term({
       t.dispose();
       term.current = null;
     };
+    // cwd 는 셸을 띄울 때 한 번만 쓰인다. 폴더를 바꿔도 이미 뜬 pane 은
+    // 그대로 두는 게 맞다 — 남이 쓰던 셸의 cwd 를 말없이 바꾸면 안 된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, onTitle]);
 
   // 포커스는 xterm 의 숨은 textarea 가 갖는다. 분할 직후 새 pane 으로 바로
