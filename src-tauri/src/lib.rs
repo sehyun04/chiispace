@@ -98,12 +98,6 @@ fn pty_close(panes: State<Panes>, id: String) {
     panes.0.lock().unwrap().remove(&id);
 }
 
-/// 헤드리스 검증 손잡이. env 가 있을 때만 깨어난다.
-///   KASASPACE_AUTOSEND="dir" KASASPACE_AUTOSEND_MS=3500
-///
-/// 웹뷰의 `__term.input()` 을 부른다 — 사용자가 키를 친 것과 같은 경로(onData ->
-/// pty_write)를 타므로 배선 전체가 검증된다. OS 로 키를 쏘는 방식(SendKeys)은
-/// 포커스가 다른 창에 있으면 **엉뚱한 앱에 타이핑된다**. 한 번 겪었다.
 /// "C-S-d" -> ((ctrl, shift, alt), "d")
 fn parse_chord(tok: &str) -> ((bool, bool, bool), &str) {
     let (mut ctrl, mut shift, mut alt) = (false, false, false);
@@ -124,6 +118,12 @@ fn parse_chord(tok: &str) -> ((bool, bool, bool), &str) {
     }
 }
 
+/// 헤드리스 검증 손잡이. env 가 있을 때만 깨어난다.
+///   KASASPACE_AUTOKEYS="C-S-d,C-=" KASASPACE_AUTOSEND="dir"
+///
+/// 웹뷰의 이벤트/`__term.input()` 을 부른다 — 사용자가 키를 친 것과 같은
+/// 경로(onData -> pty_write)를 타므로 배선 전체가 검증된다. OS 로 키를 쏘는
+/// 방식(SendKeys)은 포커스가 다른 창에 있으면 **엉뚱한 앱에 타이핑된다**. 한 번 겪었다.
 fn arm_autosend(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -182,6 +182,7 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
+            pane_status,
             workspace::initial_root,
             workspace::fs_list,
             workspace::fs_pick,
@@ -191,4 +192,35 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("tauri 앱 기동 실패");
+}
+
+/// pane 이 지금 무엇을 돌리고 있는지. 카사텀이 헤더에 그리는 그것 —
+/// 프로세스 이름과 "일하는 중" 표시다.
+///
+/// 이 판정은 전부 엔진이 이미 한다. `active_process_name` 은 셸의 프로세스
+/// 트리를 걸어 전경 명령을 찾고(ps 호출은 500ms 캐시), `active_agent` 는 그게
+/// claude 류인지 argv 로 가려낸다. 우리가 다시 짤 이유가 없다.
+#[derive(serde::Serialize)]
+struct PaneStatus {
+    id: String,
+    proc: Option<String>,
+    agent: Option<String>,
+    busy: bool,
+    cwd: Option<String>,
+}
+
+#[tauri::command]
+fn pane_status(panes: State<Panes>) -> Vec<PaneStatus> {
+    let map = panes.0.lock().unwrap();
+    map.iter()
+        .map(|(id, s)| PaneStatus {
+            id: id.clone(),
+            proc: s.active_process_name(),
+            agent: s.active_agent().map(|a| a.as_str().to_string()),
+            busy: s.has_active_job(),
+            cwd: s
+                .reported_cwd()
+                .map(|p| p.to_string_lossy().replace('\\', "/")),
+        })
+        .collect()
 }

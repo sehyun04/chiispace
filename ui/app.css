@@ -283,6 +283,47 @@ body {
   background: var(--blush);
 }
 
+/* 에이전트(claude 류)가 돌고 있으면 눈에 띄어야 한다 — 이 앱이 결국 하려는 일이다 */
+.pane-head .pip.agent {
+  background: var(--lilac);
+  box-shadow: 0 0 0 3px rgba(184, 167, 201, 0.35);
+}
+.pane-head .chip {
+  flex: none;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--lilac);
+  color: #fff;
+}
+
+/* 작업 중 표시. 진행률을 알 수 없으니(셸이 안 알려준다) 쓸고 지나가는 모양이다 */
+.busy {
+  flex: none;
+  height: 3px;
+  background: var(--line);
+  position: relative;
+  overflow: hidden;
+}
+.busy::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 32%;
+  background: var(--sky);
+  animation: sweep 1.2s linear infinite;
+}
+@keyframes sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(330%);
+  }
+}
+
 .pane-head .x {
   margin-left: auto;
   border: none;

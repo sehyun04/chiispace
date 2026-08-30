@@ -8,6 +8,14 @@ import * as L from "./layout";
 
 type Member = { name: string; slug: string; school: string; header_color: string };
 
+type PaneStat = {
+  id: string;
+  proc: string | null;
+  agent: string | null;
+  busy: boolean;
+  cwd: string | null;
+};
+
 /** 지금 포커스된 터미널. Term 이 포커스를 받을 때 window 에 올려 둔다. */
 type XTerm = { getSelection(): string; paste(t: string): void };
 const termOf = (): XTerm | undefined =>
@@ -33,6 +41,7 @@ export default function App() {
   // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
   const [booted, setBooted] = useState(false);
   const [fontSize, setFontSize] = useState(13);
+  const [stat, setStat] = useState<Record<string, PaneStat>>({});
   const nextId = useRef(1);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect } | null>(null);
@@ -121,6 +130,29 @@ export default function App() {
       clearInterval(h);
     };
   }, [root]);
+
+  // pane 이 무엇을 돌리는지는 프로세스 트리를 봐야 알 수 있고, 그건 이벤트로
+  // 오지 않는다. 엔진이 ps 호출을 500ms 로 캐시하므로 이 주기가 그보다 촘촘할
+  // 이유가 없다.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      invoke<PaneStat[]>("pane_status")
+        .then((list) => {
+          if (!alive) return;
+          const m: Record<string, PaneStat> = {};
+          for (const p of list) m[p.id] = p;
+          setStat(m);
+        })
+        .catch(() => {});
+    };
+    tick();
+    const h = setInterval(tick, 800);
+    return () => {
+      alive = false;
+      clearInterval(h);
+    };
+  }, []);
 
   // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는 동작.
   useEffect(() => {
@@ -294,8 +326,11 @@ export default function App() {
               onMouseDown={() => setFocus(s.id)}
             >
               <header className="pane-head">
-                <span className="pip" />
-                <span className="title">{titles[s.id] ?? "shell"}</span>
+                <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
+                <span className="title">{label(s.id, stat, titles)}</span>
+                {stat[s.id]?.agent ? (
+                  <span className="chip">{stat[s.id]?.agent}</span>
+                ) : null}
                 <button
                   className="x"
                   onMouseDown={(e) => e.stopPropagation()}
@@ -304,6 +339,7 @@ export default function App() {
                   ×
                 </button>
               </header>
+              {stat[s.id]?.busy ? <div className="busy" /> : null}
               <Term
                 id={s.id}
                 focused={focus === s.id}
@@ -345,6 +381,20 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+/** 헤더에 쓸 이름. 돌고 있는 명령이 있으면 그게 제일 쓸모 있다 —
+ *  OSC 타이틀은 cmd.exe 가 자기 전체 경로를 넣어 버려 읽히지 않는다. */
+function label(
+  id: string,
+  stat: Record<string, PaneStat>,
+  titles: Record<string, string>,
+): string {
+  const p = stat[id]?.proc;
+  if (p) return p;
+  const t = titles[id];
+  if (!t) return "shell";
+  return t.split(/[\/]/).pop() || t;
 }
 
 function Row({ m, lead }: { m: Member; lead?: boolean }) {
