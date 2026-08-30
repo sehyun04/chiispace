@@ -59,7 +59,7 @@ UI 폰트는 Galmuri11(OFL, `ui/assets/`). 터미널 글자는 시스템 등폭.
 ## 헤드리스 검증
 
 ```powershell
-$env:KASASPACE_ROOT     = "C:\path	oepo"   # 폴더를 연 채로 띄운다
+$env:KASASPACE_ROOT     = "C:/path/to/repo"    # 폴더를 연 채로 띄운다
 $env:KASASPACE_AUTOKEYS = "C-S-d,C-S-t,C-="     # 단축키를 순서대로 쏜다
 $env:KASASPACE_AUTOSEND = "dir /w"              # 이 문자열 + Enter 를 터미널에 주입
 scripts\shot.ps1 -Out shot.png
@@ -88,7 +88,7 @@ OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 �
 작업 트리를 쓴다. 엔진 rev 를 박아 둔 이유는 upstream `main` 이 활발히 움직이기 때문이다 —
 말없이 바뀌어 깨지는 것보다 의도적으로 올리는 편이 낫다.
 
-⚠️ 로컬 kasaterm 클론의 `main` 은 upstream 과 크게 갈라져 있다. 엔진 API·LFS·테마를 확인할
+주의: 로컬 kasaterm 클론의 `main` 은 upstream 과 크게 갈라져 있다. 엔진 API·LFS·테마를 확인할
 때 로컬 파일을 보면 **없는 것처럼 보인다**. `git show origin/main:<경로>` 로 봐야 한다.
 
 ## 지금 되는 것
