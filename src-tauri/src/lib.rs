@@ -104,6 +104,26 @@ fn pty_close(panes: State<Panes>, id: String) {
 /// 웹뷰의 `__term.input()` 을 부른다 — 사용자가 키를 친 것과 같은 경로(onData ->
 /// pty_write)를 타므로 배선 전체가 검증된다. OS 로 키를 쏘는 방식(SendKeys)은
 /// 포커스가 다른 창에 있으면 **엉뚱한 앱에 타이핑된다**. 한 번 겪었다.
+/// "C-S-d" -> ((ctrl, shift, alt), "d")
+fn parse_chord(tok: &str) -> ((bool, bool, bool), &str) {
+    let (mut ctrl, mut shift, mut alt) = (false, false, false);
+    let mut key = tok;
+    loop {
+        if let Some(r) = key.strip_prefix("C-") {
+            ctrl = true;
+            key = r;
+        } else if let Some(r) = key.strip_prefix("S-") {
+            shift = true;
+            key = r;
+        } else if let Some(r) = key.strip_prefix("A-") {
+            alt = true;
+            key = r;
+        } else {
+            return ((ctrl, shift, alt), key);
+        }
+    }
+}
+
 fn arm_autosend(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -115,20 +135,24 @@ fn arm_autosend(app: &AppHandle) {
             .unwrap_or(d)
     };
 
-    // KASASPACE_AUTOSPLIT="h,v" — 분할 단축키를 순서대로 쏜다. 진짜 KeyboardEvent 라
-    // 단축키 핸들러 -> 배치 트리 -> 새 PTY 까지 제품 경로를 그대로 탄다.
-    if let Ok(spec) = std::env::var("KASASPACE_AUTOSPLIT") {
-        let start = ms("KASASPACE_AUTOSPLIT_MS", 2500);
+    // KASASPACE_AUTOKEYS="C-S-d,C-S-e,C-=" — 단축키를 순서대로 쏜다.
+    // 진짜 KeyboardEvent 라 단축키 핸들러부터 그 뒤(배치 트리·새 PTY·리사이즈)까지
+    // 제품 경로를 그대로 탄다. 기능마다 env 를 새로 만들지 않으려고 하나로 뒀다.
+    if let Ok(spec) = std::env::var("KASASPACE_AUTOKEYS") {
+        let start = ms("KASASPACE_AUTOKEYS_MS", 2500);
+        let gap = ms("KASASPACE_AUTOKEYS_GAP", 800);
         let w = win.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(start));
-            for dir in spec.split(',').filter(|s| !s.is_empty()) {
-                let key = if dir.trim() == "v" { "E" } else { "D" };
+            for tok in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                let (mods, key) = parse_chord(tok);
+                let (ctrl, shift, alt) = mods;
+                let Ok(k) = serde_json::to_string(key) else { continue };
                 let _ = w.eval(&format!(
                     "window.dispatchEvent(new KeyboardEvent('keydown',\
-                     {{key:'{key}',ctrlKey:true,shiftKey:true,bubbles:true}}))"
+                     {{key:{k},ctrlKey:{ctrl},shiftKey:{shift},altKey:{alt},bubbles:true}}))"
                 ));
-                std::thread::sleep(std::time::Duration::from_millis(900));
+                std::thread::sleep(std::time::Duration::from_millis(gap));
             }
         });
     }
@@ -152,6 +176,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             pty_open,
             pty_write,

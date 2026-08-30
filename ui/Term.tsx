@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
@@ -45,15 +47,18 @@ export function Term({
   focused,
   onTitle,
   cwd,
+  fontSize,
 }: {
   id: string;
   focused: boolean;
   onTitle: (id: string, title: string) => void;
   /** 연 폴더가 있으면 새 셸은 거기서 시작한다 — 매번 cd 를 치게 하지 않으려고. */
   cwd?: string;
+  fontSize: number;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
+  const fitter = useRef<FitAddon | null>(null);
 
   useEffect(() => {
     const el = host.current;
@@ -62,14 +67,21 @@ export function Term({
     const t = new Terminal({
       theme: THEME,
       fontFamily: '"Consolas", "D2Coding", monospace',
-      fontSize: 13,
+      fontSize,
       lineHeight: 1.25,
       cursorBlink: true,
       allowProposedApi: true,
+      // 기본값 1000 은 빌드 로그 한 번에 날아간다. 위로 올려 본 것이 이미
+      // 사라진 뒤라면 스크롤백이 있으나 마나다.
+      scrollback: 10000,
     });
     term.current = t;
     const fit = new FitAddon();
     t.loadAddon(fit);
+    fitter.current = fit;
+    // 링크는 웹뷰가 아니라 OS 기본 브라우저로 보낸다. 웹뷰 안에서 열면 앱이
+    // 그 페이지로 통째로 바뀌고 돌아올 방법이 없다.
+    t.loadAddon(new WebLinksAddon((_e, uri) => void openUrl(uri).catch(() => {})));
     t.open(el);
     fit.fit();
 
@@ -123,6 +135,20 @@ export function Term({
     // 그대로 두는 게 맞다 — 남이 쓰던 셸의 cwd 를 말없이 바꾸면 안 된다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, onTitle]);
+
+  // 글자 크기가 바뀌면 셀 크기가 바뀌고, 곧 셸이 아는 폭·높이도 바뀐다.
+  // fit 만 하고 PTY 에 안 알리면 줄바꿈이 옛 폭 기준으로 들어온다.
+  useEffect(() => {
+    const t = term.current;
+    if (!t || t.options.fontSize === fontSize) return;
+    t.options.fontSize = fontSize;
+    try {
+      fitter.current?.fit();
+    } catch {
+      return;
+    }
+    invoke("pty_resize", { id, cols: t.cols, rows: t.rows }).catch(() => {});
+  }, [fontSize, id]);
 
   // 포커스는 xterm 의 숨은 textarea 가 갖는다. 분할 직후 새 pane 으로 바로
   // 칠 수 있어야 하므로 여기서 옮겨 준다.

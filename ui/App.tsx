@@ -32,6 +32,7 @@ export default function App() {
   // 첫 pane 은 열 폴더가 정해진 뒤에 띄운다. 먼저 띄우면 셸이 홈에서 시작해
   // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
   const [booted, setBooted] = useState(false);
+  const [fontSize, setFontSize] = useState(13);
   const nextId = useRef(1);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect } | null>(null);
@@ -67,7 +68,13 @@ export default function App() {
       let savedRoot: string | null = null;
       if (saved) {
         try {
-          const s = JSON.parse(saved) as { layout?: L.Node; root?: string; nextId?: number };
+          const s = JSON.parse(saved) as {
+            layout?: L.Node;
+            root?: string;
+            nextId?: number;
+            fontSize?: number;
+          };
+          if (s.fontSize) setFontSize(s.fontSize);
           if (s.layout) {
             setLayout(s.layout);
             setFocus(L.leaves(s.layout)[0]);
@@ -88,11 +95,11 @@ export default function App() {
   useEffect(() => {
     if (!booted) return;
     const h = setTimeout(() => {
-      const json = JSON.stringify({ layout, root, nextId: nextId.current });
+      const json = JSON.stringify({ layout, root, nextId: nextId.current, fontSize });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
-  }, [layout, root, booted]);
+  }, [layout, root, fontSize, booted]);
 
   // git 상태는 파일이 바뀔 때마다 달라진다. 감시자를 붙이는 건 다음 일이고,
   // 지금은 주기적으로 다시 묻는다 — git 한 번은 싸고, 4초면 사람이 느끼기에 즉시다.
@@ -136,6 +143,18 @@ export default function App() {
   // 버블 단계에서는 이미 셸로 흘러간 뒤다.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 글자 크기는 Shift 없이. 브라우저·에디터가 다 Ctrl +/-/0 이라 손이 그리 간다.
+      if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+        const z: Record<string, number> = { "=": 1, "+": 1, "-": -1, _: -1 };
+        if (e.key in z) {
+          setFontSize((f) => Math.min(28, Math.max(8, f + z[e.key])));
+        } else if (e.key === "0") {
+          setFontSize(13);
+        } else return;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (!e.ctrlKey || !e.shiftKey || !layout) return;
       const k = e.key.toLowerCase();
       const dirs: Record<string, "left" | "right" | "up" | "down"> = {
@@ -261,6 +280,8 @@ export default function App() {
           <b>Ctrl+Shift+W</b> pane 닫기 · <b>←↑↓→</b> 이동
           <br />
           <b>Ctrl+Shift+C/V</b> 복사·붙여넣기 · <b>O</b> 폴더
+          <br />
+          <b>Ctrl +/-/0</b> 글자 크기
         </div>
       </aside>
 
@@ -288,6 +309,7 @@ export default function App() {
                 focused={focus === s.id}
                 onTitle={onTitle}
                 cwd={root ?? undefined}
+                fontSize={fontSize}
               />
               </section>
             </div>
