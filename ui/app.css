@@ -137,14 +137,21 @@ body {
 
 /* ── 무대 ───────────────────────────────────────────────── */
 
+/* 무대는 좌표계다. pane 은 배치 트리가 준 비율(0..1)을 % 로 받아 절대 배치된다.
+ * 트리 모양대로 DOM 을 중첩하면 분할할 때마다 기존 pane 이 깊어지면서 React 가
+ * 언마운트해 버린다 — PTY 가 그때마다 죽는다. 그래서 평평하게 깔고 위치만 준다. */
 .stage {
+  position: relative;
   min-width: 0;
-  display: flex;
+}
+
+.slot {
+  position: absolute;
 }
 
 .pane {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  inset: 5px;
   background: var(--paper);
   border: var(--outline-w) solid var(--outline);
   border-radius: var(--radius);
@@ -152,6 +159,116 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 포커스 표시. pane 이 여러 개일 때 어디에 치고 있는지 모르면 오타를 낸다 */
+.pane.on {
+  box-shadow:
+    var(--drop),
+    0 0 0 2px var(--sky) inset;
+}
+.pane.on .pane-head {
+  background: var(--sky);
+  color: #fff;
+}
+.pane.on .pane-head .pip {
+  background: var(--blush);
+}
+
+.pane-head .x {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.pane-head .x:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* 경계선. 실제 선은 얇지만 잡는 영역은 넓어야 끌 수 있다 */
+.seam {
+  position: absolute;
+  z-index: 3;
+}
+.seam.vert {
+  width: 0;
+  margin-left: -5px;
+  padding-left: 10px;
+  cursor: col-resize;
+}
+.seam.horz {
+  height: 0;
+  margin-top: -5px;
+  padding-top: 10px;
+  cursor: row-resize;
+}
+.seam:hover::after,
+body.dragging .seam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  background: var(--sky);
+  border-radius: 2px;
+}
+.seam.vert:hover::after {
+  width: 3px;
+}
+.seam.horz:hover::after {
+  height: 3px;
+}
+
+/* 끄는 동안 pane 이 마우스를 먹으면(특히 xterm) 드래그가 중간에 끊긴다 */
+body.dragging {
+  user-select: none;
+}
+body.dragging .slot {
+  pointer-events: none;
+}
+
+.stage-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--ink-3);
+}
+.stage-empty button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--sun);
+  border: var(--outline-w) solid var(--outline);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--drop-sm);
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.stage-empty button:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.keys {
+  padding: 10px 14px;
+  border-top: var(--outline-w) solid var(--line);
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1.9;
+}
+.keys b {
+  color: var(--ink-2);
+  font-weight: normal;
 }
 
 .pane-head {

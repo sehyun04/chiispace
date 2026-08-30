@@ -103,21 +103,42 @@ fn pty_close(panes: State<Panes>, id: String) {
 /// pty_write)를 타므로 배선 전체가 검증된다. OS 로 키를 쏘는 방식(SendKeys)은
 /// 포커스가 다른 창에 있으면 **엉뚱한 앱에 타이핑된다**. 한 번 겪었다.
 fn arm_autosend(app: &AppHandle) {
-    let Ok(text) = std::env::var("KASASPACE_AUTOSEND") else {
-        return;
-    };
-    let delay = std::env::var("KASASPACE_AUTOSEND_MS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(3500);
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(delay));
-        let payload = serde_json::to_string(&format!("{text}\r")).unwrap_or_default();
-        let _ = win.eval(&format!("window.__term && window.__term.input({payload})"));
-    });
+    let ms = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(d)
+    };
+
+    // KASASPACE_AUTOSPLIT="h,v" — 분할 단축키를 순서대로 쏜다. 진짜 KeyboardEvent 라
+    // 단축키 핸들러 -> 배치 트리 -> 새 PTY 까지 제품 경로를 그대로 탄다.
+    if let Ok(spec) = std::env::var("KASASPACE_AUTOSPLIT") {
+        let start = ms("KASASPACE_AUTOSPLIT_MS", 2500);
+        let w = win.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(start));
+            for dir in spec.split(',').filter(|s| !s.is_empty()) {
+                let key = if dir.trim() == "v" { "E" } else { "D" };
+                let _ = w.eval(&format!(
+                    "window.dispatchEvent(new KeyboardEvent('keydown',\
+                     {{key:'{key}',ctrlKey:true,shiftKey:true,bubbles:true}}))"
+                ));
+                std::thread::sleep(std::time::Duration::from_millis(900));
+            }
+        });
+    }
+
+    if let Ok(text) = std::env::var("KASASPACE_AUTOSEND") {
+        let delay = ms("KASASPACE_AUTOSEND_MS", 3500);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            let payload = serde_json::to_string(&format!("{text}\r")).unwrap_or_default();
+            let _ = win.eval(&format!("window.__term && window.__term.input({payload})"));
+        });
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

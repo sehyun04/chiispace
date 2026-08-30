@@ -38,14 +38,25 @@ function decode(b64: string): Uint8Array {
   return out;
 }
 
-export function Term({ id }: { id: string }) {
+type W = Record<string, unknown>;
+
+export function Term({
+  id,
+  focused,
+  onTitle,
+}: {
+  id: string;
+  focused: boolean;
+  onTitle: (id: string, title: string) => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
+  const term = useRef<Terminal | null>(null);
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
 
-    const term = new Terminal({
+    const t = new Terminal({
       theme: THEME,
       fontFamily: '"Consolas", "D2Coding", monospace',
       fontSize: 13,
@@ -53,49 +64,46 @@ export function Term({ id }: { id: string }) {
       cursorBlink: true,
       allowProposedApi: true,
     });
+    term.current = t;
     const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(el);
+    t.loadAddon(fit);
+    t.open(el);
     fit.fit();
 
     let alive = true;
     const unlisteners: Array<() => void> = [];
 
-    // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이
-    // 곧바로 리사이즈를 맞으며 첫 화면을 다시 그린다.
-    invoke("pty_open", { id, cols: term.cols, rows: term.rows }).catch((e) =>
-      term.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
+    // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이 곧바로
+    // 리사이즈를 맞으며 첫 화면을 다시 그린다 — 좁은 pane 일수록 눈에 띈다.
+    invoke("pty_open", { id, cols: t.cols, rows: t.rows }).catch((e) =>
+      t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );
 
     listen<{ id: string; b64: string }>("pty:data", (ev) => {
       if (!alive || ev.payload.id !== id) return;
-      term.write(decode(ev.payload.b64));
+      t.write(decode(ev.payload.b64));
     }).then((un) => (alive ? unlisteners.push(un) : un()));
 
-    listen<string>("pty:exit", (ev) => {
-      if (!alive || ev.payload !== id) return;
-      term.writeln("\r\n\x1b[90m[셸이 끝났다]\x1b[0m");
-    }).then((un) => (alive ? unlisteners.push(un) : un()));
+    t.onTitleChange((title) => onTitle(id, title));
 
-    term.onData((data) => {
+    t.onData((data) => {
       invoke("pty_write", { id, data }).catch(() => {});
     });
 
-    // 헤드리스 검증용 손잡이. Rust 쪽 KASASPACE_AUTOSEND 가 이걸 통해 입력을
-    // 넣는다 — term.input() 은 사용자가 친 것과 같은 경로(onData)를 타므로
-    // 키 입력 배선까지 실제로 검증된다. OS 로 키를 쏘면 포커스가 다른 창에
-    // 있을 때 엉뚱한 앱에 타이핑된다.
-    (window as unknown as Record<string, unknown>).__term = term;
+    // 헤드리스 검증용 손잡이. Rust 의 KASASPACE_AUTOSEND 가 이걸 통해 입력을
+    // 넣는다 — term.input() 은 사용자가 친 것과 같은 경로(onData)를 타므로 키
+    // 배선까지 실제로 검증된다. OS 로 키를 쏘면 포커스가 다른 창에 있을 때
+    // 엉뚱한 앱에 타이핑된다.
+    const w = window as unknown as W;
+    ((w.__terms ??= {}) as Record<string, Terminal>)[id] = t;
 
-    // 창 크기가 바뀌면 셀 수를 다시 재고 PTY 에도 알린다. 둘 중 하나만 하면
-    // 셸이 옛 폭으로 줄바꿈을 넣어 화면이 찢어진다.
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
       } catch {
         return;
       }
-      invoke("pty_resize", { id, cols: term.cols, rows: term.rows }).catch(() => {});
+      invoke("pty_resize", { id, cols: t.cols, rows: t.rows }).catch(() => {});
     });
     ro.observe(el);
 
@@ -103,10 +111,20 @@ export function Term({ id }: { id: string }) {
       alive = false;
       ro.disconnect();
       unlisteners.forEach((un) => un());
+      delete ((w.__terms ??= {}) as Record<string, Terminal>)[id];
       invoke("pty_close", { id }).catch(() => {});
-      term.dispose();
+      t.dispose();
+      term.current = null;
     };
-  }, [id]);
+  }, [id, onTitle]);
+
+  // 포커스는 xterm 의 숨은 textarea 가 갖는다. 분할 직후 새 pane 으로 바로
+  // 칠 수 있어야 하므로 여기서 옮겨 준다.
+  useEffect(() => {
+    if (!focused) return;
+    term.current?.focus();
+    (window as unknown as W).__term = term.current;
+  }, [focused]);
 
   return (
     <div className="pane-body">
