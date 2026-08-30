@@ -161,6 +161,8 @@ pub fn run() {
             workspace::fs_list,
             workspace::fs_pick,
             workspace::git_status,
+            workspace::state_save,
+            workspace::state_load,
         ])
         .run(tauri::generate_context!())
         .expect("tauri 앱 기동 실패");

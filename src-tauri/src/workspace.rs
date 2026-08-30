@@ -151,3 +151,28 @@ fn pick_num(s: &str, key: &str) -> u32 {
         })
         .unwrap_or(0)
 }
+
+// ── 세션 ─────────────────────────────────────────────────────────
+//
+// 배치와 연 폴더만 저장한다. PTY 는 되살리지 않는다 — 프로세스는 앱과 함께
+// 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면 사용자가 살아 있다고 믿는다.
+// 복원되는 것은 "어떻게 나눠 놓고 어디서 일하고 있었나"까지다.
+
+fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    let dir = app.path().app_config_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("session.json"))
+}
+
+#[tauri::command]
+pub fn state_save(app: AppHandle, json: String) {
+    if let Some(p) = state_file(&app) {
+        let _ = std::fs::write(p, json);
+    }
+}
+
+#[tauri::command]
+pub fn state_load(app: AppHandle) -> Option<String> {
+    std::fs::read_to_string(state_file(&app)?).ok()
+}

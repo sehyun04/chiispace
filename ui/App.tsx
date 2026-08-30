@@ -8,6 +8,11 @@ import * as L from "./layout";
 
 type Member = { name: string; slug: string; school: string; header_color: string };
 
+/** 지금 포커스된 터미널. Term 이 포커스를 받을 때 window 에 올려 둔다. */
+type XTerm = { getSelection(): string; paste(t: string): void };
+const termOf = (): XTerm | undefined =>
+  (window as unknown as { __term?: XTerm }).__term;
+
 const leader = roster.leader as Member;
 const members = roster.members as Member[];
 
@@ -53,13 +58,41 @@ export default function App() {
     if (picked) setRoot(picked);
   }, []);
 
-  // `kasaspace <경로>` 로 띄웠으면 그 폴더를 열어 둔 채 시작한다.
+  // 부팅. 저장된 세션(배치·폴더)을 되살리되, 명령줄로 폴더를 지정했으면 그쪽이
+  // 이긴다 — 사용자가 방금 말한 것이 지난번 기억보다 우선이다.
   useEffect(() => {
-    invoke<string | null>("initial_root")
-      .then((p) => p && setRoot(p))
-      .catch(() => {})
-      .finally(() => setBooted(true));
+    (async () => {
+      const cli = await invoke<string | null>("initial_root").catch(() => null);
+      const saved = await invoke<string | null>("state_load").catch(() => null);
+      let savedRoot: string | null = null;
+      if (saved) {
+        try {
+          const s = JSON.parse(saved) as { layout?: L.Node; root?: string; nextId?: number };
+          if (s.layout) {
+            setLayout(s.layout);
+            setFocus(L.leaves(s.layout)[0]);
+          }
+          // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
+          if (typeof s.nextId === "number") nextId.current = s.nextId;
+          savedRoot = s.root ?? null;
+        } catch {
+          /* 깨진 세션 파일은 무시하고 기본값으로 시작한다 */
+        }
+      }
+      setRoot(cli ?? savedRoot);
+      setBooted(true);
+    })();
   }, []);
+
+  // 배치가 바뀔 때마다 저장. 경계선을 끄는 동안 초당 수십 번 바뀌므로 묶어서 쓴다.
+  useEffect(() => {
+    if (!booted) return;
+    const h = setTimeout(() => {
+      const json = JSON.stringify({ layout, root, nextId: nextId.current });
+      invoke("state_save", { json }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(h);
+  }, [layout, root, booted]);
 
   // git 상태는 파일이 바뀔 때마다 달라진다. 감시자를 붙이는 건 다음 일이고,
   // 지금은 주기적으로 다시 묻는다 — git 한 번은 싸고, 4초면 사람이 느끼기에 즉시다.
@@ -116,6 +149,19 @@ export default function App() {
       else if (k === "e") split("v");
       else if (k === "w") close(focus);
       else if (k === "o") void pick();
+      else if (k === "c") {
+        // 선택이 없으면 아무 일도 안 한다. 터미널에서 Ctrl+Shift+C 는 복사지
+        // 인터럽트가 아니다 — 그건 Ctrl+C 고, 그쪽은 셸로 그냥 흘려보낸다.
+        const sel = termOf()?.getSelection();
+        if (sel) void navigator.clipboard.writeText(sel).catch(() => {});
+      } else if (k === "v") {
+        // term.paste 를 거쳐야 한다. 셸이 bracketed paste 를 켰으면 앞뒤에
+        // ESC[200~ / ESC[201~ 를 붙여야 하고, 그 판단은 xterm 이 들고 있다.
+        void navigator.clipboard
+          .readText()
+          .then((txt) => txt && termOf()?.paste(txt))
+          .catch(() => {});
+      }
       else if (dirs[k]) {
         const next = L.neighbor(layout, focus, dirs[k]);
         if (next) setFocus(next);
@@ -213,6 +259,8 @@ export default function App() {
           <b>Ctrl+Shift+D</b> 좌우 분할 · <b>E</b> 상하 분할
           <br />
           <b>Ctrl+Shift+W</b> pane 닫기 · <b>←↑↓→</b> 이동
+          <br />
+          <b>Ctrl+Shift+C/V</b> 복사·붙여넣기 · <b>O</b> 폴더
         </div>
       </aside>
 
