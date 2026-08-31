@@ -10,6 +10,12 @@ description = "터미널을 한 칸으로 두는 작업환경"
 name = "kasaspace_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Tauri 는 릴리스 여부를 --release 가 아니라 이 feature 로 가른다. 꺼져 있으면
+# generate_context! 가 dev 모드로 컴파일되어 dist 를 박지 않고 devUrl(vite)을
+# 본다 — release exe 인데 "localhost 연결을 거부했습니다"가 뜬다.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

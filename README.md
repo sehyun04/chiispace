@@ -54,9 +54,14 @@ npm run tauri dev
 
 ```powershell
 npx vite build
-cd src-tauri; cargo build --release
+cd src-tauri; cargo build --release --features custom-protocol
 # -> src-tauri/target/release/kasaspace.exe  (더블클릭으로 뜬다)
 ```
+
+`--features custom-protocol` 을 빠뜨리면 안 된다. Tauri 는 릴리스 여부를 `--release`
+가 아니라 이 feature 로 가른다 — 꺼져 있으면 `generate_context!` 가 dev 모드로
+컴파일되어 dist 를 exe 안에 박지 않고 `devUrl`(vite) 을 본다. 그러면 release exe 인데
+창에 "localhost 연결을 거부했습니다"(`ERR_CONNECTION_REFUSED`) 만 뜬다.
 
 ## 테마
 
