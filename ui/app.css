@@ -471,6 +471,39 @@ body.dragging .seam.horz::after {
   height: 4px;
 }
 
+/* pane 을 헤더째 끌어 옮기기 */
+.pane-head {
+  cursor: grab;
+}
+body.pane-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+/* 끄는 동안 터미널이 마우스를 먹으면 놓을 자리를 못 따라간다 */
+body.pane-dragging .pane-body,
+body.pane-dragging .seam {
+  pointer-events: none;
+}
+body.pane-dragging .pane-head {
+  cursor: grabbing;
+}
+
+/* 놓으면 여기에 온다는 표시. 가운데로 잡으면 그 pane 전체를 덮어 자리를
+ * 맞바꾸고, 가장자리면 절반만 덮어 그쪽으로 갈라짐을 미리 보여 준다. */
+.drop-hint {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--sky) 32%, transparent);
+  border: 2px solid var(--sky);
+  border-radius: var(--radius);
+  transition:
+    left 0.08s,
+    top 0.08s,
+    width 0.08s,
+    height 0.08s;
+}
+
 /* 끄는 동안 pane 이 마우스를 먹으면(특히 xterm) 드래그가 중간에 끊긴다 */
 body.dragging {
   user-select: none;

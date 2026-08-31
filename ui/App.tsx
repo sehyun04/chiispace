@@ -57,6 +57,11 @@ export default function App() {
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
     null,
   );
+  // pane 을 헤더째 끌어 옮기는 중. 어디에 놓일지는 렌더에도 필요해 state 로
+  // 두고, mouseup 핸들러가 닫힌 값을 보지 않도록 ref 에도 같이 들고 있는다.
+  const paneDrag = useRef<{ from: string; box: HTMLElement } | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; side: L.Side } | null>(null);
+  const dropRef = useRef<{ id: string; side: L.Side } | null>(null);
 
   const cur = tabs[active] ?? tabs[0];
   const patch = useCallback(
@@ -305,16 +310,7 @@ export default function App() {
           .catch(() => {});
       } else if (dirs[k] && cur.layout) {
         const next = L.neighbor(cur.layout, cur.focus, dirs[k]);
-        if (next && e.altKey) {
-          // Alt 를 얹으면 포커스가 아니라 pane 이 간다. 포커스는 따로 옮기지
-          // 않는다 — id 가 그대로라 보고 있던 pane 을 그대로 따라가고,
-          // 그래야 연달아 눌러 끝까지 밀어 넣을 수 있다.
-          const from = cur.focus;
-          patch((t) => ({
-            ...t,
-            layout: t.layout ? L.swapLeaves(t.layout, from, next) : t.layout,
-          }));
-        } else if (next) patch((t) => ({ ...t, focus: next }));
+        if (next) patch((t) => ({ ...t, focus: next }));
       } else handled = false;
 
       if (handled) {
@@ -364,6 +360,57 @@ export default function App() {
       window.removeEventListener("blur", up);
     };
   }, [active]);
+
+  // pane 을 헤더째 끌어 옮기기. 가운데에 놓으면 자리 맞바꾸기, 가장자리에
+  // 놓으면 그쪽으로 갈라 붙인다 — 배치를 한 번에 원하는 모양으로 만들려면
+  // 맞바꾸기만으로는 모자란다.
+  useEffect(() => {
+    const finish = () => {
+      if (!paneDrag.current) return;
+      const from = paneDrag.current.from;
+      const at = dropRef.current;
+      paneDrag.current = null;
+      dropRef.current = null;
+      setDropAt(null);
+      document.body.classList.remove("pane-dragging");
+      if (!at || at.id === from) return;
+      patch((t) => {
+        if (!t.layout) return t;
+        const next = L.moveLeaf(t.layout, from, at.id, at.side);
+        // 옮긴 pane 을 계속 보고 있어야 이어서 손댈 수 있다.
+        return next ? { ...t, layout: next, focus: from } : t;
+      });
+    };
+    const move = (e: MouseEvent) => {
+      const d = paneDrag.current;
+      if (!d) return;
+      if (e.buttons === 0) {
+        finish();
+        return;
+      }
+      const layout = cur?.layout;
+      if (!layout) return;
+      const box = d.box.getBoundingClientRect();
+      const at = L.dropTarget(
+        layout,
+        (e.clientX - box.left) / box.width,
+        (e.clientY - box.top) / box.height,
+      );
+      const next = at && at.id !== d.from ? at : null;
+      dropRef.current = next;
+      setDropAt((prev) =>
+        prev?.id === next?.id && prev?.side === next?.side ? prev : next,
+      );
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", finish);
+    window.addEventListener("blur", finish);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", finish);
+      window.removeEventListener("blur", finish);
+    };
+  }, [cur, patch]);
 
   return (
     <div className="app">
@@ -422,7 +469,7 @@ export default function App() {
           <br />
           <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 포커스
           <br />
-          <b>Alt</b>+<b>←↑↓→</b> pane 옮기기
+          pane 은 <b>헤더를 끌어</b> 옮긴다
           <br />
           <b>T</b> 새 탭 · <b>PgUp</b>/<b>PgDn</b> 탭
           <br />
@@ -467,14 +514,24 @@ export default function App() {
               <div key={t.key} className={ti === active ? "page" : "page off"}>
                 <div className="stage">
                   {(t.layout ? L.rects(t.layout) : []).map((s) => (
-                    <div key={s.id} className="slot" style={pct(s.rect)}>
+                    <div key={s.id} data-pane={s.id} className="slot" style={pct(s.rect)}>
                       <section
                         className={ti === active && t.focus === s.id ? "pane on" : "pane"}
                         onMouseDown={() =>
                           setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: s.id } : x)))
                         }
                       >
-                        <header className="pane-head">
+                        <header
+                          className="pane-head"
+                          onMouseDown={(e) => {
+                            if (e.button !== 0) return;
+                            const stage = e.currentTarget.closest(".stage");
+                            if (!stage) return;
+                            paneDrag.current = { from: s.id, box: stage as HTMLElement };
+                            dropRef.current = null;
+                            document.body.classList.add("pane-dragging");
+                          }}
+                        >
                           <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
                           <span className="title">{label(s.id, stat, titles)}</span>
                           {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}
@@ -498,6 +555,15 @@ export default function App() {
                       </section>
                     </div>
                   ))}
+
+                  {ti === active && dropAt && t.layout
+                    ? (() => {
+                        const r = L.dropRect(t.layout, dropAt);
+                        return r ? (
+                          <div className={`drop-hint ${dropAt.side}`} style={pct(r)} />
+                        ) : null;
+                      })()
+                    : null}
 
                   {(t.layout ? L.seams(t.layout) : []).map((sm) => (
                     <div

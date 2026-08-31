@@ -107,6 +107,68 @@ export function swapLeaves(n: Node, a: string, b: string): Node {
   return { ...n, a: swapLeaves(n.a, a, b), b: swapLeaves(n.b, a, b) };
 }
 
+export type Side = "left" | "right" | "up" | "down" | "center";
+
+/** `from` 을 뽑아 `target` 의 `side` 쪽에 붙인다.
+ *
+ *  트리를 다시 엮어도 pane 은 안 죽는다 — slot 은 배치 모양이 아니라 id 로
+ *  짝지어지므로, 같은 id 가 남아 있는 한 React 는 그 Term 을 옮기기만 한다. */
+export function moveLeaf(n: Node, from: string, target: string, side: Side): Node | null {
+  if (from === target) return n;
+  if (side === "center") return swapLeaves(n, from, target);
+  const without = removeLeaf(n, from);
+  if (!without) return null;
+  const dir: Dir = side === "left" || side === "right" ? "h" : "v";
+  return graft(without, target, dir, from, side === "left" || side === "up");
+}
+
+function graft(n: Node, target: string, dir: Dir, id: string, before: boolean): Node {
+  if (n.kind === "leaf") {
+    if (n.id !== target) return n;
+    const added = leaf(id);
+    return before
+      ? { kind: "split", dir, ratio: 0.5, a: added, b: n }
+      : { kind: "split", dir, ratio: 0.5, a: n, b: added };
+  }
+  return { ...n, a: graft(n.a, target, dir, id, before), b: graft(n.b, target, dir, id, before) };
+}
+
+/** 화면 좌표(0..1)가 어느 pane 의 어느 쪽인지. 가운데면 자리 맞바꾸기다. */
+export function dropTarget(n: Node, fx: number, fy: number): { id: string; side: Side } | null {
+  const hit = rects(n).find(
+    (s) =>
+      fx >= s.rect.x && fx < s.rect.x + s.rect.w && fy >= s.rect.y && fy < s.rect.y + s.rect.h,
+  );
+  if (!hit) return null;
+  const dx = (fx - hit.rect.x) / hit.rect.w - 0.5;
+  const dy = (fy - hit.rect.y) / hit.rect.h - 0.5;
+  // 가장자리로 충분히 나가야 방향이 정해진다. 그 전에는 맞바꾸기 —
+  // 조금만 움직여도 배치가 갈라지면 손이 무서워서 못 끈다.
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 0.25) return { id: hit.id, side: "center" };
+  const side: Side =
+    Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+  return { id: hit.id, side };
+}
+
+/** 드롭 힌트가 덮을 자리. */
+export function dropRect(n: Node, at: { id: string; side: Side }): Rect | null {
+  const s = rects(n).find((x) => x.id === at.id);
+  if (!s) return null;
+  const r = s.rect;
+  switch (at.side) {
+    case "left":
+      return { ...r, w: r.w / 2 };
+    case "right":
+      return { ...r, x: r.x + r.w / 2, w: r.w / 2 };
+    case "up":
+      return { ...r, h: r.h / 2 };
+    case "down":
+      return { ...r, y: r.y + r.h / 2, h: r.h / 2 };
+    default:
+      return r;
+  }
+}
+
 /** 포커스를 옮길 이웃 찾기. 중심점에서 그 방향으로 가장 가까운 pane —
  *  트리 순서로 고르면 화면상 옆에 있지 않은 pane 으로 튄다. */
 export function neighbor(n: Node, from: string, dir: "left" | "right" | "up" | "down"): string | null {
