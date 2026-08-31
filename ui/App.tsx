@@ -289,7 +289,16 @@ export default function App() {
           .catch(() => {});
       } else if (dirs[k] && cur.layout) {
         const next = L.neighbor(cur.layout, cur.focus, dirs[k]);
-        if (next) patch((t) => ({ ...t, focus: next }));
+        if (next && e.altKey) {
+          // Alt 를 얹으면 포커스가 아니라 pane 이 간다. 포커스는 따로 옮기지
+          // 않는다 — id 가 그대로라 보고 있던 pane 을 그대로 따라가고,
+          // 그래야 연달아 눌러 끝까지 밀어 넣을 수 있다.
+          const from = cur.focus;
+          patch((t) => ({
+            ...t,
+            layout: t.layout ? L.swapLeaves(t.layout, from, next) : t.layout,
+          }));
+        } else if (next) patch((t) => ({ ...t, focus: next }));
       } else handled = false;
 
       if (handled) {
@@ -395,7 +404,9 @@ export default function App() {
         <div className="keys">
 <b>Ctrl+Shift</b> 로
           <br />
-          <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 이동
+          <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 포커스
+          <br />
+          <b>Alt</b>+<b>←↑↓→</b> pane 옮기기
           <br />
           <b>T</b> 새 탭 · <b>PgUp</b>/<b>PgDn</b> 탭
           <br />

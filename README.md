@@ -33,7 +33,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 |---|---|
 | `Ctrl+Shift+D` / `E` | 좌우 / 상하 분할 |
 | `Ctrl+Shift+W` | pane 닫기 |
-| `Ctrl+Shift+←↑↓→` | pane 이동 |
+| `Ctrl+Shift+←↑↓→` | 포커스 이동 |
+| `Ctrl+Shift+Alt+←↑↓→` | pane 을 그 방향 이웃과 맞바꾸기 |
 | `Ctrl+Shift+T` | 새 탭 |
 | `Ctrl+Shift+PgUp` / `PgDn` | 탭 이동 |
 | `Ctrl+Shift+C` / `V` | 복사 / 붙여넣기 |

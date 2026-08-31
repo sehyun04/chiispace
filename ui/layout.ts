@@ -95,6 +95,18 @@ export function setRatio(n: Node, path: number[], ratio: number): Node {
     : { ...n, b: setRatio(n.b, rest, ratio) };
 }
 
+/** 두 pane 의 자리를 맞바꾼다. 배치는 그대로 두고 id 만 바꿔 끼우는 이유:
+ *  React 는 slot 을 id 로 짝지으므로 그 Term 이 언마운트 없이 새 자리로
+ *  옮겨간다 — 트리를 다시 엮으면 그때마다 PTY 가 죽는다. */
+export function swapLeaves(n: Node, a: string, b: string): Node {
+  if (n.kind === "leaf") {
+    if (n.id === a) return { kind: "leaf", id: b };
+    if (n.id === b) return { kind: "leaf", id: a };
+    return n;
+  }
+  return { ...n, a: swapLeaves(n.a, a, b), b: swapLeaves(n.b, a, b) };
+}
+
 /** 포커스를 옮길 이웃 찾기. 중심점에서 그 방향으로 가장 가까운 pane —
  *  트리 순서로 고르면 화면상 옆에 있지 않은 pane 으로 튄다. */
 export function neighbor(n: Node, from: string, dir: "left" | "right" | "up" | "down"): string | null {
