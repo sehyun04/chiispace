@@ -115,54 +115,45 @@ export function Term({
 
     t.onTitleChange((title) => onTitle(id, title));
 
-    // 한글 IME. 두 가지가 깨져 있었다.
+    // 한글 IME.
     //
-    //   1. 조합 중인 자모(ㄱ -> 가 -> 강)가 확정 전에 셸로 샜다. 셸은 그걸
-    //      되돌릴 방법이 없어 확정 글자와 함께 화면에 남는다.
-    //   2. 확정된 글자가 두 번 들어갔다. xterm 은 조합 확정분을 자기 경로로
-    //      한 번 보내고, 브라우저의 input 이벤트로도 한 번 더 받는다 —
-    //      WebView2 에서 그 둘이 다 살아 나오는 때가 있다.
+    // xterm 의 조합 처리에 기대지 않는다. 그쪽은 확정분을 자기 경로로 한 번
+    // 보내고 브라우저의 input 이벤트로도 받는데, 둘 다 setTimeout(0) 뒤에
+    // 도착해서 언제 어떤 모양으로 나올지가 정해져 있지 않다. WebView2 에서는
+    // 둘 다 살아 나와 같은 글자가 두 번 들어가고, 조합 중인 자모까지 샌다.
     //
-    // 조합 상태는 xterm 안에 갇혀 있지 않다. 숨은 textarea 의 composition
-    // 이벤트가 곧 진실이므로 여기서 직접 들고 거른다.
-    //
-    // "조합 중이면 막는다"로는 안 된다. 한글은 종성이 다음 글자의 초성으로
-    // 넘어갈 때 앞 글자를 확정하므로, compositionend 바로 뒤에 다음 조합이
-    // 시작된다. 확정된 "한" 이 도착할 무렵엔 이미 다음 조합 중이라 그것까지
-    // 버려지고, 조합이 끊기는 첫 글자만 통과한다. 그래서 상태가 아니라
-    // **미확정 문자열과 같은지**로 가른다.
-    let pending = "";
+    // 그래서 조합이 열려 있는 동안은 xterm 이 무엇을 보내든 전부 버리고,
+    // 확정된 문자열은 compositionend 에서 우리가 직접 한 번만 보낸다.
+    // 확정분을 우리가 쥐고 있으므로 "확정분이 도착할 때는 이미 다음 조합이
+    // 시작돼 있다"는 한글 특유의 순서 문제도 사라진다 — 받침이 다음 글자의
+    // 초성으로 넘어가며 앞 글자가 확정되는 그 경로다.
+    let composing = false;
     let commit = "";
     let commitAt = 0;
-    let commitSent = false;
+    const send = (data: string) => void invoke("pty_write", { id, data }).catch(() => {});
+
     const ta = t.textarea;
     if (ta) {
       ta.addEventListener("compositionstart", () => {
-        pending = "";
-      });
-      ta.addEventListener("compositionupdate", (e) => {
-        pending = (e as CompositionEvent).data ?? "";
+        composing = true;
       });
       ta.addEventListener("compositionend", (e) => {
-        pending = "";
-        commit = (e as CompositionEvent).data ?? "";
+        composing = false;
+        const text = (e as CompositionEvent).data ?? "";
+        commit = text;
         commitAt = performance.now();
-        commitSent = false;
+        // 조합을 물러서 취소하면 빈 문자열로 끝난다. 보낼 것이 없다.
+        if (text) send(text);
       });
     }
 
     t.onData((data) => {
-      // 아직 조합 중인 그 글자라면 셸이 알 필요가 없다. 조합 중에는 IME 가
-      // 키를 먹으므로 이 값과 같은 입력이 달리 들어올 길이 없다.
-      if (pending && data === pending) return;
-      // 같은 확정분이 창 안에서 두 번 오면 뒤엣것은 중복이다. 같은 글자를
-      // 연달아 친 경우는 compositionend 가 새로 나며 창이 다시 열리므로
-      // 여기서 막히지 않는다.
-      if (commit && data === commit && performance.now() - commitAt < 300) {
-        if (commitSent) return;
-        commitSent = true;
-      }
-      invoke("pty_write", { id, data }).catch(() => {});
+      if (composing) return;
+      // 우리가 방금 보낸 확정분을 xterm 이 한 틱 늦게 또 보낸다. 그 창 안에서
+      // 같은 값이면 그것이다. 한글은 조합을 거치므로 사용자가 이 창 안에
+      // 같은 값을 직접 쳐 넣을 길은 없다.
+      if (commit && data === commit && performance.now() - commitAt < 150) return;
+      send(data);
     });
 
     // 헤드리스 검증용 손잡이. Rust 의 KASASPACE_AUTOSEND 가 이걸 통해 입력을
