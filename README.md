@@ -42,9 +42,20 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 
 ## 실행
 
+개발 중에는:
+
 ```powershell
 npm install
 npm run tauri dev
+```
+
+`tauri dev` 는 **끝나지 않는 명령**이다. 그 셸을 계속 붙잡고 있으니 그냥 쓰려는 거라면
+단독 exe 를 굽는 편이 낫다 — dist 를 안에 박아서 vite 도 터미널도 필요 없다.
+
+```powershell
+npx vite build
+cd src-tauri; cargo build --release
+# -> src-tauri/target/release/kasaspace.exe  (더블클릭으로 뜬다)
 ```
 
 ## 테마
