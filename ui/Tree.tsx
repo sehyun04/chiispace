@@ -53,7 +53,16 @@ function FileIcon() {
   );
 }
 
-export function Tree({ root, git }: { root: string; git: GitInfo }) {
+export function Tree({
+  root,
+  git,
+  onFile,
+}: {
+  root: string;
+  git: GitInfo;
+  /** 파일을 고르면 그 경로가 지금 보고 있는 셸로 간다. 트리는 무엇을 할지 모른다. */
+  onFile: (path: string) => void;
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [kids, setKids] = useState<Record<string, Entry[]>>({});
 
@@ -103,7 +112,7 @@ export function Tree({ root, git }: { root: string; git: GitInfo }) {
           key={e.path}
           className={e.dir ? "row dir" : "row"}
           style={{ paddingLeft: 6 + depth * 13 }}
-          onClick={() => e.dir && toggle(e.path)}
+          onClick={() => (e.dir ? toggle(e.path) : onFile(e.path))}
         >
           {e.dir ? <Chevron open={open.has(e.path)} /> : <span className="tw" />}
           {e.dir ? <FolderIcon /> : <FileIcon />}

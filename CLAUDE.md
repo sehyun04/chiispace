@@ -44,7 +44,7 @@ UI 를 고쳤으면 `npx vite build` 후 `cd src-tauri; cargo build --release --
 
 **pane 간 에이전트 연결** — 이 레포의 본론이자 가장 큰 구멍이다. upstream 에
 `kasa-socket`(cmux 호환 소켓 서버)이 이미 있으니 `kasa-pty` 처럼 당겨 쓰면 된다.
-그 밖에 파일 클릭 동작(지금은 무반응) · 창 분리 · 설정 화면 · 터미널 내 검색이 없다.
+그 밖에 창 분리 · 설정 화면 · 터미널 내 검색이 없다.
 
 ---
 

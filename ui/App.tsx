@@ -20,7 +20,7 @@ type PaneStat = {
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
 
 /** 지금 포커스된 터미널. Term 이 포커스를 받을 때 window 에 올려 둔다. */
-type XTerm = { getSelection(): string; paste(t: string): void };
+type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 const termOf = (): XTerm | undefined => (window as unknown as { __term?: XTerm }).__term;
 
 const leader = roster.leader as Member;
@@ -93,6 +93,29 @@ export default function App() {
     setTabs((ts) => (ts.length <= 1 ? ts : ts.filter((_, k) => k !== i)));
     setActive((a) => (a >= i && a > 0 ? a - 1 : a));
   }, []);
+
+  // 파일을 클릭하면 그 경로를 지금 보고 있는 셸에 넣는다. 여는 게 아니라 넣는
+  // 이유: 여기서 열 앱을 우리가 고르면 .tsx 가 메모장으로 뜬다. 경로만 들어오면
+  // 앞에 vim 이든 code 든 사용자가 이미 치고 있던 것을 그대로 쓴다.
+  const insertPath = useCallback(
+    (p: string) => {
+      // 셸이 지금 서 있는 곳 아래라면 상대 경로가 짧고 읽힌다. cwd 는 엔진이
+      // 알려주는 값이라 사용자가 cd 로 옮겨 다녀도 따라간다.
+      //
+      // cmd.exe 는 cwd 를 보고하지 않아 그 값이 비는 때가 많다. 그때는 셸을
+      // 띄운 폴더로 친다 — cd 를 했다면 어긋나지만, 매번 절대 경로가 통째로
+      // 들어오는 것보다 낫다. 틀리면 셸이 바로 없다고 말해 준다.
+      const cwd = stat[cur.focus]?.cwd ?? cur.root;
+      const rel = cwd && p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
+      // 구분자는 슬래시로 둔다 — cmd·PowerShell·bash 가 다 받는다. 백슬래시는
+      // bash 에서 이스케이프가 되어 경로가 깨진다.
+      const t = termOf();
+      if (!t) return;
+      t.paste(/\s/.test(rel) ? `"${rel}"` : rel);
+      t.focus();
+    },
+    [stat, cur],
+  );
 
   const pick = useCallback(async () => {
     const picked = await invoke<string | null>("fs_pick");
@@ -347,7 +370,7 @@ export default function App() {
                 </span>
               ) : null}
             </div>
-            <Tree root={curRoot} git={git} />
+            <Tree root={curRoot} git={git} onFile={insertPath} />
           </>
         ) : (
           <div className="tree">
