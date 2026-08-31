@@ -125,17 +125,26 @@ export function Term({
     //
     // 조합 상태는 xterm 안에 갇혀 있지 않다. 숨은 textarea 의 composition
     // 이벤트가 곧 진실이므로 여기서 직접 들고 거른다.
-    let composing = false;
+    //
+    // "조합 중이면 막는다"로는 안 된다. 한글은 종성이 다음 글자의 초성으로
+    // 넘어갈 때 앞 글자를 확정하므로, compositionend 바로 뒤에 다음 조합이
+    // 시작된다. 확정된 "한" 이 도착할 무렵엔 이미 다음 조합 중이라 그것까지
+    // 버려지고, 조합이 끊기는 첫 글자만 통과한다. 그래서 상태가 아니라
+    // **미확정 문자열과 같은지**로 가른다.
+    let pending = "";
     let commit = "";
     let commitAt = 0;
     let commitSent = false;
     const ta = t.textarea;
     if (ta) {
       ta.addEventListener("compositionstart", () => {
-        composing = true;
+        pending = "";
+      });
+      ta.addEventListener("compositionupdate", (e) => {
+        pending = (e as CompositionEvent).data ?? "";
       });
       ta.addEventListener("compositionend", (e) => {
-        composing = false;
+        pending = "";
         commit = (e as CompositionEvent).data ?? "";
         commitAt = performance.now();
         commitSent = false;
@@ -143,7 +152,9 @@ export function Term({
     }
 
     t.onData((data) => {
-      if (composing) return; // 확정 전 자모는 셸이 알 필요가 없다
+      // 아직 조합 중인 그 글자라면 셸이 알 필요가 없다. 조합 중에는 IME 가
+      // 키를 먹으므로 이 값과 같은 입력이 달리 들어올 길이 없다.
+      if (pending && data === pending) return;
       // 같은 확정분이 창 안에서 두 번 오면 뒤엣것은 중복이다. 같은 글자를
       // 연달아 친 경우는 compositionend 가 새로 나며 창이 다시 열리므로
       // 여기서 막히지 않는다.
