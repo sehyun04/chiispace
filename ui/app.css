@@ -424,37 +424,51 @@ body {
   background: rgba(0, 0, 0, 0.12);
 }
 
-/* 경계선. 실제 선은 얇지만 잡는 영역은 넓어야 끌 수 있다 */
+/* 경계선. 실제 선은 얇지만 잡는 영역은 넓어야 끌 수 있다.
+ *
+ * 선을 hover 때만 그리면 안 된다 — 끌 수 있는 자리라는 것을 알 방법이 없어
+ * 사용자가 어디를 눌러야 할지 모른 채 pane 사이 빈 틈을 겨냥하게 된다. */
 .seam {
   position: absolute;
   z-index: 3;
 }
 .seam.vert {
   width: 0;
-  margin-left: -5px;
-  padding-left: 10px;
+  margin-left: -7px;
+  padding-left: 14px;
   cursor: col-resize;
 }
 .seam.horz {
   height: 0;
-  margin-top: -5px;
-  padding-top: 10px;
+  margin-top: -7px;
+  padding-top: 14px;
   cursor: row-resize;
 }
-.seam:hover::after,
-body.dragging .seam::after {
+.seam::after {
   content: "";
   position: absolute;
   inset: 0;
   margin: auto;
-  background: var(--sky);
+  background: var(--line);
   border-radius: 2px;
 }
-.seam.vert:hover::after {
-  width: 3px;
+.seam.vert::after {
+  width: 2px;
 }
-.seam.horz:hover::after {
-  height: 3px;
+.seam.horz::after {
+  height: 2px;
+}
+.seam:hover::after,
+body.dragging .seam::after {
+  background: var(--sky);
+}
+.seam.vert:hover::after,
+body.dragging .seam.vert::after {
+  width: 4px;
+}
+.seam.horz:hover::after,
+body.dragging .seam.horz::after {
+  height: 4px;
 }
 
 /* 끄는 동안 pane 이 마우스를 먹으면(특히 xterm) 드래그가 중간에 끊긴다 */

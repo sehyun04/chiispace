@@ -101,7 +101,42 @@ export function Term({
 
     t.onTitleChange((title) => onTitle(id, title));
 
+    // 한글 IME. 두 가지가 깨져 있었다.
+    //
+    //   1. 조합 중인 자모(ㄱ -> 가 -> 강)가 확정 전에 셸로 샜다. 셸은 그걸
+    //      되돌릴 방법이 없어 확정 글자와 함께 화면에 남는다.
+    //   2. 확정된 글자가 두 번 들어갔다. xterm 은 조합 확정분을 자기 경로로
+    //      한 번 보내고, 브라우저의 input 이벤트로도 한 번 더 받는다 —
+    //      WebView2 에서 그 둘이 다 살아 나오는 때가 있다.
+    //
+    // 조합 상태는 xterm 안에 갇혀 있지 않다. 숨은 textarea 의 composition
+    // 이벤트가 곧 진실이므로 여기서 직접 들고 거른다.
+    let composing = false;
+    let commit = "";
+    let commitAt = 0;
+    let commitSent = false;
+    const ta = t.textarea;
+    if (ta) {
+      ta.addEventListener("compositionstart", () => {
+        composing = true;
+      });
+      ta.addEventListener("compositionend", (e) => {
+        composing = false;
+        commit = (e as CompositionEvent).data ?? "";
+        commitAt = performance.now();
+        commitSent = false;
+      });
+    }
+
     t.onData((data) => {
+      if (composing) return; // 확정 전 자모는 셸이 알 필요가 없다
+      // 같은 확정분이 창 안에서 두 번 오면 뒤엣것은 중복이다. 같은 글자를
+      // 연달아 친 경우는 compositionend 가 새로 나며 창이 다시 열리므로
+      // 여기서 막히지 않는다.
+      if (commit && data === commit && performance.now() - commitAt < 300) {
+        if (commitSent) return;
+        commitSent = true;
+      }
       invoke("pty_write", { id, data }).catch(() => {});
     });
 

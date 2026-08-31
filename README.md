@@ -87,6 +87,24 @@ scripts\shot.ps1 -Out shot.png
 `KASASPACE_AUTOSEND` 는 웹뷰의 `term.input()` 을 부른다. 사용자가 키를 친 것과 **같은
 경로**(`onData` → `pty_write`)를 타므로 배선 전체가 검증된다.
 
+`KASASPACE_AUTOMOUSE` 는 셀렉터가 가리키는 요소의 중앙을 눌러 끌고 놓는다.
+
+```powershell
+$env:KASASPACE_AUTOMOUSE = ".page:not(.off) .seam.vert@180,0"   # 경계선을 오른쪽으로 180px
+$env:KASASPACE_AUTOMOUSE = ".tree .row.dir@0,0"                  # 0,0 이면 클릭
+```
+
+경계선 드래그·파일트리처럼 키보드로 못 만드는 경로가 여기에 걸린다. OS 마우스를 움직이지
+않으므로 사용자 창을 건드리지 않는다. 중간 지점을 한 번 거쳐 mousemove 를 두 번 보내므로
+드래그 도중에만 나는 버그도 잡힌다.
+
+`KASASPACE_PROBE` 는 JS 표현식의 결과를 화면 아래 오버레이에 찍는다. 릴리스 웹뷰에는
+콘솔이 없어서 스크린샷에 남기는 것이 유일한 통로다.
+
+```powershell
+$env:KASASPACE_PROBE = "document.querySelectorAll('.pane').length"
+```
+
 OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 다른 창에 있으면 엉뚱한 앱에
 타이핑된다. 실제로 한 번 새어 나갔다.
 

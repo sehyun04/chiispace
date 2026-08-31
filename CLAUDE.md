@@ -71,7 +71,11 @@ UI 를 고쳤으면 `npx vite build` 후 `cd src-tauri; cargo build --release --
 **OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다** — 포커스가 다른 창에 있으면 사용자
 창에 타이핑된다. 실제로 한 번 새어 나갔다. 손잡이가 없으면 앱 안에 env 로 만든다.
 
-사용자에게 넘길 수밖에 없는 것은 **IME 조합과 마우스 조작** 둘뿐이다.
+마우스도 `KASASPACE_AUTOMOUSE`(셀렉터 기준 좌표 드래그·클릭)로 만들 수 있게 됐다.
+`KASASPACE_PROBE` 는 JS 결과를 화면 오버레이로 찍어 준다 — 릴리스 웹뷰에 콘솔이 없어서다.
+
+사용자에게 넘길 수밖에 없는 것은 **IME 조합**뿐이다. 합성 CompositionEvent 로 우리 쪽
+게이트는 검증되지만, 진짜 IME 가 WebView2 에 무엇을 보내는지는 실기로만 알 수 있다.
 
 ## 코드 맵
 

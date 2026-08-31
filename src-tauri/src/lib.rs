@@ -157,6 +157,61 @@ fn arm_autosend(app: &AppHandle) {
         });
     }
 
+    // KASASPACE_AUTOMOUSE="sel@dx,dy; sel2@0,0" — 셀렉터가 가리키는 요소의
+    // 중앙을 눌러 (dx,dy) 만큼 끌고 놓는다. dx=dy=0 이면 그냥 클릭이다.
+    //
+    // 마우스는 사용자에게 떠넘길 수밖에 없던 마지막 구멍이었다. 좌표 기반 드래그를
+    // 여기서 만들어 두면 경계선·파일트리처럼 키보드로 못 만드는 경로도 제품 코드를
+    // 그대로 타면서 검증된다. OS 마우스를 움직이지 않으므로 사용자 창을 건드리지 않는다.
+    if let Ok(spec) = std::env::var("KASASPACE_AUTOMOUSE") {
+        let start = ms("KASASPACE_AUTOMOUSE_MS", 3000);
+        let gap = ms("KASASPACE_AUTOMOUSE_GAP", 700);
+        let w = win.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(start));
+            for step in spec.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+                let (sel, delta) = step.split_once('@').unwrap_or((step, "0,0"));
+                let (dx, dy) = delta.split_once(',').unwrap_or(("0", "0"));
+                let Ok(sel) = serde_json::to_string(sel.trim()) else { continue };
+                let (dx, dy) = (dx.trim(), dy.trim());
+                // 중간 지점을 하나 거쳐야 실제 드래그와 같아진다 — 한 번에 목적지로
+                // 뛰면 mousemove 를 한 번만 보게 되어 중간 상태 버그가 안 잡힌다.
+                let _ = w.eval(&format!(
+                    "(()=>{{const el=document.querySelector({sel});if(!el)return;\
+                     const r=el.getBoundingClientRect();\
+                     const x=r.left+r.width/2,y=r.top+r.height/2;\
+                     const mk=(t,cx,cy)=>new MouseEvent(t,\
+                       {{clientX:cx,clientY:cy,bubbles:true,cancelable:true,buttons:1}});\
+                     el.dispatchEvent(mk('mousedown',x,y));\
+                     window.dispatchEvent(mk('mousemove',x+({dx})/2,y+({dy})/2));\
+                     window.dispatchEvent(mk('mousemove',x+({dx}),y+({dy})));\
+                     window.dispatchEvent(mk('mouseup',x+({dx}),y+({dy})));                     if(({dx})===0&&({dy})===0)el.dispatchEvent(mk('click',x,y));}})()"
+                ));
+                std::thread::sleep(std::time::Duration::from_millis(gap));
+            }
+        });
+    }
+
+    // KASASPACE_PROBE="<js 표현식>" — 결과를 화면 위 오버레이에 찍는다.
+    // 콘솔은 릴리스 웹뷰에서 볼 수 없으니 스크린샷에 남기는 것이 유일한 통로다.
+    if let Ok(expr) = std::env::var("KASASPACE_PROBE") {
+        let delay = ms("KASASPACE_PROBE_MS", 5000);
+        let w = win.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            let Ok(src) = serde_json::to_string(&expr) else { return };
+            let _ = w.eval(&format!(
+                "(()=>{{let out;try{{out=eval({src});}}catch(e){{out='ERR '+e;}}\
+                 const d=document.createElement('pre');\
+                 d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;\
+                   margin:0;padding:8px;max-height:45%;overflow:auto;background:#1c1c1c;\
+                   color:#d8f0c0;font:11px Consolas,monospace;white-space:pre-wrap';\
+                 d.textContent=typeof out==='string'?out:JSON.stringify(out,null,1);\
+                 document.body.appendChild(d);}})()"
+            ));
+        });
+    }
+
     if let Ok(text) = std::env::var("KASASPACE_AUTOSEND") {
         let delay = ms("KASASPACE_AUTOSEND_MS", 3500);
         std::thread::spawn(move || {

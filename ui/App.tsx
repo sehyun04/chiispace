@@ -284,6 +284,13 @@ export default function App() {
     const move = (e: MouseEvent) => {
       const d = drag.current;
       if (!d) return;
+      // 버튼을 놓은 것을 못 본 채로 남았다면 여기서 끝낸다. 창 밖에서 놓으면
+      // mouseup 이 오지 않아, 누르지도 않은 마우스를 경계선이 따라다니고
+      // .slot 의 pointer-events:none 이 남아 pane 클릭까지 죽는다.
+      if (e.buttons === 0) {
+        up();
+        return;
+      }
       const box = d.box.getBoundingClientRect();
       const f =
         d.dir === "h"
@@ -301,9 +308,12 @@ export default function App() {
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
+    // 창이 포커스를 잃는 사이 버튼을 놓으면 mouseup 은 영영 오지 않는다.
+    window.addEventListener("blur", up);
     return () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      window.removeEventListener("blur", up);
     };
   }, [active]);
 
