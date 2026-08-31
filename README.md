@@ -54,7 +54,7 @@ npm run tauri dev
 단독 exe 를 굽는 편이 낫다 — dist 를 안에 박아서 vite 도 터미널도 필요 없다.
 
 ```powershell
-npx vite build
+npm run build          # tsc --noEmit 을 먼저 돈다. npx vite build 는 타입을 안 본다
 cd src-tauri; cargo build --release --features custom-protocol
 # -> src-tauri/target/release/kasaspace.exe  (더블클릭으로 뜬다)
 ```
@@ -132,7 +132,9 @@ OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 �
 - **탭** — 탭마다 자기 배치와 자기 폴더
 - **파일트리 + git** — 브랜치 · ahead/behind · 파일별 M/A/D/? · 접힌 폴더의 변경 표시
 - **pane 헤더** — 실행 중인 명령 이름, 에이전트 표시, 작업 중 바
-- **세션 복원** — 탭 · 배치 · 폴더 · 글자 크기
+- **세션 복원** — 탭 · 배치 · 폴더 · 글자 크기, 그리고 그 pane 이 돌리던 명령을
+  프롬프트에 쳐 둔 채로. 실행까지 하지는 않는다 — 빌드나 배포가 저 혼자 다시 도는 건
+  곤란하다. 프로세스 자체는 앱과 함께 죽었으므로 되살릴 수 있는 것은 여기까지다
 - 복사/붙여넣기(bracketed paste 포함), 글자 크기, 링크 열기, 스크롤백 10000
 - **파일 클릭** — 그 경로가 지금 보고 있는 셸에 들어간다. 셸이 선 곳 기준 상대 경로다
 - 한글 입력·출력(IME 조합 중 자모는 확정 전까지 셸로 가지 않는다), 새 셸은 연 폴더에서 시작

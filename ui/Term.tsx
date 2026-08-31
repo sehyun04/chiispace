@@ -48,6 +48,7 @@ export function Term({
   onTitle,
   cwd,
   fontSize,
+  seed,
 }: {
   id: string;
   focused: boolean;
@@ -55,10 +56,15 @@ export function Term({
   /** 연 폴더가 있으면 새 셸은 거기서 시작한다 — 매번 cd 를 치게 하지 않으려고. */
   cwd?: string;
   fontSize: number;
+  /** 세션을 복원할 때, 이 pane 이 앱을 끄기 전 돌리고 있던 명령. 쳐 놓기만
+   *  하고 실행하지는 않는다 — 빌드나 배포가 저 혼자 다시 도는 건 곤란하다. */
+  seed?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fitter = useRef<FitAddon | null>(null);
+  // 최초 마운트 때의 값만 쓴다. deps 에 넣으면 이 값이 바뀔 때마다 PTY 가 다시 열린다.
+  const seedOnce = useRef(seed);
 
   useEffect(() => {
     const el = host.current;
@@ -94,9 +100,17 @@ export function Term({
       t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );
 
+    let seeded = false;
     listen<{ id: string; b64: string }>("pty:data", (ev) => {
       if (!alive || ev.payload.id !== id) return;
       t.write(decode(ev.payload.b64));
+      // 셸이 첫 출력을 낸 뒤에 얹는다. 프롬프트가 그려지기 전에 넣으면 글자가
+      // 그 뒤에 오는 출력에 묻혀 안 보인다.
+      if (seedOnce.current && !seeded) {
+        seeded = true;
+        const cmd = seedOnce.current;
+        setTimeout(() => alive && t.paste(cmd), 300);
+      }
     }).then((un) => (alive ? unlisteners.push(un) : un()));
 
     t.onTitleChange((title) => onTitle(id, title));

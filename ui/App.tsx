@@ -23,6 +23,9 @@ type Tab = { key: string; layout: L.Node | null; root: string | null; focus: str
 type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 const termOf = (): XTerm | undefined => (window as unknown as { __term?: XTerm }).__term;
 
+/** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
+const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
+
 const leader = roster.leader as Member;
 const members = roster.members as Member[];
 
@@ -45,6 +48,10 @@ export default function App() {
   // 첫 pane 은 열 폴더가 정해진 뒤에 띄운다. 먼저 띄우면 셸이 홈에서 시작해
   // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
   const [booted, setBooted] = useState(false);
+  // 복원된 pane 이 앱을 끄기 전 돌리던 명령. 되살릴 수 있는 것은 여기까지다 —
+  // 프로세스 자체는 앱과 함께 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면
+  // 사용자가 그게 살아 있다고 믿는다.
+  const [seeds, setSeeds] = useState<Record<string, string>>({});
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -136,8 +143,10 @@ export default function App() {
             nextPane?: number;
             nextTab?: number;
             fontSize?: number;
+            procs?: Record<string, string>;
           };
           if (s.fontSize) setFontSize(s.fontSize);
+          if (s.procs) setSeeds(s.procs);
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
           if (typeof s.nextPane === "number") nextPane.current = s.nextPane;
           if (typeof s.nextTab === "number") nextTab.current = s.nextTab;
@@ -161,17 +170,24 @@ export default function App() {
   useEffect(() => {
     if (!booted) return;
     const h = setTimeout(() => {
+      const procs: Record<string, string> = {};
+      for (const [id, p] of Object.entries(stat)) {
+        if (p.proc && !SHELLS.has(p.proc.toLowerCase())) procs[id] = p.proc;
+      }
       const json = JSON.stringify({
         tabs,
         active,
         nextPane: nextPane.current,
         nextTab: nextTab.current,
         fontSize,
+        procs,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
-  }, [tabs, active, fontSize, booted]);
+    // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
+    // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
+  }, [tabs, active, fontSize, booted, stat]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -477,6 +493,7 @@ export default function App() {
                           onTitle={onTitle}
                           cwd={t.root ?? undefined}
                           fontSize={fontSize}
+                          seed={seeds[s.id]}
                         />
                       </section>
                     </div>

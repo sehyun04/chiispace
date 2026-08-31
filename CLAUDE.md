@@ -37,8 +37,9 @@ src-tauri/target/release/kasaspace.exe
 **`npm run tauri dev` 를 `!` 로 돌리지 마라.** 끝나지 않는 명령이라 셸을 붙잡은 채
 출력이 안 보여서, 직전 세션이 "앱이 안 뜬다"고 오진하고 한참 헤맸다. 실제로는 잘 떠 있었다.
 단독 exe 는 dist 가 안에 박혀 있어 vite 도 터미널도 안 붙잡고, 더블클릭으로 뜬다.
-UI 를 고쳤으면 `npx vite build` 후 `cd src-tauri; cargo build --release --features custom-protocol`
-으로 다시 굽는다. feature 를 빠뜨리면 exe 가 vite 를 찾다가 연결 거부 페이지만 띄운다.
+UI 를 고쳤으면 `npm run build` 후 `cd src-tauri; cargo build --release --features custom-protocol`
+으로 다시 굽는다. **`npx vite build` 를 직접 부르지 마라** — esbuild 는 타입을 안 봐서
+prop 하나를 구조분해에서 빠뜨린 것도 통과시키고, 흰 화면으로만 드러난다. 실제로 밟았다. feature 를 빠뜨리면 exe 가 vite 를 찾다가 연결 거부 페이지만 띄운다.
 
 ### 다음에 할 것
 
