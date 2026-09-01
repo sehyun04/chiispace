@@ -152,6 +152,65 @@ fn pick_num(s: &str, key: &str) -> u32 {
         .unwrap_or(0)
 }
 
+// ── claude 대화 ──────────────────────────────────────────────────
+//
+// claude 는 대화를 `~/.claude/projects/<경로별 폴더>/<세션 UUID>.jsonl` 에 쌓는다.
+// 파일 이름이 곧 세션 ID 라, 그것을 알면 `claude --resume <id>` 로 그 대화를
+// 정확히 다시 열 수 있다. `--continue` 로는 안 된다 — 그건 "그 폴더의 가장 최근"
+// 이라서, pane 이 여럿이면 전부 같은 대화로 몰리고 다른 창에서 claude 를 돌리면
+// 엉뚱한 것이 열린다.
+
+#[derive(serde::Serialize)]
+pub struct ClaudeSession {
+    id: String,
+    /// 마지막으로 쓰인 시각(ms). 어느 pane 의 대화인지는 이걸로 가린다.
+    mtime: u64,
+}
+
+/// 경로를 폴더 이름과 맞대 보기 위한 정규화. claude 가 쓰는 인코딩 규칙을
+/// 그대로 흉내 내지 않는다 — 구분자와 대소문자 처리가 바뀌면 조용히 못 찾게 된다.
+/// 영숫자만 남겨 비교하면 규칙을 몰라도 같은 폴더를 짚는다.
+fn squash(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+#[tauri::command]
+pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
+    use tauri::Manager;
+    let Ok(home) = app.path().home_dir() else {
+        return Vec::new();
+    };
+    let want = squash(&root);
+    let Ok(dirs) = std::fs::read_dir(home.join(".claude").join("projects")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for d in dirs.flatten() {
+        if squash(&d.file_name().to_string_lossy()) != want {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(d.path()) else { continue };
+        for f in files.flatten() {
+            let name = f.file_name().to_string_lossy().to_string();
+            let Some(id) = name.strip_suffix(".jsonl") else { continue };
+            let mtime = f
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push(ClaudeSession { id: id.to_string(), mtime });
+        }
+    }
+    // 최근 것이 앞에. 방금 뜬 claude 의 대화를 찾는 일이라 그 순서가 곧 답이다.
+    out.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    out
+}
+
 // ── 세션 ─────────────────────────────────────────────────────────
 //
 // 배치와 연 폴더만 저장한다. PTY 는 되살리지 않는다 — 프로세스는 앱과 함께

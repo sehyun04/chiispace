@@ -270,6 +270,7 @@ pub fn run() {
             workspace::fs_list,
             workspace::fs_pick,
             workspace::git_status,
+            workspace::claude_sessions,
             workspace::state_save,
             workspace::state_load,
         ])

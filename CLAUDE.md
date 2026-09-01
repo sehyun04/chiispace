@@ -104,12 +104,25 @@ prop 하나를 구조분해에서 빠뜨린 것도 통과시키고, 흰 화면�
    불러오는 것뿐이라 부작용이 없다. 반면 빌드·배포 같은 일반 명령은 여전히 쳐 두기만
    한다. 실행은 `pty_write` 로 보낸다 — `paste` 는 bracketed paste 로 감싸서 셸이
    명령으로 실행하지 않는다.
-10. **`CLAUDE_CODE_CHILD_SESSION` 을 물려주지 않는다.** 이 앱이 claude code 안에서
+10. **claude 는 `--continue` 가 아니라 `--resume <세션 ID>` 로 되살린다.** `--continue` 는
+   "그 폴더의 가장 최근"이라 pane 이 여럿이면 전부 같은 대화로 몰리고, 다른 창에서
+   claude 를 돌리면 엉뚱한 것이 열린다. 대화는 `~/.claude/projects/<경로별 폴더>/<UUID>.jsonl`
+   이고 파일 이름이 곧 세션 ID다. pane 에서 claude 가 잡히면 잠시 뒤 그 폴더에서 아직
+   다른 pane 이 가져가지 않은 가장 최근 파일을 그 pane 에 붙인다. 폴더는 claude 의 인코딩
+   규칙을 흉내 내지 말고 **영숫자만 남겨 비교**해서 찾는다 — 구분자·대소문자 처리가 바뀌면
+   조용히 못 찾게 된다.
+11. **`CLAUDE_CODE_CHILD_SESSION` 을 물려주지 않는다.** 이 앱이 claude code 안에서
    실행되면 그 표시를 상속하고, pane 에서 띄운 claude 가 "Transcript saving is off" 로
    뜬다. 대화가 저장되지 않으니 다음에 `--continue` 로 이어 열 것도 없다 — 세션 복원이
    조용히 무의미해진다. 앱 시작 때 `remove_var` 로 끊는다.
 
 `tap_bytes_with_snapshot()` 을 구독 등록과 화면 채취 둘로 쪼개지 않는 이유는 README 에 있다.
+
+**`stat` 을 effect deps 로 쓸 때 800ms 보다 긴 타이머를 걸지 마라.** `pane_status` 폴링이
+800ms 마다 새 객체를 주므로 effect 가 그 주기로 재실행되고, 그보다 긴 타이머는 매번
+취소되었다가 다시 걸려 **영영 터지지 않는다**. 세션 ID 를 붙이는 2.5초 타이머가 이걸로
+한 번 죽었다(저장 쪽 400ms 는 우연히 짧아서 살아남았다). 목록처럼 값이 같으면 참조도
+같아지는 형태(정렬된 문자열)로 좁혀 deps 에 넣는다.
 
 ## 자율 테스트 우선
 

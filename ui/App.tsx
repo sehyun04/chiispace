@@ -45,10 +45,15 @@ const termOf = (id?: string): XTerm | undefined =>
  *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
 type Seed = { cmd: string; auto?: boolean };
 
-function restoreCmd(p: PaneStat): Seed | null {
+function restoreCmd(p: PaneStat, sid?: string): Seed | null {
   // 에이전트는 이어 열어 준다. 이건 대화를 불러오는 것뿐이라 부작용이 없고,
   // 명령만 쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다.
-  if (p.agent === "claude") return { cmd: "claude --continue", auto: true };
+  //
+  // 세션 ID 를 알면 그것을 짚는다. --continue 는 "그 폴더의 가장 최근" 이라
+  // pane 이 여럿이면 전부 같은 대화로 몰리고, 다른 창에서 claude 를 돌리면
+  // 엉뚱한 것이 열린다. 못 찾았을 때만 --continue 로 물러선다.
+  if (p.agent === "claude")
+    return { cmd: sid ? `claude --resume ${sid}` : "claude --continue", auto: true };
   if (p.agent) return { cmd: p.agent, auto: true };
   // 그 밖의 명령은 쳐 놓기만 한다. 빌드나 배포가 저 혼자 다시 도는 건 곤란하다.
   if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return { cmd: p.proc };
@@ -93,6 +98,9 @@ export default function App() {
   // 목록을 주고, 그 순간 저장이 돌면서 되살릴 정보가 통째로 지워진다.
   // 배치(tabs)는 그대로라 배치만 남고 명령만 날아간다.
   const procs = useRef<Record<string, Seed>>({});
+  // pane 이 어느 claude 대화를 붙들고 있는지. 한 번 정해지면 그대로 둔다 —
+  // 그 pane 의 claude 가 계속 같은 파일에 쓰고 있으므로 다시 고를 이유가 없다.
+  const sessionOf = useRef<Record<string, string>>({});
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -292,14 +300,60 @@ export default function App() {
     };
   }, []);
 
+  // claude 가 도는 pane 의 목록. 문자열로 좁혀 두는 이유는 바로 아래 있다.
+  const claudePanes = Object.entries(stat)
+    .filter(([, p]) => p.agent === "claude")
+    .map(([id]) => id)
+    .sort()
+    .join(",");
+
+  // claude 가 도는 pane 에 그 대화를 붙여 둔다. claude 는 대화를 프로젝트 폴더
+  // 아래 <세션 UUID>.jsonl 로 쌓으므로, 방금 뜬 claude 의 것은 가장 최근에 쓰인
+  // 파일이다. 이미 다른 pane 이 가져간 것은 건너뛴다 — 두 pane 이 같은 대화를
+  // 가리키면 복원할 때 둘 다 같은 자리로 열린다.
+  //
+  // deps 에 stat 을 그대로 두면 안 된다. stat 은 800ms 마다 새 객체로 오므로
+  // 그보다 긴 타이머는 매번 취소되고 다시 걸려 영영 터지지 않는다. 값이 같으면
+  // 참조도 같은 문자열로 좁혀서 목록이 실제로 바뀔 때만 다시 돈다.
+  useEffect(() => {
+    if (!curRoot || !claudePanes) return;
+    const want = claudePanes.split(",").filter((id) => !sessionOf.current[id]);
+    if (!want.length) return;
+    let alive = true;
+    // 파일이 만들어질 틈을 준다. claude 가 뜨자마자 첫 줄을 쓰지는 않는다.
+    const h = setTimeout(() => {
+      invoke<{ id: string; mtime: number }[]>("claude_sessions", { root: curRoot })
+        .then((list) => {
+          if (!alive) return;
+          const taken = new Set(Object.values(sessionOf.current));
+          for (const paneId of want) {
+            const free = list.find((c) => !taken.has(c.id));
+            if (!free) break;
+            sessionOf.current[paneId] = free.id;
+            taken.add(free.id);
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => {
+      alive = false;
+      clearTimeout(h);
+    };
+  }, [claudePanes, curRoot]);
+
   // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
   // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
   // 이미 죽었다"일 수 있고, 그 둘을 스냅샷만으로는 구별할 수 없다.
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
-      const name = restoreCmd(p);
+      const name = restoreCmd(p, sessionOf.current[id]);
       if (name) procs.current[id] = name;
-      else delete procs.current[id];
+      else {
+        delete procs.current[id];
+        // claude 가 내려갔으면 붙여 둔 대화도 놓는다. 그 pane 에서 다음에
+        // 띄우는 것은 다른 대화일 수 있다.
+        delete sessionOf.current[id];
+      }
     }
   }, [stat]);
 
