@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+// 웹뷰의 navigator.clipboard 가 아니라 OS 클립보드로 간다. 그쪽은 창이
+// 포커스를 갖고 있어야 하고 읽기에는 권한이 따로 걸려, WebView2 에서
+// NotAllowedError 로 조용히 거부되는 때가 있다.
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import roster from "./roster.json";
 import { Term } from "./Term";
 import { Tree, EMPTY_GIT, type GitInfo } from "./Tree";
@@ -300,12 +304,11 @@ export default function App() {
         // 선택이 없으면 아무 일도 안 한다. 터미널에서 Ctrl+Shift+C 는 복사지
         // 인터럽트가 아니다 — 그건 Ctrl+C 고, 그쪽은 셸로 그냥 흘려보낸다.
         const sel = termOf()?.getSelection();
-        if (sel) void navigator.clipboard.writeText(sel).catch(() => {});
+        if (sel) void writeText(sel).catch(() => {});
       } else if (k === "v") {
         // term.paste 를 거쳐야 한다. 셸이 bracketed paste 를 켰으면 앞뒤에
         // ESC[200~ / ESC[201~ 를 붙여야 하고, 그 판단은 xterm 이 들고 있다.
-        void navigator.clipboard
-          .readText()
+        void readText()
           .then((txt) => txt && termOf()?.paste(txt))
           .catch(() => {});
       } else if (dirs[k] && cur.layout) {

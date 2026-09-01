@@ -230,6 +230,10 @@ pub fn run() {
             arm_autosend(app.handle());
             Ok(())
         })
+        // 복사·붙여넣기는 웹뷰가 아니라 OS 클립보드로 간다. navigator.clipboard 는
+        // 창이 포커스를 갖고 있어야 하고 읽기에는 권한이 따로 걸려서, WebView2
+        // 에서 조용히 NotAllowedError 로 거부되는 때가 있다.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![

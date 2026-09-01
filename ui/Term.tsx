@@ -145,6 +145,25 @@ export function Term({
         // 조합을 물러서 취소하면 빈 문자열로 끝난다. 보낼 것이 없다.
         if (text) send(text);
       });
+
+      // compositionend 는 안 오는 때가 있다 — 조합 도중에 다른 pane 을
+      // 누르거나, 탭을 바꾸거나, pane 을 끌어 옮겨 DOM 이 움직이거나, 창이
+      // 포커스를 잃거나. 그러면 composing 이 true 로 박혀 그 pane 이 통째로
+      // 먹통이 된다: 한글도 영문도 백스페이스도 안 먹는다. 조합을 여는 쪽만
+      // 있고 닫는 쪽이 하나뿐이면 언젠가 반드시 이렇게 된다.
+      ta.addEventListener("blur", () => {
+        composing = false;
+      });
+      // 브라우저가 키 이벤트에 실어 주는 조합 상태가 진실이다. 무슨 이유로
+      // compositionend 를 놓쳤든 다음 키 한 번에 풀린다. keyCode 229 는
+      // IME 가 그 키를 삼키는 중이라는 표시라 조합으로 친다.
+      ta.addEventListener(
+        "keydown",
+        (e) => {
+          if (!e.isComposing && e.keyCode !== 229) composing = false;
+        },
+        true,
+      );
     }
 
     t.onData((data) => {
