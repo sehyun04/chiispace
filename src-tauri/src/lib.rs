@@ -8,7 +8,13 @@
 mod workspace;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+/// 앱이 닫히는 중인지. 종료할 때 PTY 가 줄줄이 죽는데, 그 부고가 웹뷰에
+/// 닿으면 웹뷰는 그것을 "사용자가 exit 을 쳤다"와 구별할 수 없어 pane 을
+/// 지운다. 그 빈 배치가 세션 파일에 저장되면 다음에 켤 때 전부 날아간다.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
@@ -67,7 +73,11 @@ fn pty_open(
                 break; // 웹뷰가 사라졌다.
             }
         }
-        sink.emit("pty:exit", pane).ok();
+        // 닫히는 중이라면 알리지 않는다. 이 부고는 "이 pane 을 배치에서
+        // 지워라"는 뜻인데, 종료 중에는 지울 배치가 곧 저장될 상태다.
+        if !SHUTTING_DOWN.load(Ordering::SeqCst) {
+            sink.emit("pty:exit", pane).ok();
+        }
     });
 
     panes.0.lock().unwrap().insert(id, session);
@@ -225,6 +235,14 @@ fn arm_autosend(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|_win, event| {
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
+            ) {
+                SHUTTING_DOWN.store(true, Ordering::SeqCst);
+            }
+        })
         .setup(|app| {
             app.manage(Panes::default());
             arm_autosend(app.handle());

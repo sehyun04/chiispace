@@ -160,7 +160,12 @@ export function Term({
       ta.addEventListener(
         "keydown",
         (e) => {
-          if (!e.isComposing && e.keyCode !== 229) composing = false;
+          // keyCode 229 를 예외로 두면 안 된다. 한글 IME 는 조합을 여는 첫 키도
+          // 229 로 주는데 그 시점의 isComposing 은 아직 false 다. 예외를 두면
+          // 플래그가 잘못 켜져 있을 때 한글로는 영영 못 푼다 — 치면 칠수록
+          // 229 만 오니 계속 먹통이다. isComposing 하나만 본다. 조합이 진짜로
+          // 열리는 것은 이 keydown 바로 뒤의 compositionstart 다.
+          if (!e.isComposing) composing = false;
         },
         true,
       );
@@ -222,6 +227,12 @@ export function Term({
 
   // 포커스는 xterm 의 숨은 textarea 가 갖는다. 분할 직후 새 pane 으로 바로
   // 칠 수 있어야 하므로 여기서 옮겨 준다.
+  //
+  // 이것만으로는 모자란다. focused 값이 그대로인 채로 포커스를 잃는 경로가
+  // 있어서다 — 배치가 바뀌면 React 가 slot DOM 을 실제로 옮기고(insertBefore),
+  // DOM 이 움직이면 그 안의 textarea 는 blur 된다. 그때는 prop 이 안 변하니
+  // 이 effect 가 다시 돌지 않는다. 그래서 App 이 `__terms[id].focus()` 로
+  // 직접 되돌릴 수 있게 열어 둔다.
   useEffect(() => {
     if (!focused) return;
     term.current?.focus();

@@ -23,9 +23,16 @@ type PaneStat = {
 /** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
 
-/** 지금 포커스된 터미널. Term 이 포커스를 받을 때 window 에 올려 둔다. */
 type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
-const termOf = (): XTerm | undefined => (window as unknown as { __term?: XTerm }).__term;
+
+/** pane id 로 그 터미널을 찾는다.
+ *
+ *  전역 `__term` 하나로 "지금 터미널"을 들고 있었는데, 그 값은 Term 의
+ *  focused effect 에서만 갱신된다. pane 을 옮기면 focus 는 그대로라 effect 가
+ *  돌지 않아 값이 낡고, 복사·붙여넣기가 엉뚱한 pane 을 보거나 아무 일도 안
+ *  하게 된다. 어느 pane 이 포커스인지는 App 이 이미 알고 있으니 그것으로 찾는다. */
+const termOf = (id?: string): XTerm | undefined =>
+  id ? (window as unknown as { __terms?: Record<string, XTerm> }).__terms?.[id] : undefined;
 
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
@@ -125,7 +132,7 @@ export default function App() {
       const rel = cwd && p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
       // 구분자는 슬래시로 둔다 — cmd·PowerShell·bash 가 다 받는다. 백슬래시는
       // bash 에서 이스케이프가 되어 경로가 깨진다.
-      const t = termOf();
+      const t = termOf(cur.focus);
       if (!t) return;
       t.paste(/\s/.test(rel) ? `"${rel}"` : rel);
       t.focus();
@@ -178,6 +185,11 @@ export default function App() {
   // 배치가 바뀔 때마다 저장. 경계선을 끄는 동안 초당 수십 번 바뀌므로 묶어서 쓴다.
   useEffect(() => {
     if (!booted) return;
+    // pane 이 하나도 안 남은 상태는 저장하지 않는다. 앱을 끌 때 PTY 가 줄줄이
+    // 죽으며 그 부고가 pane 을 다 지우는 경로가 있는데, 그것이 저장되면 다음에
+    // 켤 때 배치가 통째로 날아간다. Rust 쪽에서 종료 중 부고를 막고 있지만,
+    // 저장은 되돌릴 수 없는 쪽이라 여기서도 막는다.
+    if (tabs.every((t) => !t.layout)) return;
     const h = setTimeout(() => {
       const procs: Record<string, string> = {};
       for (const [id, p] of Object.entries(stat)) {
@@ -303,13 +315,13 @@ export default function App() {
       else if (k === "c") {
         // 선택이 없으면 아무 일도 안 한다. 터미널에서 Ctrl+Shift+C 는 복사지
         // 인터럽트가 아니다 — 그건 Ctrl+C 고, 그쪽은 셸로 그냥 흘려보낸다.
-        const sel = termOf()?.getSelection();
+        const sel = termOf(cur.focus)?.getSelection();
         if (sel) void writeText(sel).catch(() => {});
       } else if (k === "v") {
         // term.paste 를 거쳐야 한다. 셸이 bracketed paste 를 켰으면 앞뒤에
         // ESC[200~ / ESC[201~ 를 붙여야 하고, 그 판단은 xterm 이 들고 있다.
         void readText()
-          .then((txt) => txt && termOf()?.paste(txt))
+          .then((txt) => txt && termOf(cur.focus)?.paste(txt))
           .catch(() => {});
       } else if (dirs[k] && cur.layout) {
         const next = L.neighbor(cur.layout, cur.focus, dirs[k]);
@@ -363,6 +375,15 @@ export default function App() {
       window.removeEventListener("blur", up);
     };
   }, [active]);
+
+  // 배치가 바뀌면 React 가 slot DOM 을 실제로 옮기고(insertBefore), 그때 xterm 의
+  // 숨은 textarea 가 포커스를 잃는다. Term 쪽 effect 는 focused prop 이 그대로라
+  // 다시 돌지 않으므로 여기서 되돌린다. 이걸 안 하면 pane 을 옮긴 뒤 그 pane 에
+  // 아무것도 못 친다 — 한글도 영문도 백스페이스도.
+  useEffect(() => {
+    if (!booted) return;
+    termOf(cur?.focus)?.focus();
+  }, [cur?.layout, cur?.focus, active, booted]);
 
   // pane 을 헤더째 끌어 옮기기. 가운데에 놓으면 자리 맞바꾸기, 가장자리에
   // 놓으면 그쪽으로 갈라 붙인다 — 배치를 한 번에 원하는 모양으로 만들려면
@@ -520,14 +541,23 @@ export default function App() {
                     <div key={s.id} data-pane={s.id} className="slot" style={pct(s.rect)}>
                       <section
                         className={ti === active && t.focus === s.id ? "pane on" : "pane"}
-                        onMouseDown={() =>
-                          setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: s.id } : x)))
-                        }
+                        onMouseDown={() => {
+                          setTabs((ts) =>
+                            ts.map((x, i) => (i === ti ? { ...x, focus: s.id } : x)),
+                          );
+                          // 이미 focus 인 pane 을 다시 누르면 state 가 안 바뀌어
+                          // Term 의 effect 가 돌지 않는다. 포커스를 잃은 채였다면
+                          // 클릭해도 안 살아나므로 여기서 직접 준다.
+                          termOf(s.id)?.focus();
+                        }}
                       >
                         <header
                           className="pane-head"
                           onMouseDown={(e) => {
                             if (e.button !== 0) return;
+                            // 이걸 안 하면 헤더를 잡는 순간 포커스가 터미널에서
+                            // 헤더로 빠진다.
+                            e.preventDefault();
                             const stage = e.currentTarget.closest(".stage");
                             if (!stage) return;
                             paneDrag.current = { from: s.id, box: stage as HTMLElement };
