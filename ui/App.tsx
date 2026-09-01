@@ -34,6 +34,22 @@ type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 const termOf = (id?: string): XTerm | undefined =>
   id ? (window as unknown as { __terms?: Record<string, XTerm> }).__terms?.[id] : undefined;
 
+/** 이 pane 을 되살리려면 무엇을 쳐야 하는가.
+ *
+ *  `proc` 만 보면 안 된다. 엔진은 전경 프로세스 이름과 에이전트를 따로 판정하는데,
+ *  claude 처럼 자기 프로세스 트리를 여러 겹 두는 것은 이름 쪽이 비고 에이전트 쪽만
+ *  잡히는 때가 있다. 그때 `proc` 만 보면 claude 를 켜 둔 채로 껐는데도 아무것도
+ *  기억하지 못한다.
+ *
+ *  claude 는 이전 대화를 이어 여는 방법이 따로 있다. 세션을 되돌리려는 참이니
+ *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
+function restoreCmd(p: PaneStat): string | null {
+  if (p.agent === "claude") return "claude --continue";
+  if (p.agent) return p.agent;
+  if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return p.proc;
+  return null;
+}
+
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
 
@@ -63,6 +79,11 @@ export default function App() {
   // 프로세스 자체는 앱과 함께 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면
   // 사용자가 그게 살아 있다고 믿는다.
   const [seeds, setSeeds] = useState<Record<string, string>>({});
+  // pane 이 무엇을 돌리고 있었는지를 누적해 둔다. 순간 스냅샷(stat)으로만
+  // 계산하면 안 된다 — 앱을 끌 때 PTY 가 먼저 사라지면 pane_status 가 빈
+  // 목록을 주고, 그 순간 저장이 돌면서 되살릴 정보가 통째로 지워진다.
+  // 배치(tabs)는 그대로라 배치만 남고 명령만 날아간다.
+  const procs = useRef<Record<string, string>>({});
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -191,9 +212,10 @@ export default function App() {
     // 저장은 되돌릴 수 없는 쪽이라 여기서도 막는다.
     if (tabs.every((t) => !t.layout)) return;
     const h = setTimeout(() => {
-      const procs: Record<string, string> = {};
-      for (const [id, p] of Object.entries(stat)) {
-        if (p.proc && !SHELLS.has(p.proc.toLowerCase())) procs[id] = p.proc;
+      const live = new Set(tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : [])));
+      const saved: Record<string, string> = {};
+      for (const [id, cmd] of Object.entries(procs.current)) {
+        if (live.has(id)) saved[id] = cmd;
       }
       const json = JSON.stringify({
         tabs,
@@ -201,7 +223,7 @@ export default function App() {
         nextPane: nextPane.current,
         nextTab: nextTab.current,
         fontSize,
-        procs,
+        procs: saved,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
@@ -253,6 +275,17 @@ export default function App() {
       clearInterval(h);
     };
   }, []);
+
+  // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
+  // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
+  // 이미 죽었다"일 수 있고, 그 둘을 스냅샷만으로는 구별할 수 없다.
+  useEffect(() => {
+    for (const [id, p] of Object.entries(stat)) {
+      const name = restoreCmd(p);
+      if (name) procs.current[id] = name;
+      else delete procs.current[id];
+    }
+  }, [stat]);
 
   // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는
   // 동작이다. 어느 탭에 있든 지워야 한다.
@@ -538,7 +571,14 @@ export default function App() {
               <div key={t.key} className={ti === active ? "page" : "page off"}>
                 <div className="stage">
                   {(t.layout ? L.rects(t.layout) : []).map((s) => (
-                    <div key={s.id} data-pane={s.id} className="slot" style={pct(s.rect)}>
+                    <div
+                      key={s.id}
+                      data-pane={s.id}
+                      data-proc={stat[s.id]?.proc ?? ""}
+                      data-agent={stat[s.id]?.agent ?? ""}
+                      className="slot"
+                      style={pct(s.rect)}
+                    >
                       <section
                         className={ti === active && t.focus === s.id ? "pane on" : "pane"}
                         onMouseDown={() => {
