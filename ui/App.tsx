@@ -43,12 +43,21 @@ const termOf = (id?: string): XTerm | undefined =>
  *
  *  claude 는 이전 대화를 이어 여는 방법이 따로 있다. 세션을 되돌리려는 참이니
  *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
-function restoreCmd(p: PaneStat): string | null {
-  if (p.agent === "claude") return "claude --continue";
-  if (p.agent) return p.agent;
-  if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return p.proc;
+type Seed = { cmd: string; auto?: boolean };
+
+function restoreCmd(p: PaneStat): Seed | null {
+  // 에이전트는 이어 열어 준다. 이건 대화를 불러오는 것뿐이라 부작용이 없고,
+  // 명령만 쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다.
+  if (p.agent === "claude") return { cmd: "claude --continue", auto: true };
+  if (p.agent) return { cmd: p.agent, auto: true };
+  // 그 밖의 명령은 쳐 놓기만 한다. 빌드나 배포가 저 혼자 다시 도는 건 곤란하다.
+  if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return { cmd: p.proc };
   return null;
 }
+
+/** 예전 세션은 명령을 문자열로만 적어 두었다. */
+const asSeed = (v: unknown): Seed | null =>
+  typeof v === "string" ? { cmd: v } : v && typeof v === "object" ? (v as Seed) : null;
 
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
@@ -78,12 +87,12 @@ export default function App() {
   // 복원된 pane 이 앱을 끄기 전 돌리던 명령. 되살릴 수 있는 것은 여기까지다 —
   // 프로세스 자체는 앱과 함께 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면
   // 사용자가 그게 살아 있다고 믿는다.
-  const [seeds, setSeeds] = useState<Record<string, string>>({});
+  const [seeds, setSeeds] = useState<Record<string, Seed>>({});
   // pane 이 무엇을 돌리고 있었는지를 누적해 둔다. 순간 스냅샷(stat)으로만
   // 계산하면 안 된다 — 앱을 끌 때 PTY 가 먼저 사라지면 pane_status 가 빈
   // 목록을 주고, 그 순간 저장이 돌면서 되살릴 정보가 통째로 지워진다.
   // 배치(tabs)는 그대로라 배치만 남고 명령만 날아간다.
-  const procs = useRef<Record<string, string>>({});
+  const procs = useRef<Record<string, Seed>>({});
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -180,10 +189,17 @@ export default function App() {
             nextPane?: number;
             nextTab?: number;
             fontSize?: number;
-            procs?: Record<string, string>;
+            procs?: Record<string, unknown>;
           };
           if (s.fontSize) setFontSize(s.fontSize);
-          if (s.procs) setSeeds(s.procs);
+          if (s.procs) {
+            const m: Record<string, Seed> = {};
+            for (const [id, v] of Object.entries(s.procs)) {
+              const seed = asSeed(v);
+              if (seed) m[id] = seed;
+            }
+            setSeeds(m);
+          }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
           if (typeof s.nextPane === "number") nextPane.current = s.nextPane;
           if (typeof s.nextTab === "number") nextTab.current = s.nextTab;
@@ -213,7 +229,7 @@ export default function App() {
     if (tabs.every((t) => !t.layout)) return;
     const h = setTimeout(() => {
       const live = new Set(tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : [])));
-      const saved: Record<string, string> = {};
+      const saved: Record<string, Seed> = {};
       for (const [id, cmd] of Object.entries(procs.current)) {
         if (live.has(id)) saved[id] = cmd;
       }

@@ -244,6 +244,12 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // 이 앱이 claude code 안에서 실행되면 자식 세션 표시를 물려받는데,
+            // 그러면 pane 에서 띄운 claude 가 "Transcript saving is off" 로 뜬다.
+            // 대화가 저장되지 않으니 다음에 --continue 로 이어 열 것도 없다.
+            // 여기서 끊어 두면 pane 의 셸은 독립 세션으로 시작한다.
+            std::env::remove_var("CLAUDE_CODE_CHILD_SESSION");
+
             app.manage(Panes::default());
             arm_autosend(app.handle());
             Ok(())

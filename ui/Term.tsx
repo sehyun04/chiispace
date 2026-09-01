@@ -56,9 +56,12 @@ export function Term({
   /** 연 폴더가 있으면 새 셸은 거기서 시작한다 — 매번 cd 를 치게 하지 않으려고. */
   cwd?: string;
   fontSize: number;
-  /** 세션을 복원할 때, 이 pane 이 앱을 끄기 전 돌리고 있던 명령. 쳐 놓기만
-   *  하고 실행하지는 않는다 — 빌드나 배포가 저 혼자 다시 도는 건 곤란하다. */
-  seed?: string;
+  /** 세션을 복원할 때, 이 pane 이 앱을 끄기 전 돌리고 있던 것.
+   *
+   *  `auto` 면 실행까지 한다. 에이전트를 이어 여는 것은 부작용이 없고, 명령만
+   *  쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다. 그 밖의 명령은
+   *  쳐 놓기만 한다 — 빌드나 배포가 저 혼자 다시 도는 건 곤란하다. */
+  seed?: { cmd: string; auto?: boolean };
 }) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
@@ -108,8 +111,14 @@ export function Term({
       // 그 뒤에 오는 출력에 묻혀 안 보인다.
       if (seedOnce.current && !seeded) {
         seeded = true;
-        const cmd = seedOnce.current;
-        setTimeout(() => alive && t.paste(cmd), 300);
+        const { cmd, auto } = seedOnce.current;
+        setTimeout(() => {
+          if (!alive) return;
+          // 실행은 pty_write 로 직접 보낸다. paste 는 bracketed paste 로 감싸서
+          // 셸이 그것을 명령으로 실행하지 않고 입력으로만 받는다.
+          if (auto) send(cmd + "\r");
+          else t.paste(cmd);
+        }, 500);
       }
     }).then((un) => (alive ? unlisteners.push(un) : un()));
 
