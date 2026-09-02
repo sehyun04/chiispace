@@ -116,81 +116,86 @@ body {
   margin-left: 4px;
 }
 
-/* 트리가 사이드바의 주인이다 — 로스터는 아래에서 남는 만큼만 쓴다 */
-.tree {
+/* pane 목록이 사이드바의 주인이다 — 로스터는 아래에서 남는 만큼만 쓴다.
+ *
+ * 파일 탐색기를 걷어낸 자리다. 파일을 뒤지는 일은 pane 안의 에이전트가 하고,
+ * 여기서 알고 싶은 것은 "어느 칸에서 무엇이 돌고 있나" 하나다. */
+.panes {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 0 6px 8px;
 }
 
-.row {
+.prow {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  border-radius: 7px;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
   white-space: nowrap;
-  cursor: default;
-}
-.row.dir {
   cursor: pointer;
 }
-.row:hover {
+.prow:hover {
   background: var(--paper);
 }
-.row .tw {
-  width: 10px;
+.prow.on {
+  background: var(--sky);
+  color: #fff;
+}
+/* 다른 탭에 있는 pane. 목록에는 남기되 지금 보고 있는 것과 구별되어야 한다 */
+.prow.off {
+  opacity: 0.55;
+}
+.prow .pip {
+  width: 9px;
+  height: 9px;
   flex: none;
-  color: var(--ink-3);
-  transition: transform 0.12s;
+  border-radius: 50%;
+  border: 2px solid var(--outline);
+  background: var(--card);
 }
-.row .ic {
-  flex: none;
-  color: var(--ink-3);
+.prow .pip.agent {
+  background: var(--lilac);
 }
-.row.dir .ic {
-  color: var(--sky);
+.prow.on .pip {
+  background: var(--blush);
 }
-.row .nm {
+.prow .nm {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* git 표시. 색이 곧 정보라 글자와 색을 같이 준다 — 색맹이어도 글자로 읽힌다 */
-.gs {
+/* 일하는 중 표시. pane 헤더의 바와 같은 뜻이라 색을 맞춘다 */
+.prow .work {
   margin-left: auto;
   flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sun);
+  box-shadow: 0 0 0 2px var(--outline);
+}
+
+.side-section .count {
+  margin-left: auto;
   font-size: 10px;
-  padding-left: 6px;
-}
-.g-M {
-  color: #c9971f;
-}
-.g-new {
-  color: #6a9e63;
-}
-.g-A {
-  color: #6a9e63;
-}
-.g-D {
-  color: #c96f6b;
-}
-.g-R {
-  color: #7f8fc0;
-}
-.g-dot {
   color: var(--ink-3);
 }
 
-.empty {
-  margin: 4px 6px 10px;
-  padding: 14px 12px;
-  border: var(--outline-w) dashed var(--line);
-  border-radius: var(--radius-sm);
+/* 바뀐 파일 수. 트리를 걷어내면서 파일별 표시가 사라졌으니 총계만 남긴다 */
+.dirty {
+  flex: none;
+  font-size: 10px;
+  color: var(--outline);
+}
+.dirty::before {
+  content: "~";
+  margin-right: 2px;
+}
+
+.repo.empty {
   color: var(--ink-3);
-  line-height: 1.7;
-  text-align: center;
+  font-size: 11px;
 }
 
 .roster {

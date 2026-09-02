@@ -7,42 +7,6 @@ use std::process::Command;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(serde::Serialize)]
-pub struct Entry {
-    name: String,
-    path: String,
-    dir: bool,
-}
-
-/// 열어도 볼 일이 없고 열면 수천 개가 쏟아지는 것들. 트리에서 아예 뺀다.
-const SKIP: &[&str] = &["node_modules", "target", ".git", "dist", ".next", "__pycache__"];
-
-#[tauri::command]
-pub fn fs_list(path: String) -> Result<Vec<Entry>, String> {
-    let mut out = Vec::new();
-    for e in std::fs::read_dir(&path).map_err(|e| e.to_string())? {
-        let Ok(e) = e else { continue };
-        let name = e.file_name().to_string_lossy().to_string();
-        if SKIP.contains(&name.as_str()) {
-            continue;
-        }
-        let dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        out.push(Entry {
-            name,
-            path: e.path().to_string_lossy().replace('\\', "/"),
-            dir,
-        });
-    }
-    // 디렉터리 먼저, 그다음 이름순. 파일 탐색기가 다 그렇게 하고, 그 기대를 깨면
-    // 눈이 목록을 훑지 못한다.
-    out.sort_by(|a, b| {
-        b.dir
-            .cmp(&a.dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    Ok(out)
-}
-
 /// 시작할 때 열어 둘 폴더. `kasaspace <경로>` 또는 KASASPACE_ROOT.
 /// `code .` 과 같은 기대를 따른다 — 터미널에서 폴더를 지정해 여는 것이 기본 동선이다.
 #[tauri::command]

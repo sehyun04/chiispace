@@ -7,7 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import roster from "./roster.json";
 import { Term } from "./Term";
-import { Tree, EMPTY_GIT, type GitInfo } from "./Tree";
+import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
 
 type Member = { name: string; slug: string; school: string; header_color: string };
@@ -123,6 +123,9 @@ export default function App() {
   const dropRef = useRef<{ id: string; side: L.Side } | null>(null);
 
   const cur = tabs[active] ?? tabs[0];
+  const paneCount = tabs.reduce((n, t) => n + (t.layout ? L.leaves(t.layout).length : 0), 0);
+  // 트리가 없어졌으니 바뀐 파일 수만이라도 여기 남긴다.
+  const dirty = Object.keys(git.files).length;
   const patch = useCallback(
     (fn: (t: Tab) => Tab) => setTabs((ts) => ts.map((t, i) => (i === active ? fn(t) : t))),
     [active],
@@ -165,29 +168,6 @@ export default function App() {
     setActive((a) => (a >= i && a > 0 ? a - 1 : a));
   }, []);
 
-  // 파일을 클릭하면 그 경로를 지금 보고 있는 셸에 넣는다. 여는 게 아니라 넣는
-  // 이유: 여기서 열 앱을 우리가 고르면 .tsx 가 메모장으로 뜬다. 경로만 들어오면
-  // 앞에 vim 이든 code 든 사용자가 이미 치고 있던 것을 그대로 쓴다.
-  const insertPath = useCallback(
-    (p: string) => {
-      // 셸이 지금 서 있는 곳 아래라면 상대 경로가 짧고 읽힌다. cwd 는 엔진이
-      // 알려주는 값이라 사용자가 cd 로 옮겨 다녀도 따라간다.
-      //
-      // cmd.exe 는 cwd 를 보고하지 않아 그 값이 비는 때가 많다. 그때는 셸을
-      // 띄운 폴더로 친다 — cd 를 했다면 어긋나지만, 매번 절대 경로가 통째로
-      // 들어오는 것보다 낫다. 틀리면 셸이 바로 없다고 말해 준다.
-      const cwd = stat[cur.focus]?.cwd ?? cur.root;
-      const rel = cwd && p.startsWith(cwd + "/") ? p.slice(cwd.length + 1) : p;
-      // 구분자는 슬래시로 둔다 — cmd·PowerShell·bash 가 다 받는다. 백슬래시는
-      // bash 에서 이스케이프가 되어 경로가 깨진다.
-      const t = termOf(cur.focus);
-      if (!t) return;
-      t.paste(/\s/.test(rel) ? `"${rel}"` : rel);
-      t.focus();
-    },
-    [stat, cur],
-  );
-
   const commitName = useCallback(
     (id: string, raw: string) => {
       const v = raw.trim();
@@ -196,8 +176,7 @@ export default function App() {
       // --resume 목록과 프롬프트 박스에도 그대로 나온다. pane 이름과 대화
       // 이름이 따로 놀면 정작 세션을 고를 때 아무 도움이 안 된다.
       if (v && stat[id]?.agent === "claude") {
-        void invoke("pty_write", { id, data: `/rename ${v}
-` }).catch(() => {});
+        void invoke("pty_write", { id, data: `/rename ${v}` }).catch(() => {});
       }
       setNames((n) => {
         if (!v) {
@@ -660,28 +639,56 @@ export default function App() {
         </div>
 
         {curRoot ? (
-          <>
-            <div className="repo">
-              <span className="repo-name">{curRoot.split("/").pop()}</span>
-              {git.branch ? (
-                <span className="branch">
-                  {git.branch}
-                  {git.ahead ? <b>↑{git.ahead}</b> : null}
-                  {git.behind ? <b>↓{git.behind}</b> : null}
-                </span>
-              ) : null}
-            </div>
-            <Tree root={curRoot} git={git} onFile={insertPath} />
-          </>
+          <div className="repo">
+            <span className="repo-name">{curRoot.split("/").pop()}</span>
+            {git.branch ? (
+              <span className="branch">
+                {git.branch}
+                {git.ahead ? <b>↑{git.ahead}</b> : null}
+                {git.behind ? <b>↓{git.behind}</b> : null}
+              </span>
+            ) : null}
+            {dirty ? <span className="dirty">{dirty}</span> : null}
+          </div>
         ) : (
-          <div className="tree">
-            <div className="empty">
-              아직 연 폴더가 없어
-              <br />
-              <b>Ctrl+Shift+O</b>
-            </div>
+          <div className="repo empty">
+            아직 연 폴더가 없어 · <b>Ctrl+Shift+O</b>
           </div>
         )}
+
+        {/* 파일 탐색기 자리에 pane 목록을 둔다. 파일을 뒤지는 일은 pane 안의
+            에이전트가 하고, 여기서 알고 싶은 것은 "어느 칸에서 무엇이 돌고
+            있나"다. 다른 탭 것까지 함께 보여야 그 물음에 답이 된다. */}
+        <div className="side-section">
+          <span>pane</span>
+          <span className="count">{paneCount}</span>
+        </div>
+        <div className="panes">
+          {tabs.flatMap((t, ti) =>
+            (t.layout ? L.rects(t.layout) : []).map((sl) => {
+              const st = stat[sl.id];
+              const here = ti === active;
+              return (
+                <div
+                  key={`${t.key}:${sl.id}`}
+                  className={here && t.focus === sl.id ? "prow on" : here ? "prow" : "prow off"}
+                  title={names[sl.id] || sessionTitle[sl.id] || ""}
+                  onClick={() => {
+                    setActive(ti);
+                    setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: sl.id } : x)));
+                    termOf(sl.id)?.focus();
+                  }}
+                >
+                  <span className={st?.agent ? "pip agent" : "pip"} />
+                  <span className="nm">
+                    {names[sl.id] || sessionTitle[sl.id] || label(sl.id, stat, titles)}
+                  </span>
+                  {st?.busy ? <span className="work" /> : null}
+                </div>
+              );
+            }),
+          )}
+        </div>
 
         <div className="side-section">
           {roster.label} · {roster.user_title}

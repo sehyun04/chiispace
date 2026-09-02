@@ -186,7 +186,6 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/App.tsx` (505줄) | 탭 · 배치 · 단축키 |
 | `ui/layout.ts` (122줄) | pane 배치 트리 |
 | `ui/Term.tsx` (166줄) | xterm.js 배선 |
-| `ui/Tree.tsx` (121줄) | 파일트리 |
 | `ui/app.css` (548줄) · `ui/theme.css` (50줄) | 치이카와 테마 |
 
 ## 옆 폴더 kasaterm 을 볼 때

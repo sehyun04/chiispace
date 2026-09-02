@@ -267,7 +267,6 @@ pub fn run() {
             pty_close,
             pane_status,
             workspace::initial_root,
-            workspace::fs_list,
             workspace::fs_pick,
             workspace::git_status,
             workspace::claude_sessions,
