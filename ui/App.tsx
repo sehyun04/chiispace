@@ -23,12 +23,7 @@ type PaneStat = {
 /** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
 
-type XTerm = {
-  getSelection(): string;
-  paste(t: string): void;
-  focus(): void;
-  options: { scrollback: number };
-};
+type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 
 /** pane id 로 그 터미널을 찾는다.
  *
@@ -410,22 +405,6 @@ export default function App() {
       clearTimeout(h);
     };
   }, [claudePanes, curRoot]);
-
-  // 에이전트가 도는 pane 은 스크롤백을 두지 않는다.
-  //
-  // 엔진이 claude 에게 대체 화면을 못 쓰게 막아 두어서, claude 가 화면을 고쳐
-  // 그릴 때마다 그 내용이 스크롤백에 통째로 쌓인다. 조금만 써도 수백 줄이 되고
-  // 아래로 내려도 끝이 안 난다. 그 표시는 엔진이 자기 이유로 켜 둔 것이라
-  // 값으로 되돌릴 수 없으니(존재 여부만 본다), 쌓이는 쪽을 막는다. 전체 화면
-  // TUI 는 어차피 자기 스크롤을 갖고 있어 잃는 것이 없다.
-  useEffect(() => {
-    for (const [id, p] of Object.entries(stat)) {
-      const t = termOf(id);
-      if (!t) continue;
-      const want = p.agent ? 0 : 10000;
-      if (t.options.scrollback !== want) t.options.scrollback = want;
-    }
-  }, [stat]);
 
   // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
   // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
