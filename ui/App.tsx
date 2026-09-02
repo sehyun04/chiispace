@@ -113,6 +113,9 @@ export default function App() {
   // 마지막 프롬프트)은 어디까지나 추측이라, 직접 붙인 이름이 있으면 그것이 이긴다.
   const [names, setNames] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Enter 로 이미 확정했는지. 확정 뒤 input 이 사라지며 blur 가 또 불리는데,
+  // 그대로 두면 claude 에 /rename 이 두 번 날아간다.
+  const renameDone = useRef(false);
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -190,21 +193,32 @@ export default function App() {
     [stat, cur],
   );
 
-  const commitName = useCallback((id: string, raw: string) => {
-    const v = raw.trim();
-    setNames((n) => {
-      if (!v) {
-        if (!(id in n)) return n;
-        // 비우면 이름을 떼고 다시 자동 표시로 돌아간다.
-        const next = { ...n };
-        delete next[id];
-        return next;
+  const commitName = useCallback(
+    (id: string, raw: string) => {
+      const v = raw.trim();
+      // claude 가 도는 pane 이면 그 대화의 이름도 같이 바꾼다. claude 에는
+      // 세션에 이름을 붙이는 /rename 이 있고, 그 이름은 대화에 남아 나중에
+      // --resume 목록과 프롬프트 박스에도 그대로 나온다. pane 이름과 대화
+      // 이름이 따로 놀면 정작 세션을 고를 때 아무 도움이 안 된다.
+      if (v && stat[id]?.agent === "claude") {
+        void invoke("pty_write", { id, data: `/rename ${v}
+` }).catch(() => {});
       }
-      return n[id] === v ? n : { ...n, [id]: v };
-    });
-    setRenaming(null);
-    termOf(id)?.focus();
-  }, []);
+      setNames((n) => {
+        if (!v) {
+          if (!(id in n)) return n;
+          // 비우면 이름을 떼고 다시 자동 표시로 돌아간다.
+          const next = { ...n };
+          delete next[id];
+          return next;
+        }
+        return n[id] === v ? n : { ...n, [id]: v };
+      });
+      setRenaming(null);
+      termOf(id)?.focus();
+    },
+    [stat],
+  );
 
   const pick = useCallback(async () => {
     const picked = await invoke<string | null>("fs_pick");
@@ -739,13 +753,23 @@ export default function App() {
                               // 헤더는 끌면 pane 이 옮겨진다. 글자를 고르는 중에
                               // 그게 걸리면 안 된다.
                               onMouseDown={(e) => e.stopPropagation()}
+                              // 키로 끝냈으면 뒤따르는 blur 는 흘려보낸다. 그러지
+                              // 않으면 확정이 두 번 일어나 claude 에 /rename 이
+                              // 두 번 날아간다.
                               onBlur={(e) => {
+                                if (renameDone.current) {
+                                  renameDone.current = false;
+                                  return;
+                                }
                                 commitName(s.id, e.currentTarget.value);
                               }}
                               onKeyDown={(e) => {
                                 e.stopPropagation();
-                                if (e.key === "Enter") commitName(s.id, e.currentTarget.value);
-                                else if (e.key === "Escape") {
+                                if (e.key === "Enter") {
+                                  renameDone.current = true;
+                                  commitName(s.id, e.currentTarget.value);
+                                } else if (e.key === "Escape") {
+                                  renameDone.current = true;
                                   setRenaming(null);
                                   termOf(s.id)?.focus();
                                 }
