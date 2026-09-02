@@ -174,13 +174,9 @@ pub struct ClaudeSession {
 ///
 /// jsonl 은 한 줄에 한 레코드라 줄 단위로 훑고, `last-prompt` 가 붙은 줄만
 /// 파싱한다. 대화가 수 MB 로 자라므로 모든 줄을 JSON 으로 뜯으면 그 값을 치른다.
-fn session_title(path: &std::path::Path) -> String {
-    use std::io::BufRead;
-    let Ok(f) = std::fs::File::open(path) else {
-        return String::new();
-    };
+fn scan_title<R: std::io::BufRead>(r: R) -> String {
     let mut last = String::new();
-    for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+    for line in r.lines().map_while(Result::ok) {
         if !line.contains("\"last-prompt\"") {
             continue;
         }
@@ -194,6 +190,31 @@ fn session_title(path: &std::path::Path) -> String {
         }
     }
     last
+}
+
+fn session_title(path: &std::path::Path) -> String {
+    use std::io::{BufReader, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    // 이 값을 헤더에 걸어 두고 주기적으로 다시 읽는데, 대화는 수 MB 까지 자란다.
+    // 최근 프롬프트는 뒤쪽에 있으므로 꼬리부터 본다. 거기서 못 찾을 때만 전부 훑는다.
+    const TAIL: u64 = 512 * 1024;
+    if len > TAIL && f.seek(SeekFrom::Start(len - TAIL)).is_ok() {
+        let mut r = BufReader::new(&mut f);
+        // 잘린 첫 줄은 JSON 이 아니므로 버린다.
+        let mut cut = String::new();
+        let _ = std::io::BufRead::read_line(&mut r, &mut cut);
+        let t = scan_title(r);
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    let Ok(whole) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    scan_title(BufReader::new(whole))
 }
 
 /// 경로를 폴더 이름과 맞대 보기 위한 정규화. claude 가 쓰는 인코딩 규칙을

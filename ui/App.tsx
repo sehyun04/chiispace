@@ -397,12 +397,48 @@ export default function App() {
             if (fresh.title) titles[paneId] = fresh.title;
           }
           if (Object.keys(titles).length) setSessionTitle((t) => ({ ...t, ...titles }));
+          // 제목은 아래 effect 가 이어서 계속 맞춘다.
         })
         .catch(() => {});
     }, 4000);
     return () => {
       alive = false;
       clearTimeout(h);
+    };
+  }, [claudePanes, curRoot]);
+
+  // 붙여 둔 대화의 제목을 헤더에 맞춰 둔다.
+  //
+  // 세션을 처음 붙일 때 한 번만 가져오면, 복원으로 연 pane 은 이미 어느
+  // 대화인지 알아서 그 경로를 타지 않아 제목이 영영 비고 헤더가 "claude" 로
+  // 떨어진다. 그리고 대화가 진행되면 마지막으로 시킨 일도 바뀌므로, 한 번
+  // 가져온 값을 붙들고 있으면 곧 옛날 것이 된다. 주기적으로 다시 맞춘다.
+  useEffect(() => {
+    if (!curRoot || !claudePanes) return;
+    let alive = true;
+    const tick = () => {
+      invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot })
+        .then((list) => {
+          if (!alive) return;
+          const byId = new Map(list.map((c) => [c.id, c.title]));
+          const next: Record<string, string> = {};
+          for (const paneId of claudePanes.split(",")) {
+            const sid = sessionOf.current[paneId];
+            const title = sid ? byId.get(sid) : undefined;
+            if (title) next[paneId] = title;
+          }
+          setSessionTitle((prev) => {
+            const changed = Object.keys(next).some((k) => prev[k] !== next[k]);
+            return changed ? { ...prev, ...next } : prev;
+          });
+        })
+        .catch(() => {});
+    };
+    tick();
+    const h = setInterval(tick, 8000);
+    return () => {
+      alive = false;
+      clearInterval(h);
     };
   }, [claudePanes, curRoot]);
 
@@ -712,6 +748,7 @@ export default function App() {
                       data-pane={s.id}
                       data-proc={stat[s.id]?.proc ?? ""}
                       data-agent={stat[s.id]?.agent ?? ""}
+                      data-title={titles[s.id] ?? ""}
                       className="slot"
                       style={pct(s.rect)}
                     >
@@ -866,11 +903,18 @@ function label(
   stat: Record<string, PaneStat>,
   titles: Record<string, string>,
 ): string {
+  const t = titles[id];
+  const tail = t ? t.split(/[\\/]/).pop() || t : "";
+  // 에이전트는 자기 세션 이름을 터미널 타이틀에 실어 보낸다(claude 의 --name
+  // 설명에 그렇게 적혀 있다). 그 이름이 "claude" 라는 프로세스 이름보다 훨씬
+  // 쓸모 있다 — 여러 개를 띄워 놓으면 헤더가 전부 "claude" 라 구별이 안 된다.
+  // claude 는 일하는 중이면 타이틀 앞에 표시를 하나 붙인다(✱ 따위). 그것까지
+  // 헤더에 들이면 이름이 밀려 보이므로 앞머리의 기호는 떼고 쓴다.
+  const named = tail.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  if (stat[id]?.agent && named) return named;
   const p = stat[id]?.proc;
   if (p) return p;
-  const t = titles[id];
-  if (!t) return "shell";
-  return t.split(/[\\/]/).pop() || t;
+  return tail || "shell";
 }
 
 function Row({ m, lead }: { m: Member; lead?: boolean }) {
