@@ -70,6 +70,19 @@ const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh"
 const leader = roster.leader as Member;
 const members = roster.members as Member[];
 
+/** 배정할 수 있는 사람들. 대장(하치와레)이 앞에 서서 첫 칸을 맡는다. */
+const cast: Member[] = [leader, ...members];
+const bySlug = new Map(cast.map((m) => [m.slug, m]));
+
+/** `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙는다.
+ *  vite 가 빌드 때 모아 주므로 파일을 넣는 것 말고 할 일이 없다. */
+const faces = import.meta.glob("./assets/faces/*.png", {
+  eager: true,
+  query: "?url",
+  import: "default",
+}) as Record<string, string>;
+const faceUrl = (slug?: string) => (slug ? faces[`./assets/faces/${slug}.png`] : undefined);
+
 const pct = (r: L.Rect) => ({
   left: `${r.x * 100}%`,
   top: `${r.y * 100}%`,
@@ -107,6 +120,11 @@ export default function App() {
   // 사용자가 직접 붙인 pane 이름. 자동으로 알아낸 것(돌고 있는 명령, claude 대화의
   // 마지막 프롬프트)은 어디까지나 추측이라, 직접 붙인 이름이 있으면 그것이 이긴다.
   const [names, setNames] = useState<Record<string, string>>({});
+  // 칸마다 누가 맡았는지(paneId -> slug). 세션에 남아 다시 켜도 같은 얼굴이
+  // 같은 칸에 붙는다.
+  const [casting, setCasting] = useState<Record<string, string>>({});
+  // 지금 사람을 고르고 있는 칸. 자동으로 붙여 준 사람이 마음에 안 들 수 있다.
+  const [picking, setPicking] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   // Enter 로 이미 확정했는지. 확정 뒤 input 이 사라지며 blur 가 또 불리는데,
   // 그대로 두면 claude 에 /rename 이 두 번 날아간다.
@@ -216,9 +234,11 @@ export default function App() {
             fontSize?: number;
             procs?: Record<string, unknown>;
             names?: Record<string, string>;
+            casting?: Record<string, string>;
           };
           if (s.fontSize) setFontSize(s.fontSize);
           if (s.names) setNames(s.names);
+          if (s.casting) setCasting(s.casting);
           if (s.procs) {
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
@@ -275,13 +295,14 @@ export default function App() {
         fontSize,
         procs: saved,
         names,
+        casting,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat, names]);
+  }, [tabs, active, fontSize, booted, stat, names, casting]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -421,6 +442,25 @@ export default function App() {
       clearInterval(h);
     };
   }, [claudePanes, curRoot]);
+
+  // 새로 생긴 칸에 사람을 붙인다. 이미 나간 사람은 피하고, 스무 명을 다 쓰면
+  // 처음부터 다시 돈다. 칸이 사라져도 배정은 지우지 않는다 — 같은 칸이 되살아날
+  // 때 얼굴이 바뀌면 그게 더 낯설다.
+  useEffect(() => {
+    const live = tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []));
+    const need = live.filter((id) => !casting[id]);
+    if (!need.length) return;
+    setCasting((c) => {
+      const used = new Set(Object.values(c));
+      const next = { ...c };
+      for (const id of need) {
+        const free = cast.find((m) => !used.has(m.slug)) ?? cast[used.size % cast.length];
+        next[id] = free.slug;
+        used.add(free.slug);
+      }
+      return next;
+    });
+  }, [tabs, casting]);
 
   // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
   // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
@@ -682,9 +722,17 @@ export default function App() {
                         termOf(sl.id)?.focus();
                       }}
                     >
-                      <span className={st?.agent ? "ico agent" : "ico"}>
-                        {st?.agent ? <AgentMark /> : <ShellMark />}
-                      </span>
+                      <button
+                        className="ico"
+                        title="누가 맡을지 고르기"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPicking((v) => (v === sl.id ? null : sl.id));
+                        }}
+                      >
+                        <Face slug={casting[sl.id]} agent={!!st?.agent} />
+                      </button>
                       <span className="pmeta">
                         <span className="nm">{nm}</span>
                         <span className="sub">{shortPath(t.root)}</span>
@@ -701,6 +749,27 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {/* 고르는 칸이 이 탭에 있으면 그 아래에 펼친다. 목록 밖에 띄우면
+                    어느 칸의 것인지 흐려지고 자리도 계산해야 한다. */}
+                {picking && slots.some((sl) => sl.id === picking) ? (
+                  <div className="castpick">
+                    {cast.map((m) => (
+                      <button
+                        key={m.slug}
+                        className={casting[picking] === m.slug ? "cp on" : "cp"}
+                        title={`${m.name} · ${m.school}`}
+                        onClick={() => {
+                          setCasting((c) => ({ ...c, [picking]: m.slug }));
+                          setPicking(null);
+                        }}
+                      >
+                        <Face slug={m.slug} />
+                        <span>{m.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -768,7 +837,9 @@ export default function App() {
                             document.body.classList.add("pane-dragging");
                           }}
                         >
-                          <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
+                          <span className={stat[s.id]?.busy ? "pip work" : "pip"}>
+                            <Face slug={casting[s.id]} agent={!!stat[s.id]?.agent} />
+                          </span>
                           {renaming === s.id ? (
                             <input
                               className="rename"
@@ -911,6 +982,21 @@ function label(
 function shortPath(p: string | null): string {
   if (!p) return "셸";
   return p.replace(/^[A-Za-z]:\/Users\/[^/]+/, "~").replace(/\//g, "\\");
+}
+
+/** 그 칸을 맡은 캐릭터의 얼굴.
+ *
+ *  그림이 아직 없으면 그 사람의 색으로 칠한 원에 역할 기호(에이전트=별,
+ *  셸=프롬프트)를 얹는다 — 그림이 들어오기 전에도 칸끼리는 구별되어야 한다. */
+function Face({ slug, agent }: { slug?: string; agent?: boolean }) {
+  const url = faceUrl(slug);
+  const who = slug ? bySlug.get(slug) : undefined;
+  if (url) return <img className="face" src={url} alt={who?.name ?? ""} draggable={false} />;
+  return (
+    <span className="face ph" style={who ? { background: who.header_color } : undefined}>
+      {agent ? <AgentMark /> : <ShellMark />}
+    </span>
+  );
 }
 
 /** 에이전트가 도는 칸. 무엇이 특별한지 한눈에 보이도록 채운 별로 둔다. */
