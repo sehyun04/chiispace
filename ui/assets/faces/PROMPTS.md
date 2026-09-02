@@ -13,7 +13,20 @@
 | `<slug>.png` | 늘. 사이드바·pane 헤더·칸 안에 서는 그림 |
 | `<slug>-work.png` | 그 칸이 일하는 중일 때만. 없으면 기본 그림이 통통 뛴다 |
 
-**움직이는 그림은 APNG 나 GIF 를 그 이름 그대로 넣으면 된다.** 확장자는 `.png` 로 두어도
+**움직이는 그림은 만들어 준다.** 정지 그림만 넣고 이걸 돌리면 된다:
+
+```powershell
+python scripts/make-motion.py             # faces 의 모든 그림
+python scripts/make-motion.py hachiware   # 한 명만
+python scripts/make-motion.py --force     # 이미 있는 것도 다시
+```
+
+`<slug>.png` 한 장에서 `<slug>-work.png`(APNG)를 굽는다. 눌렀다 펴면서 뛰는 움직임이고,
+프레임을 따로 그리지 않는다 — 스무 명분을 손으로 그릴 수 없고, 생성 AI 로 프레임을 뽑으면
+장마다 캐릭터가 미세하게 달라져 떨린다. 세기는 스크립트 위쪽 상수(`LIFT`·`SQUASH`·`TILT`)로
+조절한다.
+
+**직접 만든 움직임을 넣어도 된다.** APNG 나 GIF 를 그 이름 그대로 넣으면 된다. 확장자는 `.png` 로 두어도
 APNG 면 그냥 돌아간다 — `<img>` 가 알아서 재생하므로 코드는 손대지 않는다. upstream
 kasaterm 도 걷기 동작을 APNG 로 갖고 있다. `-work.png` 를 따로 넣으면 우리가 통통 뛰게
 만들지 않는다(움직임이 둘이면 산만해서).
