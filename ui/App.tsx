@@ -176,7 +176,8 @@ export default function App() {
       // --resume 목록과 프롬프트 박스에도 그대로 나온다. pane 이름과 대화
       // 이름이 따로 놀면 정작 세션을 고를 때 아무 도움이 안 된다.
       if (v && stat[id]?.agent === "claude") {
-        void invoke("pty_write", { id, data: `/rename ${v}` }).catch(() => {});
+        void invoke("pty_write", { id, data: `/rename ${v}
+` }).catch(() => {});
       }
       setNames((n) => {
         if (!v) {
@@ -632,62 +633,81 @@ export default function App() {
         </div>
 
         <div className="side-section">
-          <span>폴더</span>
+          <span>작업</span>
           <button className="mini" onClick={pick}>
-            {curRoot ? "바꾸기" : "열기"}
+            {curRoot ? "폴더 바꾸기" : "폴더 열기"}
           </button>
         </div>
 
-        {curRoot ? (
-          <div className="repo">
-            <span className="repo-name">{curRoot.split("/").pop()}</span>
-            {git.branch ? (
-              <span className="branch">
-                {git.branch}
-                {git.ahead ? <b>↑{git.ahead}</b> : null}
-                {git.behind ? <b>↓{git.behind}</b> : null}
-              </span>
-            ) : null}
-            {dirty ? <span className="dirty">{dirty}</span> : null}
-          </div>
-        ) : (
-          <div className="repo empty">
-            아직 연 폴더가 없어 · <b>Ctrl+Shift+O</b>
-          </div>
-        )}
-
-        {/* 파일 탐색기 자리에 pane 목록을 둔다. 파일을 뒤지는 일은 pane 안의
-            에이전트가 하고, 여기서 알고 싶은 것은 "어느 칸에서 무엇이 돌고
-            있나"다. 다른 탭 것까지 함께 보여야 그 물음에 답이 된다. */}
-        <div className="side-section">
-          <span>pane</span>
-          <span className="count">{paneCount}</span>
-        </div>
-        <div className="panes">
-          {tabs.flatMap((t, ti) =>
-            (t.layout ? L.rects(t.layout) : []).map((sl) => {
-              const st = stat[sl.id];
-              const here = ti === active;
-              return (
-                <div
-                  key={`${t.key}:${sl.id}`}
-                  className={here && t.focus === sl.id ? "prow on" : here ? "prow" : "prow off"}
-                  title={names[sl.id] || sessionTitle[sl.id] || ""}
-                  onClick={() => {
-                    setActive(ti);
-                    setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: sl.id } : x)));
-                    termOf(sl.id)?.focus();
-                  }}
-                >
-                  <span className={st?.agent ? "pip agent" : "pip"} />
-                  <span className="nm">
-                    {names[sl.id] || sessionTitle[sl.id] || label(sl.id, stat, titles)}
-                  </span>
-                  {st?.busy ? <span className="work" /> : null}
+        {/* 탭과 pane 을 한 목록으로 둔다. 위에 탭 줄을 따로 두면 같은 것을 두 군데서
+            고르게 되고, 정작 "어느 칸에서 무엇이 돌고 있나"는 어디에도 안 보인다.
+            탭은 묶음의 제목이고 그 아래가 그 탭의 pane 이다. */}
+        <div className="sessions">
+          {tabs.map((t, ti) => {
+            const slots = t.layout ? L.rects(t.layout) : [];
+            return (
+              <div key={t.key} className={ti === active ? "tgroup on" : "tgroup"}>
+                <div className="tg-head" onMouseDown={() => setActive(ti)}>
+                  <span className="tg-name">{t.root?.split("/").pop() ?? "shell"}</span>
+                  {ti === active && git.branch ? (
+                    <span className="tg-branch">
+                      {git.branch}
+                      {dirty ? <i>~{dirty}</i> : null}
+                    </span>
+                  ) : null}
+                  {tabs.length > 1 ? (
+                    <button
+                      className="x"
+                      title="탭 닫기"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={() => closeTab(ti)}
+                    >
+                      ×
+                    </button>
+                  ) : null}
                 </div>
-              );
-            }),
-          )}
+
+                {slots.map((sl) => {
+                  const st = stat[sl.id];
+                  const here = ti === active;
+                  const nm = names[sl.id] || sessionTitle[sl.id] || label(sl.id, stat, titles);
+                  return (
+                    <div
+                      key={sl.id}
+                      className={here && t.focus === sl.id ? "prow on" : "prow"}
+                      title={nm}
+                      onMouseDown={() => {
+                        setActive(ti);
+                        setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: sl.id } : x)));
+                        termOf(sl.id)?.focus();
+                      }}
+                    >
+                      <span className={st?.agent ? "ico agent" : "ico"}>
+                        {st?.agent ? <AgentMark /> : <ShellMark />}
+                      </span>
+                      <span className="pmeta">
+                        <span className="nm">{nm}</span>
+                        <span className="sub">{shortPath(t.root)}</span>
+                      </span>
+                      {st?.busy ? <span className="work" /> : null}
+                      <button
+                        className="x"
+                        title="닫기"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={() => closePane(sl.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          <button className="newtab" onClick={newTab} title="새 탭 (Ctrl+Shift+T)">
+            새 탭
+          </button>
         </div>
 
         <div className="side-section">
@@ -700,46 +720,9 @@ export default function App() {
           ))}
         </div>
 
-        <div className="keys">
-<b>Ctrl+Shift</b> 로
-          <br />
-          <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 포커스
-          <br />
-          pane 은 <b>헤더를 끌어</b> 옮기고 <b>두 번 눌러</b> 이름 붙인다
-          <br />
-          <b>T</b> 새 탭 · <b>PgUp</b>/<b>PgDn</b> 탭
-          <br />
-          <b>C</b>/<b>V</b> 복사·붙여넣기 · <b>O</b> 폴더
-          <br />
-          <b>Ctrl</b> <b>+</b>/<b>-</b>/<b>0</b> 글자 크기
-        </div>
       </aside>
 
       <div className="main">
-        <div className="tabbar">
-          {tabs.map((t, i) => (
-            <div
-              key={t.key}
-              className={i === active ? "tab on" : "tab"}
-              onMouseDown={() => setActive(i)}
-            >
-              <span className="tab-name">{t.root?.split("/").pop() ?? "shell"}</span>
-              {tabs.length > 1 ? (
-                <button
-                  className="x"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={() => closeTab(i)}
-                >
-                  ×
-                </button>
-              ) : null}
-            </div>
-          ))}
-          <button className="tab add" onClick={newTab} title="새 탭 (Ctrl+Shift+T)">
-            +
-          </button>
-        </div>
-
         {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.
             display:none 이 아니라 visibility:hidden 인 것이 핵심 — 상자 크기가
             남아 있어야 xterm 이 자기 칸 수를 옳게 재고, 탭으로 돌아왔을 때
@@ -922,6 +905,37 @@ function label(
   const p = stat[id]?.proc;
   if (p) return p;
   return tail || "shell";
+}
+
+/** 홈 아래는 `~` 로 접는다. 목록에서 알고 싶은 것은 어느 프로젝트인지지 전체 경로가 아니다. */
+function shortPath(p: string | null): string {
+  if (!p) return "셸";
+  return p.replace(/^[A-Za-z]:\/Users\/[^/]+/, "~").replace(/\//g, "\\");
+}
+
+/** 에이전트가 도는 칸. 무엇이 특별한지 한눈에 보이도록 채운 별로 둔다. */
+function AgentMark() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+      <path d="M8 1.6 L9.5 6.3 L14.2 8 L9.5 9.7 L8 14.4 L6.5 9.7 L1.8 8 L6.5 6.3 Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** 그냥 셸인 칸. 프롬프트 기호가 곧 그 뜻이다. */
+function ShellMark() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+      <path
+        d="M3.2 4.4 L6.6 8 L3.2 11.6 M8.4 11.8 H12.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function Row({ m, lead }: { m: Member; lead?: boolean }) {
