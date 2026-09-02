@@ -66,6 +66,23 @@ function halves(n: Extract<Node, { kind: "split" }>, r: Rect): [Rect, Rect] {
   ];
 }
 
+/** 모든 칸이 같은 넓이가 되도록 비율을 다시 잡는다.
+ *
+ *  칸을 늘릴 때 쓴다. 분할은 "지금 칸을 반으로" 나누는 일이라, 새로 생긴 칸에
+ *  포커스가 가고 거기서 또 나누면 그 자리만 계속 반씩 줄어든다 — 다섯 번이면
+ *  14px 이 되어 사실상 사라진다. 사용자가 원하는 것은 "칸을 하나 늘리는 것"이지
+ *  "한 칸을 잘게 쪼개는 것"이 아니다.
+ *
+ *  각 split 의 비율을 양쪽이 품은 칸 수에 맞추면 전체가 고르게 나뉜다. */
+export function balance(n: Node): Node {
+  if (n.kind === "leaf") return n;
+  const a = balance(n.a);
+  const b = balance(n.b);
+  const ca = leaves(a).length;
+  const cb = leaves(b).length;
+  return { ...n, a, b, ratio: ca / (ca + cb) };
+}
+
 export function splitLeaf(n: Node, target: string, dir: Dir, newId: string): Node {
   if (n.kind === "leaf") {
     if (n.id !== target) return n;

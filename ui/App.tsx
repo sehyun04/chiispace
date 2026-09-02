@@ -171,7 +171,9 @@ export default function App() {
       const id = `%${nextPane.current++}`;
       patch((t) => ({
         ...t,
-        layout: t.layout ? L.splitLeaf(t.layout, t.focus, dir, id) : L.leaf(id),
+        // 나눈 뒤 전체를 고르게 편다. 안 그러면 새 칸에 포커스가 가고 거기서
+        // 또 나누게 되어 그 자리만 반씩 줄어든다 — 몇 번이면 못 쓸 만큼 좁아진다.
+        layout: t.layout ? L.balance(L.splitLeaf(t.layout, t.focus, dir, id)) : L.leaf(id),
         focus: id,
       }));
     },
