@@ -81,7 +81,20 @@ const faces = import.meta.glob("./assets/faces/*.png", {
   query: "?url",
   import: "default",
 }) as Record<string, string>;
-const faceUrl = (slug?: string) => (slug ? faces[`./assets/faces/${slug}.png`] : undefined);
+/** `<slug>.png` 가 기본, `<slug>-work.png` 가 있으면 일하는 중에는 그걸 쓴다.
+ *  APNG·GIF 를 그 이름으로 넣어도 된다 — `<img>` 가 알아서 돌린다. */
+const faceUrl = (slug?: string, state?: "work") => {
+  if (!slug) return undefined;
+  if (state) {
+    const alt = faces[`./assets/faces/${slug}-${state}.png`];
+    if (alt) return alt;
+  }
+  return faces[`./assets/faces/${slug}.png`];
+};
+/** 그 사람의 일하는 중 그림이 따로 있는지. 있으면 그림이 알아서 움직이므로
+ *  우리가 통통 뛰게 만들지 않는다 — 두 움직임이 겹치면 산만하다. */
+const hasWorkFace = (slug?: string) =>
+  !!slug && !!faces[`./assets/faces/${slug}-work.png`];
 
 const pct = (r: L.Rect) => ({
   left: `${r.x * 100}%`,
@@ -894,6 +907,22 @@ export default function App() {
                           </button>
                         </header>
                         {stat[s.id]?.busy ? <div className="busy" /> : null}
+
+                        {/* 맡은 아이를 칸 안에 세워 둔다. 헤더의 작은 얼굴만으로는
+                            누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
+                            터미널을 고르고 끄는 데 걸리지 않게 한다. */}
+                        {stat[s.id]?.agent && faceUrl(casting[s.id]) ? (
+                          <img
+                            className={
+                              stat[s.id]?.busy && !hasWorkFace(casting[s.id])
+                                ? "buddy bob"
+                                : "buddy"
+                            }
+                            src={faceUrl(casting[s.id], stat[s.id]?.busy ? "work" : undefined)}
+                            alt=""
+                            draggable={false}
+                          />
+                        ) : null}
                         <Term
                           id={s.id}
                           focused={ti === active && t.focus === s.id}
