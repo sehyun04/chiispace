@@ -23,7 +23,12 @@ type PaneStat = {
 /** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
 
-type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
+type XTerm = {
+  getSelection(): string;
+  paste(t: string): void;
+  focus(): void;
+  options: { scrollback: number };
+};
 
 /** pane id 로 그 터미널을 찾는다.
  *
@@ -104,6 +109,10 @@ export default function App() {
   // 그 대화에서 마지막으로 시킨 일. 여러 pane 에 claude 를 띄워 두면 헤더가
   // 전부 "claude" 라 어느 쪽이 무슨 작업이었는지 알 수 없다.
   const [sessionTitle, setSessionTitle] = useState<Record<string, string>>({});
+  // 사용자가 직접 붙인 pane 이름. 자동으로 알아낸 것(돌고 있는 명령, claude 대화의
+  // 마지막 프롬프트)은 어디까지나 추측이라, 직접 붙인 이름이 있으면 그것이 이긴다.
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [renaming, setRenaming] = useState<string | null>(null);
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -181,6 +190,22 @@ export default function App() {
     [stat, cur],
   );
 
+  const commitName = useCallback((id: string, raw: string) => {
+    const v = raw.trim();
+    setNames((n) => {
+      if (!v) {
+        if (!(id in n)) return n;
+        // 비우면 이름을 떼고 다시 자동 표시로 돌아간다.
+        const next = { ...n };
+        delete next[id];
+        return next;
+      }
+      return n[id] === v ? n : { ...n, [id]: v };
+    });
+    setRenaming(null);
+    termOf(id)?.focus();
+  }, []);
+
   const pick = useCallback(async () => {
     const picked = await invoke<string | null>("fs_pick");
     if (picked) patch((t) => ({ ...t, root: picked }));
@@ -201,8 +226,10 @@ export default function App() {
             nextTab?: number;
             fontSize?: number;
             procs?: Record<string, unknown>;
+            names?: Record<string, string>;
           };
           if (s.fontSize) setFontSize(s.fontSize);
+          if (s.names) setNames(s.names);
           if (s.procs) {
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
@@ -238,6 +265,7 @@ export default function App() {
     // 켤 때 배치가 통째로 날아간다. Rust 쪽에서 종료 중 부고를 막고 있지만,
     // 저장은 되돌릴 수 없는 쪽이라 여기서도 막는다.
     if (tabs.every((t) => !t.layout)) return;
+    void names;
     const h = setTimeout(() => {
       const live = new Set(tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : [])));
       const saved: Record<string, Seed> = {};
@@ -251,13 +279,14 @@ export default function App() {
         nextTab: nextTab.current,
         fontSize,
         procs: saved,
+        names,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat]);
+  }, [tabs, active, fontSize, booted, stat, names]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -348,6 +377,22 @@ export default function App() {
       clearTimeout(h);
     };
   }, [claudePanes, curRoot]);
+
+  // 에이전트가 도는 pane 은 스크롤백을 두지 않는다.
+  //
+  // 엔진이 claude 에게 대체 화면을 못 쓰게 막아 두어서, claude 가 화면을 고쳐
+  // 그릴 때마다 그 내용이 스크롤백에 통째로 쌓인다. 조금만 써도 수백 줄이 되고
+  // 아래로 내려도 끝이 안 난다. 그 표시는 엔진이 자기 이유로 켜 둔 것이라
+  // 값으로 되돌릴 수 없으니(존재 여부만 본다), 쌓이는 쪽을 막는다. 전체 화면
+  // TUI 는 어차피 자기 스크롤을 갖고 있어 잃는 것이 없다.
+  useEffect(() => {
+    for (const [id, p] of Object.entries(stat)) {
+      const t = termOf(id);
+      if (!t) continue;
+      const want = p.agent ? 0 : 10000;
+      if (t.options.scrollback !== want) t.options.scrollback = want;
+    }
+  }, [stat]);
 
   // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
   // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
@@ -605,7 +650,7 @@ export default function App() {
           <br />
           <b>D</b>/<b>E</b> 분할 · <b>W</b> 닫기 · <b>←↑↓→</b> 포커스
           <br />
-          pane 은 <b>헤더를 끌어</b> 옮긴다
+          pane 은 <b>헤더를 끌어</b> 옮기고 <b>두 번 눌러</b> 이름 붙인다
           <br />
           <b>T</b> 새 탭 · <b>PgUp</b>/<b>PgDn</b> 탭
           <br />
@@ -685,9 +730,40 @@ export default function App() {
                           }}
                         >
                           <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
-                          <span className="title" title={sessionTitle[s.id] || undefined}>
-                            {sessionTitle[s.id] || label(s.id, stat, titles)}
-                          </span>
+                          {renaming === s.id ? (
+                            <input
+                              className="rename"
+                              defaultValue={names[s.id] ?? ""}
+                              placeholder="이 pane 의 이름"
+                              autoFocus
+                              // 헤더는 끌면 pane 이 옮겨진다. 글자를 고르는 중에
+                              // 그게 걸리면 안 된다.
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                commitName(s.id, e.currentTarget.value);
+                              }}
+                              onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") commitName(s.id, e.currentTarget.value);
+                                else if (e.key === "Escape") {
+                                  setRenaming(null);
+                                  termOf(s.id)?.focus();
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="title"
+                              title={
+                                names[s.id]
+                                  ? `${names[s.id]} — 두 번 눌러 이름 고치기`
+                                  : (sessionTitle[s.id] ?? "") || "두 번 눌러 이름 붙이기"
+                              }
+                              onDoubleClick={() => setRenaming(s.id)}
+                            >
+                              {names[s.id] || sessionTitle[s.id] || label(s.id, stat, titles)}
+                            </span>
+                          )}
                           {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}
                           <button
                             className="x"

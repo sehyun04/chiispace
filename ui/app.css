@@ -571,6 +571,20 @@ body.dragging .slot {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: text;
+}
+
+/* 이름 고치기. 헤더 안에 그대로 앉아야 글자가 튀지 않는다 */
+.pane-head .rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: none;
+  border-radius: 4px;
+  padding: 1px 6px;
+  outline: 2px solid var(--outline);
 }
 
 /* xterm 은 자기 셀 수에 맞춰 자기 크기를 정한다. 컨테이너가 content 크기를
@@ -586,7 +600,9 @@ body.dragging .slot {
 
 .term-host {
   position: absolute;
-  inset: 8px 6px 8px 10px;
+  /* 상하는 최소로. 여기서 8px 을 주면 fit 이 버리는 자투리(셀 높이의 나머지)와
+     합쳐져 한 줄이 넘는 빈 띠가 아래에 남고, 줄 수도 하나 손해 본다. */
+  inset: 2px 6px 2px 10px;
 }
 .pane-body .xterm-viewport {
   background: transparent !important;
