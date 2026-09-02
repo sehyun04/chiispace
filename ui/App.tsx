@@ -248,7 +248,13 @@ export default function App() {
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
               const seed = asSeed(v);
-              if (seed) m[id] = seed;
+              if (seed) {
+                m[id] = seed;
+                // 복원으로 여는 pane 은 어느 대화인지 이미 안다. 미리 붙여 두어야
+                // 아래의 "새로 생긴 것 찾기"가 이 pane 을 건드리지 않는다.
+                const hit = /--resume\s+([0-9a-f-]{36})/.exec(seed.cmd);
+                if (hit) sessionOf.current[id] = hit[1];
+              }
             }
             setSeeds(m);
           }
@@ -366,8 +372,19 @@ export default function App() {
     const want = claudePanes.split(",").filter((id) => !sessionOf.current[id]);
     if (!want.length) return;
     let alive = true;
+    let before: Set<string> | null = null;
+    // 먼저 지금 있는 대화를 찍어 둔다. 그 뒤에 새로 생긴 것만 이 pane 의 것으로
+    // 본다 — 그냥 "가장 최근"을 집으면 다른 창에서 돌고 있는 남의 대화를 집고,
+    // 나중에 그것을 --resume 으로 열려다 충돌해서 pane 이 뜨자마자 죽는다.
+    invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot })
+      .then((list) => {
+        if (alive) before = new Set(list.map((c) => c.id));
+      })
+      .catch(() => {});
     // 파일이 만들어질 틈을 준다. claude 가 뜨자마자 첫 줄을 쓰지는 않는다.
     const h = setTimeout(() => {
+      if (!before) return;
+      const seen = before;
       invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", {
         root: curRoot,
       })
@@ -376,16 +393,18 @@ export default function App() {
           const taken = new Set(Object.values(sessionOf.current));
           const titles: Record<string, string> = {};
           for (const paneId of want) {
-            const free = list.find((c) => !taken.has(c.id));
-            if (!free) break;
-            sessionOf.current[paneId] = free.id;
-            taken.add(free.id);
-            if (free.title) titles[paneId] = free.title;
+            const fresh = list.find((c) => !seen.has(c.id) && !taken.has(c.id));
+            // 새로 생긴 대화가 없으면 아무것도 붙이지 않는다. 그러면 복원할 때
+            // --continue 로 물러서는데, 남의 대화를 여는 것보다 그편이 낫다.
+            if (!fresh) break;
+            sessionOf.current[paneId] = fresh.id;
+            taken.add(fresh.id);
+            if (fresh.title) titles[paneId] = fresh.title;
           }
           if (Object.keys(titles).length) setSessionTitle((t) => ({ ...t, ...titles }));
         })
         .catch(() => {});
-    }, 2500);
+    }, 4000);
     return () => {
       alive = false;
       clearTimeout(h);

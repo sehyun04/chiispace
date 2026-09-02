@@ -94,6 +94,12 @@ export function Term({
     t.open(el);
     fit.fit();
 
+    // 스크롤백이 없으면 xterm 은 휠을 위/아래 화살표로 바꿔 앱에 보낸다. claude 는
+    // 그 화살표를 프롬프트 히스토리로 받으므로, 아무 데서나 휠만 굴려도 이전에
+    // 친 것들이 줄줄이 튀어나온다. 스크롤할 것이 없으면 휠도 아무 일을 하지
+    // 않는 편이 맞다. false 를 주면 xterm 은 그 변환까지 건너뛴다.
+    t.attachCustomWheelEventHandler(() => (t.options.scrollback ?? 0) > 0);
+
     let alive = true;
     const unlisteners: Array<() => void> = [];
 

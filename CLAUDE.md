@@ -130,6 +130,21 @@ prop 하나를 구조분해에서 빠뜨린 것도 통과시키고, 흰 화면�
 `pty_write` 로 `/rename` 을 같이 보낸다. 확정은 **한 경로에서만** 해야 한다 — Enter 에서
 확정하고 그 뒤 input 이 사라지며 blur 가 또 불리면 `/rename` 이 두 번 날아간다.
 
+**스크롤백을 0 으로 두면 휠이 화살표 키가 되어 앱으로 간다.** xterm 은
+`buffer.hasScrollback` 이 false 면 휠을 `ESC[A`/`ESC[B` 로 바꿔 보낸다. claude 는 그것을
+프롬프트 히스토리로 받으므로, 아무 데서나 휠만 굴려도 이전에 친 것들이 줄줄이 튀어나온다.
+`attachCustomWheelEventHandler` 가 false 를 주면 그 변환 **앞에서** 끊긴다(xterm 소스에서
+커스텀 핸들러 검사가 `hasScrollback` 검사보다 먼저다). 스크롤백을 0 으로 만들 거면 휠도
+같이 막아야 짝이 맞는다.
+
+**claude 세션은 "가장 최근"으로 고르면 안 된다.** 그러면 다른 창에서 돌고 있는 남의 대화를
+집고, 나중에 그것을 `--resume` 으로 열려다 충돌해서 **pane 이 뜨자마자 죽는다**(화면에는
+"another Claude Code on this machine already has ... for this conversation" 이 스쳐 간다).
+claude 가 감지되면 먼저 지금 있는 대화 목록을 찍어 두고, 그 뒤에 **새로 생긴 것만** 그
+pane 에 붙인다. 새로 생긴 것이 없으면 아무것도 붙이지 않고 `--continue` 로 물러선다 —
+남의 대화를 여는 것보다 그편이 낫다. 복원으로 여는 pane 은 저장된 명령에서 세션 ID 를
+미리 읽어 붙여 두어, 이 탐색이 건드리지 않게 한다.
+
 **에이전트가 도는 pane 은 스크롤백을 0 으로 둔다.** 엔진이 claude 에게 대체 화면을 못 쓰게
 막아 두어서(`CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN`), claude 가 화면을 고쳐 그릴 때마다 그
 내용이 스크롤백에 통째로 쌓인다. 조금만 써도 700줄이 넘고 아래로 내려도 끝이 안 난다.
