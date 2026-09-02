@@ -8,7 +8,9 @@ description = "터미널을 한 칸으로 두는 작업환경"
 [lib]
 # Windows 에서 lib 이름이 bin 과 같으면 충돌한다(rust-lang/cargo#8519).
 name = "kasaspace_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# staticlib·cdylib 은 Tauri 템플릿이 모바일용으로 넣어 둔 것이라 여기서는 쓰지
+# 않는다. 데스크톱만 만들 것이므로 빼 두면 링크할 산출물이 하나로 준다.
+crate-type = ["rlib"]
 
 [features]
 # Tauri 는 릴리스 여부를 --release 가 아니라 이 feature 로 가른다. 꺼져 있으면

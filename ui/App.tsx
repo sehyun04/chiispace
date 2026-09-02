@@ -101,6 +101,9 @@ export default function App() {
   // pane 이 어느 claude 대화를 붙들고 있는지. 한 번 정해지면 그대로 둔다 —
   // 그 pane 의 claude 가 계속 같은 파일에 쓰고 있으므로 다시 고를 이유가 없다.
   const sessionOf = useRef<Record<string, string>>({});
+  // 그 대화에서 마지막으로 시킨 일. 여러 pane 에 claude 를 띄워 두면 헤더가
+  // 전부 "claude" 라 어느 쪽이 무슨 작업이었는지 알 수 없다.
+  const [sessionTitle, setSessionTitle] = useState<Record<string, string>>({});
   const nextPane = useRef(1);
   const nextTab = useRef(1);
   const drag = useRef<{ path: number[]; dir: L.Dir; parent: L.Rect; box: HTMLElement } | null>(
@@ -322,16 +325,21 @@ export default function App() {
     let alive = true;
     // 파일이 만들어질 틈을 준다. claude 가 뜨자마자 첫 줄을 쓰지는 않는다.
     const h = setTimeout(() => {
-      invoke<{ id: string; mtime: number }[]>("claude_sessions", { root: curRoot })
+      invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", {
+        root: curRoot,
+      })
         .then((list) => {
           if (!alive) return;
           const taken = new Set(Object.values(sessionOf.current));
+          const titles: Record<string, string> = {};
           for (const paneId of want) {
             const free = list.find((c) => !taken.has(c.id));
             if (!free) break;
             sessionOf.current[paneId] = free.id;
             taken.add(free.id);
+            if (free.title) titles[paneId] = free.title;
           }
+          if (Object.keys(titles).length) setSessionTitle((t) => ({ ...t, ...titles }));
         })
         .catch(() => {});
     }, 2500);
@@ -353,6 +361,7 @@ export default function App() {
         // claude 가 내려갔으면 붙여 둔 대화도 놓는다. 그 pane 에서 다음에
         // 띄우는 것은 다른 대화일 수 있다.
         delete sessionOf.current[id];
+        setSessionTitle((t) => (id in t ? { ...t, [id]: "" } : t));
       }
     }
   }, [stat]);
@@ -676,7 +685,9 @@ export default function App() {
                           }}
                         >
                           <span className={stat[s.id]?.agent ? "pip agent" : "pip"} />
-                          <span className="title">{label(s.id, stat, titles)}</span>
+                          <span className="title" title={sessionTitle[s.id] || undefined}>
+                            {sessionTitle[s.id] || label(s.id, stat, titles)}
+                          </span>
                           {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}
                           <button
                             className="x"

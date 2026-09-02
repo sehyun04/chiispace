@@ -165,6 +165,35 @@ pub struct ClaudeSession {
     id: String,
     /// 마지막으로 쓰인 시각(ms). 어느 pane 의 대화인지는 이걸로 가린다.
     mtime: u64,
+    /// 그 대화에서 마지막으로 시킨 일. pane 헤더에 이걸 걸어야 여러 개를
+    /// 띄워 놓고도 어느 쪽이 무슨 작업이었는지 안다.
+    title: String,
+}
+
+/// 대화에서 마지막 사용자 프롬프트를 뽑는다.
+///
+/// jsonl 은 한 줄에 한 레코드라 줄 단위로 훑고, `last-prompt` 가 붙은 줄만
+/// 파싱한다. 대화가 수 MB 로 자라므로 모든 줄을 JSON 으로 뜯으면 그 값을 치른다.
+fn session_title(path: &std::path::Path) -> String {
+    use std::io::BufRead;
+    let Ok(f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let mut last = String::new();
+    for line in std::io::BufReader::new(f).lines().map_while(Result::ok) {
+        if !line.contains("\"last-prompt\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+        // lastPrompt 가 빠진 레코드도 섞여 있다. 그건 건너뛰고 그 앞의 것을 남긴다.
+        if let Some(p) = v.get("lastPrompt").and_then(|x| x.as_str()) {
+            let one = p.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+            if !one.is_empty() {
+                last = one.chars().take(80).collect();
+            }
+        }
+    }
+    last
 }
 
 /// 경로를 폴더 이름과 맞대 보기 위한 정규화. claude 가 쓰는 인코딩 규칙을
@@ -203,7 +232,11 @@ pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            out.push(ClaudeSession { id: id.to_string(), mtime });
+            out.push(ClaudeSession {
+                id: id.to_string(),
+                mtime,
+                title: session_title(&f.path()),
+            });
         }
     }
     // 최근 것이 앞에. 방금 뜬 claude 의 대화를 찾는 일이라 그 순서가 곧 답이다.

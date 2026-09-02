@@ -118,6 +118,12 @@ prop 하나를 구조분해에서 빠뜨린 것도 통과시키고, 흰 화면�
 
 `tap_bytes_with_snapshot()` 을 구독 등록과 화면 채취 둘로 쪼개지 않는 이유는 README 에 있다.
 
+**빌드가 갑자기 ``crate `softbuffer` required to be available in rlib format`` 으로 깨지면
+코드가 아니라 `target` 의 fingerprint 가 상한 것이다.** 그 rlib 은 `target/release/deps` 에
+멀쩡히 있는데도 cargo 가 다른 해시를 기대하며 다시 만들지도 않는다. `cargo clean -p <크레이트>`
+로는 안 풀리고 `cargo clean` 전체가 필요하다(재빌드 2~3분). crate-type 이나 의존성을
+건드려 고치려 들지 마라 — 원인이 아니다.
+
 **`stat` 을 effect deps 로 쓸 때 800ms 보다 긴 타이머를 걸지 마라.** `pane_status` 폴링이
 800ms 마다 새 객체를 주므로 effect 가 그 주기로 재실행되고, 그보다 긴 타이머는 매번
 취소되었다가 다시 걸려 **영영 터지지 않는다**. 세션 ID 를 붙이는 2.5초 타이머가 이걸로
