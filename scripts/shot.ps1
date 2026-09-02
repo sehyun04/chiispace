@@ -75,5 +75,10 @@ $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
 $mid = $bmp.GetPixel([int]($w/2), [int]($ht/2))
 $bmp.Dispose()
 
-Stop-Process -Id $p.Id -Force
+# 창 닫기를 먼저 청한다. 곧바로 죽이면 PTY 가 한꺼번에 무너지며 그 부고가 웹뷰에
+# 닿아 배치가 지워지고, 그 빈 배치가 세션 파일에 저장된다 — 사용자가 쓰던 칸들이
+# 검증 한 번에 날아간다. 실제로 그렇게 잃었다.
+$p.CloseMainWindow() | Out-Null
+for ($i = 0; $i -lt 30 -and -not $p.HasExited; $i++) { Start-Sleep -Milliseconds 100 }
+if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
 Write-Output "저장: $Out (${w}x${ht}) PrintWindow=$ok 중앙픽셀=$mid"

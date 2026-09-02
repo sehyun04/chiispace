@@ -154,6 +154,10 @@ export default function App() {
   const dropRef = useRef<{ id: string; side: L.Side } | null>(null);
 
   const cur = tabs[active] ?? tabs[0];
+  // 이벤트 핸들러가 최신 배치를 봐야 한다. state 를 그대로 닫아 두면 등록 시점의
+  // 낡은 값을 보게 되고, 그렇다고 deps 에 넣으면 매번 다시 구독한다.
+  const tabsNow = useRef(tabs);
+  tabsNow.current = tabs;
   const paneCount = tabs.reduce((n, t) => n + (t.layout ? L.leaves(t.layout).length : 0), 0);
   // 트리가 없어졌으니 바뀐 파일 수만이라도 여기 남긴다.
   const dirty = Object.keys(git.files).length;
@@ -497,11 +501,38 @@ export default function App() {
   // 셸이 끝나면 그 pane 은 사라진다 — 터미널에서 exit 을 친 사람이 기대하는
   // 동작이다. 어느 탭에 있든 지워야 한다.
   useEffect(() => {
+    // 짧은 사이에 부고가 몰려 오면 그것은 사용자가 exit 을 친 것이 아니라 앱이나
+    // 셸이 한꺼번에 무너지는 중이다(강제 종료가 그렇다). 그 부고를 곧이곧대로
+    // 받으면 배치가 통째로 지워지고, 그 빈 배치가 세션에 저장돼 다음에 켤 때도
+    // 사라진 채로 뜬다 — 되돌릴 방법이 없다. 하나씩 닫는 것만 받아들인다.
+    // 부고가 오면 곧바로 지우지 않고 잠깐 모은다.
+    //
+    // 하나만 왔으면 사용자가 그 칸에서 exit 을 친 것이다. 여럿이 한꺼번에 오면
+    // 셸들이 함께 무너지는 중이고(앱이 강제로 죽을 때가 그렇다), 그것까지
+    // 받아들이면 배치가 통째로 지워진 뒤 그 빈 배치가 세션에 저장돼 다음에 켤
+    // 때도 사라진 채로 뜬다 — 되돌릴 방법이 없다. 그때는 아무것도 하지 않는다.
+    // 화면에는 멈춘 터미널이 남지만, 잃는 것보다 낫다.
+    let pending: string[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const un = listen<string>("pty:exit", (ev) => {
-      setTabs((ts) =>
-        ts.map((t) => (t.layout ? { ...t, layout: L.removeLeaf(t.layout, ev.payload) } : t)),
+      // 이미 배치에 없는 칸의 부고는 세지 않는다. 그것까지 세면 진짜 exit 이
+      // "여럿 중 하나"가 되어 함께 묻힌다.
+      const live = tabsNow.current.some(
+        (t) => t.layout && L.leaves(t.layout).includes(ev.payload),
       );
+      if (!live) return;
+      pending.push(ev.payload);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const ids = pending;
+        pending = [];
+        if (ids.length !== 1) return;
+        setTabs((ts) =>
+          ts.map((t) => (t.layout ? { ...t, layout: L.removeLeaf(t.layout, ids[0]) } : t)),
+        );
+      }, 350);
     });
+
     return () => {
       un.then((f) => f());
     };
