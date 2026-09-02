@@ -190,8 +190,8 @@ body {
 
 .prow .ico {
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
 /* 그 칸을 맡은 얼굴. 그림이 들어오면 원 안을 채우고, 없으면 그 사람 색으로
@@ -204,7 +204,10 @@ body {
   border-radius: 50%;
   border: var(--outline-w) solid var(--outline);
   background: var(--card);
-  object-fit: cover;
+  /* cover 가 아니라 contain 이다. 그림에 몸통까지 들어 있어 꽉 채우면 팔다리가
+     잘려 나간다 — 원 안에 통째로 앉히고 남는 자리는 비워 둔다. */
+  object-fit: contain;
+  padding: 1px;
 }
 .face.ph {
   display: grid;
@@ -242,8 +245,8 @@ body {
   min-width: 0;
 }
 .cp .face {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
 }
 .cp span {
   max-width: 100%;
@@ -647,8 +650,8 @@ body.dragging .slot {
    두 곳을 오갈 때 짝이 맞는다. */
 .pane-head .pip {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 /* 일하는 중이면 얼굴이 반응한다 — 지금은 테두리가 숨을 쉰다.
    그림이 들어오면 표정으로 바꿀 자리다. */
