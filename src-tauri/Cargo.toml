@@ -38,7 +38,7 @@ base64 = "0.22"
 # 움직이고, 엔진이 말없이 바뀌면 여기가 깨진다. 올릴 때는 의도적으로 올린다.
 #
 # GPU 셀 렌더러(kasa-cells)는 쓰지 않는다 — 화면은 웹뷰의 xterm.js 가 그린다.
-kasa-pty = { git = "https://github.com/2rami/kasaterm", rev = "06d68c947974f04b311c67648a9ff5d3857c3ff4" }
+kasa-pty = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d954bf81df103bd320d2196fd267d" }
 
 # 엔진을 같이 고쳐 가며 실험할 때만 주석을 푼다. git 대신 옆 폴더의 작업 트리를 쓴다.
 # [patch."https://github.com/2rami/kasaterm"]
