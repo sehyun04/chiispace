@@ -139,6 +139,8 @@ export default function App() {
   // 지금 사람을 고르고 있는 칸. 자동으로 붙여 준 사람이 마음에 안 들 수 있다.
   const [picking, setPicking] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // 옆칸을 접어 두면 터미널이 창을 다 쓴다. 접은 채로 두는 사람도 있으니 세션에 남긴다.
+  const [sideOpen, setSideOpen] = useState(true);
   // Enter 로 이미 확정했는지. 확정 뒤 input 이 사라지며 blur 가 또 불리는데,
   // 그대로 두면 claude 에 /rename 이 두 번 날아간다.
   const renameDone = useRef(false);
@@ -254,10 +256,12 @@ export default function App() {
             procs?: Record<string, unknown>;
             names?: Record<string, string>;
             casting?: Record<string, string>;
+            sideOpen?: boolean;
           };
           if (s.fontSize) setFontSize(s.fontSize);
           if (s.names) setNames(s.names);
           if (s.casting) setCasting(s.casting);
+          if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
@@ -315,13 +319,14 @@ export default function App() {
         procs: saved,
         names,
         casting,
+        sideOpen,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat, names, casting]);
+  }, [tabs, active, fontSize, booted, stat, names, casting, sideOpen]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -581,6 +586,7 @@ export default function App() {
       else if (k === "w") closePane(cur.focus);
       else if (k === "t") newTab();
       else if (k === "o") void pick();
+      else if (k === "b") setSideOpen((v) => !v);
       else if (k === "pageup") setActive((a) => (a - 1 + tabs.length) % tabs.length);
       else if (k === "pagedown") setActive((a) => (a + 1) % tabs.length);
       else if (k === "c") {
@@ -708,7 +714,15 @@ export default function App() {
   }, [cur, patch]);
 
   return (
-    <div className="app">
+    <div className={sideOpen ? "app" : "app closed"}>
+      <button
+        className="sidetoggle"
+        title={sideOpen ? "옆칸 접기 (Ctrl+Shift+B)" : "옆칸 펴기 (Ctrl+Shift+B)"}
+        onClick={() => setSideOpen((v) => !v)}
+      >
+        <SideMark open={sideOpen} />
+      </button>
+
       <aside className="side">
         <div className="side-section">
           <span>작업</span>
@@ -1036,6 +1050,31 @@ function label(
 function shortPath(p: string | null): string {
   if (!p) return "셸";
   return p.replace(/^[A-Za-z]:\/Users\/[^/]+/, "~").replace(/\//g, "\\");
+}
+
+/** 옆칸 접기·펴기. 왼쪽 칸이 채워졌는지로 지금 상태를 말한다. */
+function SideMark({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <rect
+        x="1.6"
+        y="2.6"
+        width="12.8"
+        height="10.8"
+        rx="2.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M6.4 2.6 V13.4"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        fill="none"
+      />
+      {open ? <rect x="1.6" y="2.6" width="4.8" height="10.8" rx="2.4" fill="currentColor" /> : null}
+    </svg>
+  );
 }
 
 /** 그 칸을 맡은 캐릭터의 얼굴.

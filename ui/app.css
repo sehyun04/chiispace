@@ -21,10 +21,48 @@ body {
 
 /* 창을 꽉 쓴다. 바깥 여백은 창 자체가 이미 경계라 두 번 그을 이유가 없다. */
 .app {
+  position: relative;
   height: 100%;
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   background: var(--paper);
+}
+/* 접으면 옆칸을 아예 떼지 않고 폭만 0 으로 준다. 떼어 내면 그 안의 상태가
+   같이 사라지고, 다시 펼 때 처음부터 그린다. */
+.app.closed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+.app.closed .side {
+  border-right: none;
+}
+/* 접으면 단추가 첫 칸의 머리줄 위에 얹힌다. 그 자리를 비켜 준다 */
+.app.closed .main {
+  padding-left: 30px;
+}
+
+/* 접기 단추는 늘 창 왼쪽 위 같은 자리에 있는다 — 접으나 펴나 손이 같은 곳으로 간다 */
+.sidetoggle {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.sidetoggle:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+/* 접힌 동안에는 이 단추만이 옆칸으로 돌아가는 길이라 조금 더 또렷하게 */
+.app.closed .sidetoggle {
+  color: var(--ink-2);
 }
 
 /* ── 사이드바 ────────────────────────────────────────────── */
@@ -37,6 +75,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 
 
@@ -44,6 +83,10 @@ body {
 
 .side-section {
   padding: 14px 14px 6px;
+}
+/* 맨 위 줄만 단추 자리를 비켜 준다 */
+.side > .side-section:first-child {
+  padding-left: 38px;
   color: var(--ink-3);
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -636,29 +679,30 @@ body.dragging .slot {
 }
 
 
-/* 머리줄은 늘 떠 있지 않는다.
+/* 머리줄이 칸의 경계다.
  *
- * 이름·얼굴·닫기는 가끔 쓰는 것인데 늘 자리를 차지하면 칸마다 띠가 하나씩
- * 얹혀 답답하다. 터미널 위에 겹쳐 두고 마우스를 올릴 때만 보인다 —
- * 그동안 그 칸이 무엇인지는 왼쪽 목록이 말해 준다. */
+ * 늘 보이되 바탕을 주지 않는다. 띠를 칠하면 그것이 또 하나의 상자가 되고,
+ * 아주 숨겨 버리면 어디서 어디까지가 한 칸인지 알 수 없다. 투명한 채로 자리만
+ * 지키고, 아래 옅은 선 하나로 터미널과 나눈다. 글자는 평소 흐리게 두었다가
+ * 그 칸을 보거나 마우스를 올릴 때 또렷해진다. */
 .pane-head {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 4;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 10px;
-  color: var(--ink-2);
-  background: linear-gradient(var(--paper) 62%, transparent);
-  opacity: 0;
-  transition: opacity 0.12s;
+  padding: 2px 10px;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  transition: color 0.12s;
 }
 .pane:hover .pane-head,
-.pane-head:focus-within {
-  opacity: 1;
+.pane.on .pane-head {
+  color: var(--ink-2);
+}
+/* 보고 있는 칸은 경계선도 그 색으로 */
+.pane.on .pane-head {
+  border-bottom-color: var(--sky);
 }
 
 /* pane 헤더에도 같은 얼굴이 앉는다. 사이드바에서 고른 그 사람이 여기 있어야
@@ -714,10 +758,7 @@ body.dragging .slot {
   position: relative;
   overflow: hidden;
 }
-/* 머리줄이 겹쳐 뜨므로 첫 줄이 가리지 않게 위를 조금 비운다 */
-.term-host {
-  top: 6px;
-}
+
 
 .term-host {
   position: absolute;
