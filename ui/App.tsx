@@ -710,14 +710,6 @@ export default function App() {
   return (
     <div className="app">
       <aside className="side">
-        <div className="side-head">
-          <span>kasaspace</span>
-          <span className="cheeks">
-            <i />
-            <i />
-          </span>
-        </div>
-
         <div className="side-section">
           <span>작업</span>
           <button className="mini" onClick={pick}>

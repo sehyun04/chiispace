@@ -78,6 +78,10 @@ cd src-tauri; cargo build --release --features custom-protocol
 
 ## 테마
 
+굵은 테두리는 캐릭터에만 쓴다. 화면 구조까지 두르면 카드가 여러 장 놓인 모양이 되어
+터미널보다 상자가 먼저 보인다 — 칸은 틈과 바탕색으로 가르고, 지금 보고 있는 칸만 안쪽에
+얇은 선을 둔다. pane 머리줄(이름·얼굴·닫기)은 마우스를 올릴 때만 뜬다.
+
 `ui/theme.css` 한 파일이 색의 전부다. 값은 upstream 의 `theme-src-chiikawa/roster.json`
 에서 왔다 — 그건 색 테마가 아니라 **캐릭터 로스터**(21명, 페르소나 + `header_color`)이고,
 `desc.txt` 가 말하는 외형("순백 서양배 모양 몸 · 두꺼운 따뜻한 갈색 테두리 · 분홍 볼터치")이

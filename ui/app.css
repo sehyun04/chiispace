@@ -19,53 +19,31 @@ body {
   overflow: hidden;
 }
 
+/* 창을 꽉 쓴다. 바깥 여백은 창 자체가 이미 경계라 두 번 그을 이유가 없다. */
 .app {
   height: 100%;
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: 236px minmax(0, 1fr);
+  background: var(--paper);
 }
 
 /* ── 사이드바 ────────────────────────────────────────────── */
 
+/* 옆칸도 카드로 세우지 않는다. 바탕색이 살짝 다른 것만으로 경계가 읽히고,
+   경계선은 오른쪽 한 줄이면 족하다. */
 .side {
   background: var(--card);
-  border: var(--outline-w) solid var(--outline);
-  border-radius: var(--radius);
-  box-shadow: var(--drop);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.side-head {
-  padding: 12px 14px;
-  border-bottom: var(--outline-w) solid var(--outline);
-  background: var(--sky);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  letter-spacing: 0.02em;
-}
 
-/* 볼터치 두 점. 치이카와의 얼굴에서 온 유일한 장식이라 여기 말고는 안 쓴다 */
-.cheeks {
-  display: inline-flex;
-  gap: 3px;
-  margin-left: auto;
-}
-.cheeks i {
-  width: 7px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--blush);
-  display: block;
-}
+
 
 .side-section {
-  padding: 12px 14px 6px;
+  padding: 14px 14px 6px;
   color: var(--ink-3);
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -133,9 +111,9 @@ body {
   margin-bottom: 6px;
   border-radius: var(--radius-sm);
 }
+/* 보고 있는 묶음. 테두리를 두르는 대신 바탕만 살짝 눕힌다 */
 .tgroup.on {
   background: var(--paper);
-  box-shadow: 0 0 0 var(--outline-w) var(--line);
 }
 
 .tg-head {
@@ -410,8 +388,8 @@ body {
 .main {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
+  background: var(--paper);
 }
 
 .pages {
@@ -442,29 +420,26 @@ body {
   position: absolute;
 }
 
+/* 칸을 카드로 세우지 않는다.
+ *
+ * 테두리와 그림자를 두르면 종이 카드가 여러 장 놓인 모양이 되어, 정작 봐야 할
+ * 터미널보다 상자가 먼저 눈에 든다. 경계는 칸 사이 틈만으로 충분하다 —
+ * 지금 어느 칸을 보고 있는지는 아래에서 얇은 선 하나로 말한다. */
 .pane {
   position: absolute;
-  inset: 5px;
+  inset: 2px;
   background: var(--paper);
-  border: var(--outline-w) solid var(--outline);
-  border-radius: var(--radius);
-  box-shadow: var(--drop);
+  border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 /* 포커스 표시. pane 이 여러 개일 때 어디에 치고 있는지 모르면 오타를 낸다 */
+/* 보고 있는 칸. 테두리를 두르는 대신 안쪽에 얇은 선만 남긴다 */
 .pane.on {
-  box-shadow:
-    var(--drop),
-    0 0 0 2px var(--sky) inset;
+  box-shadow: 0 0 0 2px var(--sky) inset;
 }
-.pane.on .pane-head {
-  background: var(--sky);
-  color: #fff;
-}
-
 
 
 .pane-head .chip {
@@ -661,17 +636,29 @@ body.dragging .slot {
 }
 
 
-
+/* 머리줄은 늘 떠 있지 않는다.
+ *
+ * 이름·얼굴·닫기는 가끔 쓰는 것인데 늘 자리를 차지하면 칸마다 띠가 하나씩
+ * 얹혀 답답하다. 터미널 위에 겹쳐 두고 마우스를 올릴 때만 보인다 —
+ * 그동안 그 칸이 무엇인지는 왼쪽 목록이 말해 준다. */
 .pane-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 8px;
-  /* 얼굴이 커졌으니 위아래는 얼굴이 정한다. 여기서 더 주면 헤더만 두꺼워지고
-     그만큼 터미널이 줄어든다. */
-  padding: 3px 12px;
-  background: var(--card);
-  border-bottom: var(--outline-w) solid var(--outline);
+  padding: 3px 10px;
   color: var(--ink-2);
+  background: linear-gradient(var(--paper) 62%, transparent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.pane:hover .pane-head,
+.pane-head:focus-within {
+  opacity: 1;
 }
 
 /* pane 헤더에도 같은 얼굴이 앉는다. 사이드바에서 고른 그 사람이 여기 있어야
@@ -726,6 +713,10 @@ body.dragging .slot {
   min-width: 0;
   position: relative;
   overflow: hidden;
+}
+/* 머리줄이 겹쳐 뜨므로 첫 줄이 가리지 않게 위를 조금 비운다 */
+.term-host {
+  top: 6px;
 }
 
 .term-host {
