@@ -5,20 +5,14 @@ import { listen } from "@tauri-apps/api/event";
 // 포커스를 갖고 있어야 하고 읽기에는 권한이 따로 걸려, WebView2 에서
 // NotAllowedError 로 조용히 거부되는 때가 있다.
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-import roster from "./roster.json";
+import { anyFace, cast, Face, faceUrl, hasWorkFace } from "./roster";
+import { asSeed, label, restoreCmd, type PaneStat, type Seed } from "./session";
 import { Term } from "./Term";
+import { Sidebar } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
 
-type Member = { name: string; slug: string; school: string; header_color: string };
 
-type PaneStat = {
-  id: string;
-  proc: string | null;
-  agent: string | null;
-  busy: boolean;
-  cwd: string | null;
-};
 
 /** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
@@ -34,77 +28,7 @@ type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 const termOf = (id?: string): XTerm | undefined =>
   id ? (window as unknown as { __terms?: Record<string, XTerm> }).__terms?.[id] : undefined;
 
-/** 이 pane 을 되살리려면 무엇을 쳐야 하는가.
- *
- *  `proc` 만 보면 안 된다. 엔진은 전경 프로세스 이름과 에이전트를 따로 판정하는데,
- *  claude 처럼 자기 프로세스 트리를 여러 겹 두는 것은 이름 쪽이 비고 에이전트 쪽만
- *  잡히는 때가 있다. 그때 `proc` 만 보면 claude 를 켜 둔 채로 껐는데도 아무것도
- *  기억하지 못한다.
- *
- *  claude 는 이전 대화를 이어 여는 방법이 따로 있다. 세션을 되돌리려는 참이니
- *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
-type Seed = { cmd: string; auto?: boolean };
 
-function restoreCmd(p: PaneStat, sid?: string): Seed | null {
-  // 에이전트는 이어 열어 준다. 이건 대화를 불러오는 것뿐이라 부작용이 없고,
-  // 명령만 쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다.
-  //
-  // 세션 ID 를 알면 그것을 짚는다. --continue 는 "그 폴더의 가장 최근" 이라
-  // pane 이 여럿이면 전부 같은 대화로 몰리고, 다른 창에서 claude 를 돌리면
-  // 엉뚱한 것이 열린다. 못 찾았을 때만 --continue 로 물러선다.
-  if (p.agent === "claude")
-    return { cmd: sid ? `claude --resume ${sid}` : "claude --continue", auto: true };
-  if (p.agent) return { cmd: p.agent, auto: true };
-  // 그 밖의 명령은 쳐 놓기만 한다. 빌드나 배포가 저 혼자 다시 도는 건 곤란하다.
-  if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return { cmd: p.proc };
-  return null;
-}
-
-/** 예전 세션은 명령을 문자열로만 적어 두었다. */
-const asSeed = (v: unknown): Seed | null =>
-  typeof v === "string" ? { cmd: v } : v && typeof v === "object" ? (v as Seed) : null;
-
-/** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
-const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
-
-const leader = roster.leader as Member;
-const members = roster.members as Member[];
-
-/** 로스터 전체. 이름을 되찾을 때 쓴다. */
-const roll: Member[] = [leader, ...members];
-const bySlug = new Map(roll.map((m) => [m.slug, m]));
-
-/** `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙는다.
- *  vite 가 빌드 때 모아 주므로 파일을 넣는 것 말고 할 일이 없다. */
-const faces = import.meta.glob("./assets/faces/*.png", {
-  eager: true,
-  query: "?url",
-  import: "default",
-}) as Record<string, string>;
-/** `<slug>.png` 가 기본, `<slug>-work.png` 가 있으면 일하는 중에는 그걸 쓴다.
- *  APNG·GIF 를 그 이름으로 넣어도 된다 — `<img>` 가 알아서 돌린다. */
-/** 그림이 들어온 사람만 칸을 맡는다.
- *
- *  스무 명을 다 세워 두면 아직 얼굴이 없는 사람이 색 동그라미로 섞여 나와,
- *  들어온 그림이 오히려 묻힌다. 그림을 더 넣으면 여기가 저절로 늘어난다.
- *  하나도 없으면 로스터 전체로 돌아간다 — 그때는 색으로라도 칸을 갈라야 한다. */
-const faceUrl = (slug?: string, state?: "work") => {
-  if (!slug) return undefined;
-  if (state) {
-    const alt = faces[`./assets/faces/${slug}-${state}.png`];
-    if (alt) return alt;
-  }
-  return faces[`./assets/faces/${slug}.png`];
-};
-/** 그 사람의 일하는 중 그림이 따로 있는지. 있으면 그림이 알아서 움직이므로
- *  우리가 통통 뛰게 만들지 않는다 — 두 움직임이 겹치면 산만하다. */
-const hasWorkFace = (slug?: string) =>
-  !!slug && !!faces[`./assets/faces/${slug}-work.png`];
-
-const drawn = roll.filter((m) => faceUrl(m.slug));
-const cast: Member[] = drawn.length ? drawn : roll;
-/** 그림이 하나라도 들어왔는가. 그때부터는 얼굴 없는 배정을 갈아 끼운다. */
-const anyFace = drawn.length > 0;
 
 const pct = (r: L.Rect) => ({
   left: `${r.x * 100}%`,
@@ -243,6 +167,14 @@ export default function App() {
     },
     [stat],
   );
+
+  /** 그 탭으로 건너간다. 칸까지 주면 그 칸을 잡는다. 옆칸 목록이 부른다. */
+  const selectPane = useCallback((ti: number, pane?: string) => {
+    setActive(ti);
+    if (!pane) return;
+    setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: pane } : x)));
+    termOf(pane)?.focus();
+  }, []);
 
   const pick = useCallback(async () => {
     const picked = await invoke<string | null>("fs_pick");
@@ -747,125 +679,29 @@ export default function App() {
         <SideMark open={sideOpen} />
       </button>
 
-      <aside className="side">
-        <div className="side-section">
-          <span>작업</span>
-          <button className="mini" onClick={pick}>
-            {curRoot ? "폴더 바꾸기" : "폴더 열기"}
-          </button>
-        </div>
-
-        {/* 탭과 pane 을 한 목록으로 둔다. 위에 탭 줄을 따로 두면 같은 것을 두 군데서
-            고르게 되고, 정작 "어느 칸에서 무엇이 돌고 있나"는 어디에도 안 보인다.
-            탭은 묶음의 제목이고 그 아래가 그 탭의 pane 이다. */}
-        <div className="sessions">
-          {tabs.map((t, ti) => {
-            const slots = t.layout ? L.rects(t.layout) : [];
-            return (
-              <div key={t.key} className={ti === active ? "tgroup on" : "tgroup"}>
-                <div className="tg-head" onMouseDown={() => setActive(ti)}>
-                  <span className="tg-name">{t.root?.split("/").pop() ?? "shell"}</span>
-                  {ti === active && git.branch ? (
-                    <span className="tg-branch">
-                      {git.branch}
-                      {dirty ? <i>~{dirty}</i> : null}
-                    </span>
-                  ) : null}
-                  {tabs.length > 1 ? (
-                    <button
-                      className="x"
-                      title="탭 닫기"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={() => closeTab(ti)}
-                    >
-                      ×
-                    </button>
-                  ) : null}
-                </div>
-
-                {slots.map((sl) => {
-                  const st = stat[sl.id];
-                  const here = ti === active;
-                  const nm = names[sl.id] || sessionTitle[sl.id] || label(sl.id, stat, titles);
-                  return (
-                    <div
-                      key={sl.id}
-                      className={here && t.focus === sl.id ? "prow on" : "prow"}
-                      title={nm}
-                      onMouseDown={() => {
-                        setActive(ti);
-                        setTabs((ts) => ts.map((x, i) => (i === ti ? { ...x, focus: sl.id } : x)));
-                        termOf(sl.id)?.focus();
-                      }}
-                    >
-                      <button
-                        className="ico"
-                        title="누가 맡을지 고르기"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPicking((v) => (v === sl.id ? null : sl.id));
-                        }}
-                      >
-                        <Face slug={casting[sl.id]} agent={!!st?.agent} />
-                      </button>
-                      <span className="pmeta">
-                        <span className="nm">{nm}</span>
-                        <span className="sub">{shortPath(t.root)}</span>
-                      </span>
-                      {st?.busy ? <span className="work" /> : null}
-                      <button
-                        className="x"
-                        title="닫기"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={() => closePane(sl.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-
-                {/* 고르는 칸이 이 탭에 있으면 그 아래에 펼친다. 목록 밖에 띄우면
-                    어느 칸의 것인지 흐려지고 자리도 계산해야 한다. */}
-                {picking && slots.some((sl) => sl.id === picking) ? (
-                  <div className="castpick">
-                    {cast.map((m) => (
-                      <button
-                        key={m.slug}
-                        className={casting[picking] === m.slug ? "cp on" : "cp"}
-                        title={`${m.name} · ${m.school}`}
-                        onClick={() => {
-                          setCasting((c) => ({ ...c, [picking]: m.slug }));
-                          setPicking(null);
-                        }}
-                      >
-                        <Face slug={m.slug} />
-                        <span>{m.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-
-          <button className="newtab" onClick={newTab} title="새 탭 (Ctrl+Shift+T)">
-            새 탭
-          </button>
-        </div>
-
-        <div className="side-section">
-          {roster.label} · {roster.user_title}
-        </div>
-        <div className="roster">
-          <Row m={leader} lead />
-          {members.map((m) => (
-            <Row key={m.slug} m={m} />
-          ))}
-        </div>
-
-      </aside>
+      <Sidebar
+        tabs={tabs}
+        active={active}
+        git={git}
+        dirty={dirty}
+        stat={stat}
+        titles={titles}
+        names={names}
+        sessionTitle={sessionTitle}
+        casting={casting}
+        picking={picking}
+        renaming={renaming}
+        curRoot={curRoot}
+        onPickFolder={pick}
+        onNewTab={newTab}
+        onCloseTab={closeTab}
+        onClosePane={closePane}
+        onSelectPane={selectPane}
+        onSetPicking={setPicking}
+        onSetRenaming={setRenaming}
+        onSetCasting={setCasting}
+        onCommitName={commitName}
+      />
 
       <div className="main">
         {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.
@@ -1049,32 +885,6 @@ export default function App() {
   );
 }
 
-/** 헤더에 쓸 이름. 돌고 있는 명령이 있으면 그게 제일 쓸모 있다 —
- *  OSC 타이틀은 cmd.exe 가 자기 전체 경로를 넣어 버려 읽히지 않는다. */
-function label(
-  id: string,
-  stat: Record<string, PaneStat>,
-  titles: Record<string, string>,
-): string {
-  const t = titles[id];
-  const tail = t ? t.split(/[\\/]/).pop() || t : "";
-  // 에이전트는 자기 세션 이름을 터미널 타이틀에 실어 보낸다(claude 의 --name
-  // 설명에 그렇게 적혀 있다). 그 이름이 "claude" 라는 프로세스 이름보다 훨씬
-  // 쓸모 있다 — 여러 개를 띄워 놓으면 헤더가 전부 "claude" 라 구별이 안 된다.
-  // claude 는 일하는 중이면 타이틀 앞에 표시를 하나 붙인다(✱ 따위). 그것까지
-  // 헤더에 들이면 이름이 밀려 보이므로 앞머리의 기호는 떼고 쓴다.
-  const named = tail.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-  if (stat[id]?.agent && named) return named;
-  const p = stat[id]?.proc;
-  if (p) return p;
-  return tail || "shell";
-}
-
-/** 홈 아래는 `~` 로 접는다. 목록에서 알고 싶은 것은 어느 프로젝트인지지 전체 경로가 아니다. */
-function shortPath(p: string | null): string {
-  if (!p) return "셸";
-  return p.replace(/^[A-Za-z]:\/Users\/[^/]+/, "~").replace(/\//g, "\\");
-}
 
 /** 옆칸 접기·펴기. 왼쪽 칸이 채워졌는지로 지금 상태를 말한다. */
 function SideMark({ open }: { open: boolean }) {
@@ -1101,52 +911,3 @@ function SideMark({ open }: { open: boolean }) {
   );
 }
 
-/** 그 칸을 맡은 캐릭터의 얼굴.
- *
- *  그림이 아직 없으면 그 사람의 색으로 칠한 원에 역할 기호(에이전트=별,
- *  셸=프롬프트)를 얹는다 — 그림이 들어오기 전에도 칸끼리는 구별되어야 한다. */
-function Face({ slug, agent }: { slug?: string; agent?: boolean }) {
-  const url = faceUrl(slug);
-  const who = slug ? bySlug.get(slug) : undefined;
-  if (url) return <img className="face" src={url} alt={who?.name ?? ""} draggable={false} />;
-  return (
-    <span className="face ph" style={who ? { background: who.header_color } : undefined}>
-      {agent ? <AgentMark /> : <ShellMark />}
-    </span>
-  );
-}
-
-/** 에이전트가 도는 칸. 무엇이 특별한지 한눈에 보이도록 채운 별로 둔다. */
-function AgentMark() {
-  return (
-    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-      <path d="M8 1.6 L9.5 6.3 L14.2 8 L9.5 9.7 L8 14.4 L6.5 9.7 L1.8 8 L6.5 6.3 Z" fill="currentColor" />
-    </svg>
-  );
-}
-
-/** 그냥 셸인 칸. 프롬프트 기호가 곧 그 뜻이다. */
-function ShellMark() {
-  return (
-    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-      <path
-        d="M3.2 4.4 L6.6 8 L3.2 11.6 M8.4 11.8 H12.8"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function Row({ m, lead }: { m: Member; lead?: boolean }) {
-  return (
-    <div className={lead ? "member lead" : "member"}>
-      <span className="pip" style={{ background: m.header_color }} />
-      <span className="who">{m.name}</span>
-      <span className="school">{m.school}</span>
-    </div>
-  );
-}

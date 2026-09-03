@@ -196,32 +196,30 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
   기억이 없는 파일이 있으면 그건 남의 것이다.
 - **exe 를 구울 때 `failed to remove file` 이 나면** 다른 세션이 같은 것을 굽고 있거나
   앱이 떠 있는 것이다. 죽이기 전에 사용자 창인지 본다.
+- **커밋과 빌드는 한 세션이 전담하는 편이 낫다.** 나머지는 파일만 고친다.
 
-## 자율 테스트 우선
+### 일을 받으면 어느 파일을 만지는지부터 말한다
 
-"테스트 해보세요"라고 떠넘기지 말고 직접 실행·확인·수정 사이클을 돌려라.
-`KASASPACE_AUTOKEYS`(진짜 KeyboardEvent) · `KASASPACE_AUTOSEND`(`term.input()`) ·
-`scripts/shot.ps1` 로 제품 경로를 그대로 탈 수 있다. 사용법은 README.
-
-**OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다** — 포커스가 다른 창에 있으면 사용자
-창에 타이핑된다. 실제로 한 번 새어 나갔다. 손잡이가 없으면 앱 안에 env 로 만든다.
-
-마우스도 `KASASPACE_AUTOMOUSE`(셀렉터 기준 좌표 드래그·클릭)로 만들 수 있게 됐다.
-`KASASPACE_PROBE` 는 JS 결과를 화면 오버레이로 찍어 준다 — 릴리스 웹뷰에 콘솔이 없어서다.
-
-사용자에게 넘길 수밖에 없는 것은 **IME 조합**뿐이다. 합성 CompositionEvent 로 우리 쪽
-게이트는 검증되지만, 진짜 IME 가 WebView2 에 무엇을 보내는지는 실기로만 알 수 있다.
+사용자가 일을 나눠 시킬 때 겹치는지 판단할 근거가 된다. 아래 코드 맵으로 자기 영역을
+먼저 밝히고 시작한다.
 
 ## 코드 맵
 
-| | |
+| 파일 | 하는 일 |
 |---|---|
-| `src-tauri/src/lib.rs` (309줄) | PTY ↔ 웹뷰 다리, pane 상태, 검증 손잡이 |
-| `src-tauri/src/workspace.rs` (255줄) | git · 세션 · claude 대화 목록 |
-| `ui/App.tsx` (949줄) | 탭 · 배치 · 단축키 · 사이드바 세션 목록 · 세션 복원 |
-| `ui/layout.ts` (196줄) | pane 배치 트리 · 끌어 옮기기 |
-| `ui/Term.tsx` (262줄) | xterm.js 배선 · 한글 IME · 복원 명령 |
-| `ui/app.css` (648줄) · `ui/theme.css` (50줄) | 치이카와 테마 |
+| `src-tauri/src/lib.rs` (294줄) | PTY ↔ 웹뷰 다리, pane 상태, 검증 손잡이 |
+| `src-tauri/src/workspace.rs` (255줄) | git · 세션 파일 · claude 대화 목록 |
+| `ui/App.tsx` (913줄) | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
+| `ui/Sidebar.tsx` (182줄) | 옆칸 — 탭 묶음과 칸 목록. 그리기만 하고 판단은 App 이 준다 |
+| `ui/roster.tsx` (101줄) | 치이카와 로스터와 얼굴 · 누가 어느 칸을 맡는가 |
+| `ui/session.ts` (72줄) | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
+| `ui/layout.ts` (213줄) | pane 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
+| `ui/Term.tsx` (268줄) | xterm.js 배선 · 한글 IME · 복원 명령 |
+| `ui/app.css` (774줄) · `ui/theme.css` (88줄) | 치이카와 테마 |
+| `ui/assets/faces/` · `scripts/make-motion.py` | 얼굴 그림과 움직임 |
+
+`ui/App.tsx` 는 얼개라 여러 일이 만나기 쉽다. **거기를 만지는 일은 한 번에 하나만** 돌린다.
+옆칸 모양 · 캐릭터 · 세션 판정은 각자 제 파일로 갈라 두었으므로 서로 부딪히지 않는다.
 
 ## 옆 폴더 kasaterm 을 볼 때
 
