@@ -543,6 +543,19 @@ export default function App() {
     };
   }, []);
 
+  // 칸이 하나도 없는 탭은 치운다. "셸이 다 닫혔어"만 남은 탭이 목록에 쌓이면
+  // 켤 때마다 어느 탭이 살아 있는지 세어 봐야 한다. 마지막 하나는 남긴다 —
+  // 전부 닫혔을 때 새 셸을 여는 자리가 있어야 한다.
+  useEffect(() => {
+    setTabs((ts) => {
+      if (ts.length <= 1) return ts;
+      const live = ts.filter((t) => t.layout);
+      if (!live.length || live.length === ts.length) return ts;
+      setActive((a) => Math.min(a, live.length - 1));
+      return live;
+    });
+  }, [tabs]);
+
   // 포커스가 있던 pane 이 사라졌으면 아무 데나가 아니라 남은 첫 pane 으로.
   useEffect(() => {
     setTabs((ts) => {

@@ -100,6 +100,12 @@ export function Term({
     // 않는 편이 맞다. false 를 주면 xterm 은 그 변환까지 건너뛴다.
     t.attachCustomWheelEventHandler(() => (t.options.scrollback ?? 0) > 0);
 
+    // 첫 줄부터 그리면 내용이 화면 위쪽에 몰리고 아래가 텅 빈다. 셸이든
+    // claude 든 마찬가지다 — 대체 화면을 안 쓰므로 늘 커서가 있는 자리부터
+    // 그린다. 미리 화면 높이만큼 빈 줄을 깔아 두면 커서가 맨 아래로 내려가서,
+    // 프롬프트가 눈이 가는 자리에서 시작하고 출력은 위로 밀려 올라간다.
+    if (t.rows > 1) t.write("\n".repeat(t.rows - 1));
+
     let alive = true;
     const unlisteners: Array<() => void> = [];
 
