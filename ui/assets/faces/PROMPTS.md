@@ -16,10 +16,16 @@
 **움직이는 그림은 만들어 준다.** 정지 그림만 넣고 이걸 돌리면 된다:
 
 ```powershell
-python scripts/make-motion.py             # faces 의 모든 그림
-python scripts/make-motion.py hachiware   # 한 명만
-python scripts/make-motion.py --force     # 이미 있는 것도 다시
+python scripts/make-motion.py                 # faces 의 모든 그림
+python scripts/make-motion.py hachiware       # 한 명만
+python scripts/make-motion.py --force         # 이미 있는 것도 다시
+python scripts/make-motion.py --amount 0.2    # 더 약하게 (기본 0.45)
+python scripts/make-motion.py --amount 1      # 확 뛰게
 ```
+
+세기를 바꿔 다시 구우려면 `--force` 를 같이 준다. 기본 0.45 는 화면에서 위아래로
+3px 남짓 움직이는 정도다 — 곁눈질로 "저 칸이 일하는구나"만 알면 되는 자리라
+크게 주면 귀엽기보다 정신없다.
 
 `<slug>.png` 한 장에서 `<slug>-work.png`(APNG)를 굽는다. 눌렀다 펴면서 뛰는 움직임이고,
 프레임을 따로 그리지 않는다 — 스무 명분을 손으로 그릴 수 없고, 생성 AI 로 프레임을 뽑으면

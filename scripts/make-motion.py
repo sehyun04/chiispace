@@ -1,8 +1,10 @@
 # 정지 그림 한 장에서 "일하는 중" 움직임을 만든다.
 #
-#   python scripts/make-motion.py             # faces 의 모든 그림
-#   python scripts/make-motion.py hachiware   # 한 명만
-#   python scripts/make-motion.py --force     # 이미 있는 것도 다시 만든다
+#   python scripts/make-motion.py                 # faces 의 모든 그림
+#   python scripts/make-motion.py hachiware       # 한 명만
+#   python scripts/make-motion.py --force         # 이미 있는 것도 다시 만든다
+#   python scripts/make-motion.py --amount 0.2    # 더 약하게 (기본 0.45)
+#   python scripts/make-motion.py --amount 1      # 확 뛰게
 #
 # <slug>.png -> <slug>-work.png (APNG). 앱은 그 칸이 일하는 중일 때 그것을 쓰고,
 # 있으면 CSS 로 통통 뛰게 만들지 않는다 — 움직임이 둘이면 산만해서다.
@@ -23,50 +25,54 @@ FRAMES = 14
 SIZE = 256  # 화면에서는 84px 이 최대라 이 정도면 충분하다
 MS = 70  # 프레임 간격. 14프레임이면 한 번 뛰는 데 약 1초
 
-# 움직임의 세기. 크게 주면 귀엽기보다 정신없다.
+# 세기를 다 끌어올린 값. 실제로는 여기에 --amount 를 곱해 쓴다.
+# 1.0 으로 두면 확실히 뛰지만 곁눈질로 볼 때 정신없다 — 기본은 그 절반쯤이다.
 LIFT = 0.13  # 뜨는 높이(그림 높이 대비)
 SQUASH = 0.10  # 바닥에서 눌리는 정도
 TILT = 2.5  # 기울기(도)
+DEFAULT_AMOUNT = 0.45
 
 
-def frame(base: Image.Image, t: float) -> Image.Image:
+def frame(base: Image.Image, t: float, amount: float) -> Image.Image:
     """위상 t(0..1) 에서의 한 장. t=0 이 바닥, t=0.5 가 꼭대기다."""
     w, h = base.size
+    squash, tilt = SQUASH * amount, TILT * amount
     lift = math.sin(math.pi * t)  # 0 -> 1 -> 0
     ground = (1.0 - lift) ** 2  # 바닥에 가까울수록 1
 
     # 뜰 때는 살짝 길쭉해지고, 닿을 때는 눌리면서 옆으로 퍼진다.
-    sx = 1.0 + SQUASH * ground - 0.4 * SQUASH * lift
-    sy = 1.0 - SQUASH * ground + 0.4 * SQUASH * lift
+    sx = 1.0 + squash * ground - 0.4 * squash * lift
+    sy = 1.0 - squash * ground + 0.4 * squash * lift
 
     body = base.resize((max(1, int(w * sx)), max(1, int(h * sy))), Image.LANCZOS)
-    if TILT:
-        body = body.rotate(TILT * math.sin(2 * math.pi * t), resample=Image.BICUBIC, expand=True)
+    if tilt:
+        body = body.rotate(tilt * math.sin(2 * math.pi * t), resample=Image.BICUBIC, expand=True)
 
     canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     # 바닥은 붙여 두고 위로만 뜬다. 가운데 정렬로 두면 뛰는 게 아니라 떠 있게 보인다.
     x = (w - body.width) // 2
-    y = h - body.height - int(h * LIFT * lift)
+    y = h - body.height - int(h * LIFT * amount * lift)
     canvas.alpha_composite(body, (x, max(0, y)))
     return canvas
 
 
-def fit(src: Image.Image, size: int) -> Image.Image:
+def fit(src: Image.Image, size: int, amount: float) -> Image.Image:
     """정사각 캔버스 안에 넣는다. 뛸 자리를 위쪽에 비워 둔다."""
     img = src.convert("RGBA")
-    room = int(size * (1.0 - LIFT))  # 뜨는 높이만큼 캐릭터를 작게
+    # 약하게 뛸수록 비워 둘 자리도 적다 — 그만큼 캐릭터를 크게 그릴 수 있다.
+    room = int(size * (1.0 - LIFT * amount))
     img.thumbnail((room, room), Image.LANCZOS)
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     canvas.alpha_composite(img, ((size - img.width) // 2, size - img.height))
     return canvas
 
 
-def build(png: Path, force: bool) -> str:
+def build(png: Path, force: bool, amount: float) -> str:
     out = png.with_name(f"{png.stem}-work.png")
     if out.exists() and not force:
         return f"{png.stem}: 이미 있어서 건너뜀 (--force 로 다시 만든다)"
-    base = fit(Image.open(png), SIZE)
-    frames = [frame(base, i / FRAMES) for i in range(FRAMES)]
+    base = fit(Image.open(png), SIZE, amount)
+    frames = [frame(base, i / FRAMES, amount) for i in range(FRAMES)]
     frames[0].save(
         out,
         save_all=True,
@@ -79,8 +85,15 @@ def build(png: Path, force: bool) -> str:
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
-    force = "--force" in sys.argv
+    argv = sys.argv[1:]
+    force = "--force" in argv
+    amount = DEFAULT_AMOUNT
+    if "--amount" in argv:
+        i = argv.index("--amount")
+        if i + 1 < len(argv):
+            amount = float(argv[i + 1])
+            argv = argv[:i] + argv[i + 2 :]
+    args = [a for a in argv if not a.startswith("-")]
     pngs = sorted(
         p
         for p in FACES.glob("*.png")
@@ -89,8 +102,9 @@ def main() -> int:
     if not pngs:
         print(f"만들 그림이 없다: {FACES}")
         return 1
+    print(f"세기 {amount:g} (1 이 최대, 기본 {DEFAULT_AMOUNT})")
     for p in pngs:
-        print(build(p, force))
+        print(build(p, force, amount))
     return 0
 
 

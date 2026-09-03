@@ -1,3 +1,6 @@
 node_modules/
 dist/
 target/
+
+# playwright MCP 가 남기는 임시 로그. 저장소에 들어갈 것이 아니다.
+.playwright-mcp/
