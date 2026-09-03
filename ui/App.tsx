@@ -70,9 +70,9 @@ const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh"
 const leader = roster.leader as Member;
 const members = roster.members as Member[];
 
-/** 배정할 수 있는 사람들. 대장(하치와레)이 앞에 서서 첫 칸을 맡는다. */
-const cast: Member[] = [leader, ...members];
-const bySlug = new Map(cast.map((m) => [m.slug, m]));
+/** 로스터 전체. 이름을 되찾을 때 쓴다. */
+const roll: Member[] = [leader, ...members];
+const bySlug = new Map(roll.map((m) => [m.slug, m]));
 
 /** `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙는다.
  *  vite 가 빌드 때 모아 주므로 파일을 넣는 것 말고 할 일이 없다. */
@@ -83,6 +83,11 @@ const faces = import.meta.glob("./assets/faces/*.png", {
 }) as Record<string, string>;
 /** `<slug>.png` 가 기본, `<slug>-work.png` 가 있으면 일하는 중에는 그걸 쓴다.
  *  APNG·GIF 를 그 이름으로 넣어도 된다 — `<img>` 가 알아서 돌린다. */
+/** 그림이 들어온 사람만 칸을 맡는다.
+ *
+ *  스무 명을 다 세워 두면 아직 얼굴이 없는 사람이 색 동그라미로 섞여 나와,
+ *  들어온 그림이 오히려 묻힌다. 그림을 더 넣으면 여기가 저절로 늘어난다.
+ *  하나도 없으면 로스터 전체로 돌아간다 — 그때는 색으로라도 칸을 갈라야 한다. */
 const faceUrl = (slug?: string, state?: "work") => {
   if (!slug) return undefined;
   if (state) {
@@ -95,6 +100,11 @@ const faceUrl = (slug?: string, state?: "work") => {
  *  우리가 통통 뛰게 만들지 않는다 — 두 움직임이 겹치면 산만하다. */
 const hasWorkFace = (slug?: string) =>
   !!slug && !!faces[`./assets/faces/${slug}-work.png`];
+
+const drawn = roll.filter((m) => faceUrl(m.slug));
+const cast: Member[] = drawn.length ? drawn : roll;
+/** 그림이 하나라도 들어왔는가. 그때부터는 얼굴 없는 배정을 갈아 끼운다. */
+const anyFace = drawn.length > 0;
 
 const pct = (r: L.Rect) => ({
   left: `${r.x * 100}%`,
@@ -472,7 +482,8 @@ export default function App() {
   // 때 얼굴이 바뀌면 그게 더 낯설다.
   useEffect(() => {
     const live = tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []));
-    const need = live.filter((id) => !casting[id]);
+    // 아직 아무도 안 맡았거나, 맡은 사람의 그림이 빠진 칸을 다시 짝지어 준다.
+    const need = live.filter((id) => !casting[id] || (anyFace && !faceUrl(casting[id])));
     if (!need.length) return;
     setCasting((c) => {
       const used = new Set(Object.values(c));
