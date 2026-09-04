@@ -19,6 +19,7 @@ import {
   liveAttach,
   restoreCmd,
   seedSession,
+  splitContinue,
   type PaneStat,
   type ShellKind,
   type Seed,
@@ -249,6 +250,36 @@ export default function App() {
                 m[id] = liveAttach(seed, bg);
               }
             }
+            // 저장된 `claude --continue` 를 그대로 치면 안 된다. 그런 칸이 둘이면
+            // 둘 다 그 폴더의 가장 최근 대화로 열린다 — 실제로 두 칸이 같은 세션으로
+            // 열렸다. 무엇이 열릴지는 지금 알 수 있으니(가장 최근이 곧 그것이다)
+            // id 로 바꿔 짚고, 나머지 칸은 새 대화로 연다. 자세한 것은 session.ts.
+            const rootOf: Record<string, string | null> = {};
+            for (const t of s.tabs ?? []) {
+              for (const id of t.layout ? L.leaves(t.layout) : []) rootOf[id] = t.root;
+            }
+            const byRoot = new Map<string, string[]>();
+            for (const [id, seed] of Object.entries(m)) {
+              if (seed.cmd !== "claude --continue") continue;
+              const r = rootOf[id] ?? "";
+              byRoot.set(r, [...(byRoot.get(r) ?? []), id]);
+            }
+            for (const [root, ids] of byRoot) {
+              if (!root) {
+                // 폴더를 모르면 무엇이 열릴지도 모른다. 그래도 겹치지는 않게
+                // `--continue` 는 맨 앞 칸에만 남긴다.
+                for (const id of ids.slice(1)) m[id] = { cmd: "claude", auto: true };
+                continue;
+              }
+              const list = await invoke<{ id: string }[]>("claude_sessions", { root }).catch(
+                () => [] as { id: string }[],
+              );
+              const picked = splitContinue(ids, list[0]?.id, new Set(Object.values(sessionOf.current)));
+              for (const [id, v] of Object.entries(picked)) {
+                if (v.sid) sessionOf.current[id] = v.sid;
+                m[id] = liveAttach(v.seed, bg);
+              }
+            }
             setSeeds(m);
             // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
             // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
@@ -387,10 +418,24 @@ export default function App() {
         if (alive) before = new Set(list.map((c) => c.id));
       })
       .catch(() => {});
-    // 파일이 만들어질 틈을 준다. claude 가 뜨자마자 첫 줄을 쓰지는 않는다.
-    const h = setTimeout(() => {
-      if (!before) return;
+    // 한 번만 보고 끝내면 안 된다. claude 는 뜨자마자 첫 줄을 쓰지 않고 **사용자가
+    // 처음 말을 걸 때** 대화 파일을 만든다. 그게 몇 분 뒤일 수도 있는데, 그때는 이
+    // effect 가 다시 돌 일이 없어(칸 목록이 그대로다) 그 칸은 영영 안 붙는다.
+    // 안 붙으면 저장이 `--continue` 로 떨어지고, 그런 칸이 둘이면 다음에 켤 때
+    // 두 칸이 같은 대화로 열린다 — 사용자가 겪은 게 그것이다.
+    //
+    // 그래서 붙을 때까지 계속 본다. 다만 무한정은 아니다. 여기서 "새로 생긴 대화"는
+    // 다른 창에서 띄운 claude 의 것일 수도 있어서, 오래 열어 둘수록 남의 것을 집을
+    // 확률만 올라간다. 몇 분이면 사용자가 말을 걸고도 남는다.
+    let left = 60; // 3초 * 60 = 3분
+    const look = () => {
+      if (!before || !alive) return;
       const seen = before;
+      const need = claudePanes.split(",").filter((id) => !sessionOf.current[id]);
+      if (!need.length || left-- <= 0) {
+        clearInterval(h);
+        return;
+      }
       invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", {
         root: curRoot,
       })
@@ -398,10 +443,10 @@ export default function App() {
           if (!alive) return;
           const taken = new Set(Object.values(sessionOf.current));
           const titles: Record<string, string> = {};
-          for (const paneId of want) {
+          for (const paneId of need) {
             const fresh = list.find((c) => !seen.has(c.id) && !taken.has(c.id));
-            // 새로 생긴 대화가 없으면 아무것도 붙이지 않는다. 그러면 복원할 때
-            // --continue 로 물러서는데, 남의 대화를 여는 것보다 그편이 낫다.
+            // 새로 생긴 대화가 없으면 아무것도 붙이지 않는다. 남의 대화를 집는
+            // 것보다 다음 차례를 기다리는 편이 낫다.
             if (!fresh) break;
             sessionOf.current[paneId] = fresh.id;
             taken.add(fresh.id);
@@ -411,10 +456,12 @@ export default function App() {
           // 제목은 아래 effect 가 이어서 계속 맞춘다.
         })
         .catch(() => {});
-    }, 4000);
+    };
+    // 첫 조회는 파일이 만들어질 틈을 주고 나서. 그 뒤로는 3초마다 다시 본다.
+    const h = setInterval(look, 3000);
     return () => {
       alive = false;
-      clearTimeout(h);
+      clearInterval(h);
     };
   }, [claudePanes, curRoot]);
 

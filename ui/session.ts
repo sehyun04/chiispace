@@ -78,6 +78,40 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
   return { ...seed, cmd: `claude attach ${short}` };
 }
 
+/** 세션 ID 를 모르는 claude 칸들을 서로 다른 대화로 갈라 준다.
+ *
+ *  저장된 `claude --continue` 를 그대로 쳐서는 안 된다. `--continue` 는 "그 폴더의
+ *  가장 최근"이라 그런 칸이 둘이면 **둘 다 같은 대화로 열린다** — 사용자 눈에는
+ *  복원이 고장 난 것이고, 게다가 한 대화에 두 프로세스가 붙는다. 실제로 그렇게 열렸다.
+ *
+ *  그런데 `--continue` 가 무엇을 열지는 우리가 미리 안다. 켤 때 그 폴더의 가장 최근
+ *  대화가 곧 답이므로, `--continue` 대신 그 id 를 짚어 `--resume` 으로 연다. 그러면
+ *  어느 대화인지 지금 알게 되어 다음 저장부터는 `--resume <id>` 로 남는다 — 한 번
+ *  `--continue` 로 떨어지면 영영 못 벗어나던 고리가 여기서 끊긴다. 살아 있는
+ *  백그라운드 대화인지도 id 가 있어야 가려내 `attach` 로 붙을 수 있다.
+ *
+ *  나머지 칸은 새 대화(`claude`)로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이
+ *  어느 것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다
+ *  칸이 뜨자마자 죽는다. 모르면 새로 여는 편이 낫다 — 남의 것을 뺏지 않고, 그 대화는
+ *  새로 생긴 파일이라 곧 그 칸의 것으로 붙는다. */
+export function splitContinue(
+  panes: string[],
+  newest: string | undefined,
+  taken: Set<string>,
+): Record<string, { seed: Seed; sid?: string }> {
+  const out: Record<string, { seed: Seed; sid?: string }> = {};
+  let first = newest && !taken.has(newest) ? newest : undefined;
+  for (const id of panes) {
+    if (first) {
+      out[id] = { seed: { cmd: `claude --resume ${first}`, auto: true }, sid: first };
+      first = undefined;
+      continue;
+    }
+    out[id] = { seed: { cmd: "claude", auto: true } };
+  }
+  return out;
+}
+
 /** 예전 세션은 명령을 문자열로만 적어 두었다. */
 export const asSeed = (v: unknown): Seed | null =>
   typeof v === "string" ? { cmd: v } : v && typeof v === "object" ? (v as Seed) : null;
