@@ -85,6 +85,9 @@ export default function App() {
   // pane 이 어느 claude 대화를 붙들고 있는지. 한 번 정해지면 그대로 둔다 —
   // 그 pane 의 claude 가 계속 같은 파일에 쓰고 있으므로 다시 고를 이유가 없다.
   const sessionOf = useRef<Record<string, string>>({});
+  // 그 칸에서 에이전트를 실제로 본 적이 있는가. "아직 안 떴다"와 "떴다가 내려갔다"를
+  // 가르는 데 쓴다 — 스냅샷만으로는 둘이 똑같아 보인다.
+  const sawAgent = useRef<Record<string, boolean>>({});
   // 그 대화에서 마지막으로 시킨 일. 여러 pane 에 claude 를 띄워 두면 헤더가
   // 전부 "claude" 라 어느 쪽이 무슨 작업이었는지 알 수 없다.
   const [sessionTitle, setSessionTitle] = useState<Record<string, string>>({});
@@ -281,6 +284,11 @@ export default function App() {
               }
             }
             setSeeds(m);
+            // 되살릴 명령을 지금 바로 들고 있는다. procs 는 "이 칸이 무엇을
+            // 돌리는가"인데, 저장은 그것만 보고 쓴다. 켠 직후 몇 초 동안은 셸이
+            // 아직 이 명령을 띄우는 중이라 pane_status 로는 아무것도 안 보이고,
+            // 그 사이에 앱을 끄면 복원 정보가 통째로 빈 채로 저장된다.
+            procs.current = { ...m };
             // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
             // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
             // 릴리스 웹뷰에는 콘솔이 없으니 KASASPACE_PROBE 로 들여다볼 자리가 필요하다.
@@ -301,6 +309,10 @@ export default function App() {
         setTabs((ts) => ts.map((t, i) => (i === 0 ? { ...t, root: cli } : t)));
         setActive(0);
       }
+      // 어느 칸이 어느 대화를 쥐고 있는지 들여다볼 창구. ref 객체를 그대로
+      // 걸어 두므로 값이 바뀌면 여기서도 바로 보인다 — 이 배선은 화면에 안
+      // 남아서 스크린샷으로는 확인할 수 없고, 릴리스 웹뷰에는 콘솔도 없다.
+      (window as unknown as { __bind?: unknown }).__bind = sessionOf.current;
       setBooted(true);
     })();
   }, []);
@@ -525,12 +537,23 @@ export default function App() {
   // 이미 죽었다"일 수 있고, 그 둘을 스냅샷만으로는 구별할 수 없다.
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
+      if (p.agent) sawAgent.current[id] = true;
       const name = restoreCmd(p, sessionOf.current[id]);
       if (name) procs.current[id] = name;
       else {
         delete procs.current[id];
         // claude 가 내려갔으면 붙여 둔 대화도 놓는다. 그 pane 에서 다음에
         // 띄우는 것은 다른 대화일 수 있다.
+        //
+        // 다만 **아직 안 뜬 것**과 헷갈리면 안 된다. 복원한 칸은 셸을 띄우고
+        // 명령을 쳐 넣기까지 몇 초가 걸리고 그동안 전경은 그냥 셸인데, 그때
+        // 놓아 버리면 방금 붙여 둔 대화를 잃는다. 그러면 그 칸은 다시 붙을
+        // 길이 없어(이어 연 대화는 "새로 생긴 파일"이 아니다) 저장이
+        // `--continue` 로 떨어지고, 그런 칸이 둘이면 다음에 켤 때 같은 대화가
+        // 두 칸에 열린다. 폴링 주기와 셸이 뜨는 속도가 엇갈리는 경합이라
+        // 어떤 날은 멀쩡하고 어떤 날은 깨졌다.
+        if (!sawAgent.current[id]) continue;
+        delete sawAgent.current[id];
         delete sessionOf.current[id];
         setSessionTitle((t) => (id in t ? { ...t, [id]: "" } : t));
       }

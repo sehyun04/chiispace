@@ -57,7 +57,21 @@ export function restoreCmd(p: PaneStat, sid?: string): Seed | null {
 
 /** 저장된 복원 명령에서 claude 세션 ID 를 꺼낸다. */
 export const seedSession = (cmd: string): string | null =>
-  /--resume\s+([0-9a-f-]{36})/i.exec(cmd)?.[1] ?? null;
+  /--(?:resume|session-id)\s+([0-9a-f-]{36})/i.exec(cmd)?.[1] ?? null;
+
+/** v4 UUID. `crypto.randomUUID` 는 보안 컨텍스트에서만 있어서 웹뷰가 앱을 어떤
+ *  주소로 띄우느냐에 따라 없을 수 있다. 있으면 그걸 쓰고 없으면 직접 만든다 —
+ *  여기서 던지면 그 칸이 아예 안 열린다. */
+function uuid(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  const b = new Uint8Array(16);
+  c.getRandomValues(b);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
 
 /** 살아 있는 백그라운드 대화는 `--resume` 이 아니라 `attach` 로 붙는다.
  *
@@ -90,10 +104,14 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
  *  `--continue` 로 떨어지면 영영 못 벗어나던 고리가 여기서 끊긴다. 살아 있는
  *  백그라운드 대화인지도 id 가 있어야 가려내 `attach` 로 붙을 수 있다.
  *
- *  나머지 칸은 새 대화(`claude`)로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이
- *  어느 것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다
- *  칸이 뜨자마자 죽는다. 모르면 새로 여는 편이 낫다 — 남의 것을 뺏지 않고, 그 대화는
- *  새로 생긴 파일이라 곧 그 칸의 것으로 붙는다. */
+ *  나머지 칸은 새 대화로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이 어느
+ *  것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다 칸이
+ *  뜨자마자 죽는다. 모르면 새로 여는 편이 낫다 — 남의 것을 뺏지 않는다.
+ *
+ *  그때 **id 를 우리가 정해 준다**(`--session-id`). 그러지 않으면 그 칸이 무슨
+ *  대화인지 알아내려고 "방금 새로 생긴 대화 파일"을 뒤져야 하는데, 그 사이 다른
+ *  창에서 claude 를 띄우면 그쪽 대화를 이 칸의 것으로 착각한다 — 실제로 한 칸이
+ *  남의 대화를 물어 엉뚱한 이름이 떴다. 우리가 낸 id 는 틀릴 수가 없다. */
 export function splitContinue(
   panes: string[],
   newest: string | undefined,
@@ -107,7 +125,8 @@ export function splitContinue(
       first = undefined;
       continue;
     }
-    out[id] = { seed: { cmd: "claude", auto: true } };
+    const fresh = uuid();
+    out[id] = { seed: { cmd: `claude --session-id ${fresh}`, auto: true }, sid: fresh };
   }
   return out;
 }

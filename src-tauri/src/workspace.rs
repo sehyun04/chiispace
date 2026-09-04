@@ -129,56 +129,100 @@ pub struct ClaudeSession {
     id: String,
     /// 마지막으로 쓰인 시각(ms). 어느 pane 의 대화인지는 이걸로 가린다.
     mtime: u64,
-    /// 그 대화에서 마지막으로 시킨 일. pane 헤더에 이걸 걸어야 여러 개를
-    /// 띄워 놓고도 어느 쪽이 무슨 작업이었는지 안다.
+    /// 그 대화를 뭐라고 부를지. 사람이 붙인 이름이 있으면 그것, 없으면
+    /// 마지막으로 시킨 일이다. pane 헤더에 이걸 걸어야 여러 개를 띄워 놓고도
+    /// 어느 쪽이 무슨 대화였는지 안다.
     title: String,
 }
 
-/// 대화에서 마지막 사용자 프롬프트를 뽑는다.
+/// 대화에서 주운 것: 사람이 붙인 이름과, 마지막 사용자 프롬프트.
+#[derive(Default)]
+struct Scan {
+    name: String,
+    prompt: String,
+}
+
+impl Scan {
+    /// 이름이 있으면 이름, 없으면 마지막 프롬프트.
+    fn pick(self) -> String {
+        if self.name.is_empty() { self.prompt } else { self.name }
+    }
+}
+
+/// 대화에서 이름과 마지막 프롬프트를 같이 줍는다.
 ///
-/// jsonl 은 한 줄에 한 레코드라 줄 단위로 훑고, `last-prompt` 가 붙은 줄만
-/// 파싱한다. 대화가 수 MB 로 자라므로 모든 줄을 JSON 으로 뜯으면 그 값을 치른다.
-fn scan_title<R: std::io::BufRead>(r: R) -> String {
-    let mut last = String::new();
+/// jsonl 은 한 줄에 한 레코드라 줄 단위로 훑고, 찾는 표시가 든 줄만 파싱한다.
+/// 대화가 수십 MB 로 자라므로 모든 줄을 JSON 으로 뜯으면 그 값을 치른다.
+fn scan_title<R: std::io::BufRead>(r: R) -> Scan {
+    let mut out = Scan::default();
     for line in r.lines().map_while(Result::ok) {
-        if !line.contains("\"last-prompt\"") {
+        let named = line.contains("\"agent-name\"");
+        if !named && !line.contains("\"last-prompt\"") {
             continue;
         }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+        if named {
+            // `/rename` 이나 `--name` 으로 붙인 이름. 바꿀 때마다 새 레코드가
+            // 쌓이므로 마지막 것이 지금 이름이다.
+            if let Some(n) = v.get("agentName").and_then(|x| x.as_str()) {
+                let one = n.trim();
+                if !one.is_empty() {
+                    out.name = one.chars().take(80).collect();
+                }
+            }
+            continue;
+        }
         // lastPrompt 가 빠진 레코드도 섞여 있다. 그건 건너뛰고 그 앞의 것을 남긴다.
         if let Some(p) = v.get("lastPrompt").and_then(|x| x.as_str()) {
             let one = p.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
             if !one.is_empty() {
-                last = one.chars().take(80).collect();
+                out.prompt = one.chars().take(80).collect();
             }
         }
     }
-    last
+    out
 }
 
+/// 그 대화를 화면에 뭐라고 걸지.
+///
+/// **이름이 있으면 이름이 이긴다.** 마지막 프롬프트는 물을 때마다 바뀌므로 칸
+/// 이름으로 걸어 두면 조금 전까지 "카사스페"이던 칸이 방금 친 질문으로 바뀐다 —
+/// 이름을 붙여 둔 뜻이 없어지고, 나중에 어느 칸이 무엇이었는지 헷갈린다.
+/// 이름이 없는 대화에서만 마지막 프롬프트로 대신한다.
 fn session_title(path: &std::path::Path) -> String {
-    use std::io::{BufReader, Seek, SeekFrom};
+    use std::io::{BufReader, Read, Seek, SeekFrom};
     let Ok(mut f) = std::fs::File::open(path) else {
         return String::new();
     };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    // 이 값을 헤더에 걸어 두고 주기적으로 다시 읽는데, 대화는 수 MB 까지 자란다.
-    // 최근 프롬프트는 뒤쪽에 있으므로 꼬리부터 본다. 거기서 못 찾을 때만 전부 훑는다.
-    const TAIL: u64 = 512 * 1024;
-    if len > TAIL && f.seek(SeekFrom::Start(len - TAIL)).is_ok() {
+    // 이 값을 헤더에 걸어 두고 주기적으로 다시 읽는데, 대화는 수십 MB 까지 자란다.
+    // 통째로 훑지 않고 양 끝만 본다.
+    const EDGE: u64 = 512 * 1024;
+    if len > EDGE && f.seek(SeekFrom::Start(len - EDGE)).is_ok() {
         let mut r = BufReader::new(&mut f);
         // 잘린 첫 줄은 JSON 이 아니므로 버린다.
         let mut cut = String::new();
         let _ = std::io::BufRead::read_line(&mut r, &mut cut);
-        let t = scan_title(r);
-        if !t.is_empty() {
-            return t;
+        let tail = scan_title(r);
+        if !tail.name.is_empty() {
+            return tail.name;
+        }
+        // 이름은 대화 앞머리에서 한 번 붙고 마는 수가 있어 꼬리에는 없을 수 있다.
+        // 그렇다고 수십 MB 를 다 훑을 수는 없으니 머리 쪽도 같은 크기만 본다.
+        if let Ok(head) = std::fs::File::open(path) {
+            let got = scan_title(BufReader::new(head.take(EDGE)));
+            if !got.name.is_empty() {
+                return got.name;
+            }
+        }
+        if !tail.prompt.is_empty() {
+            return tail.prompt;
         }
     }
     let Ok(whole) = std::fs::File::open(path) else {
         return String::new();
     };
-    scan_title(BufReader::new(whole))
+    scan_title(BufReader::new(whole)).pick()
 }
 
 /// 경로를 폴더 이름과 맞대 보기 위한 정규화. claude 가 쓰는 인코딩 규칙을
