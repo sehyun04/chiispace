@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    kasaspace_lib::run()
+    chiispace_lib::run()
 }

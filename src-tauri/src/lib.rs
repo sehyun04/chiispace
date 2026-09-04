@@ -128,7 +128,7 @@ fn parse_chord(tok: &str) -> ((bool, bool, bool), &str) {
 }
 
 /// 헤드리스 검증 손잡이. env 가 있을 때만 깨어난다.
-///   KASASPACE_AUTOKEYS="C-S-d,C-=" KASASPACE_AUTOSEND="dir"
+///   CHIISPACE_AUTOKEYS="C-S-d,C-=" CHIISPACE_AUTOSEND="dir"
 ///
 /// 웹뷰의 이벤트/`__term.input()` 을 부른다 — 사용자가 키를 친 것과 같은
 /// 경로(onData -> pty_write)를 타므로 배선 전체가 검증된다. OS 로 키를 쏘는
@@ -144,12 +144,12 @@ fn arm_autosend(app: &AppHandle) {
             .unwrap_or(d)
     };
 
-    // KASASPACE_AUTOKEYS="C-S-d,C-S-e,C-=" — 단축키를 순서대로 쏜다.
+    // CHIISPACE_AUTOKEYS="C-S-d,C-S-e,C-=" — 단축키를 순서대로 쏜다.
     // 진짜 KeyboardEvent 라 단축키 핸들러부터 그 뒤(배치 트리·새 PTY·리사이즈)까지
     // 제품 경로를 그대로 탄다. 기능마다 env 를 새로 만들지 않으려고 하나로 뒀다.
-    if let Ok(spec) = std::env::var("KASASPACE_AUTOKEYS") {
-        let start = ms("KASASPACE_AUTOKEYS_MS", 2500);
-        let gap = ms("KASASPACE_AUTOKEYS_GAP", 800);
+    if let Ok(spec) = std::env::var("CHIISPACE_AUTOKEYS") {
+        let start = ms("CHIISPACE_AUTOKEYS_MS", 2500);
+        let gap = ms("CHIISPACE_AUTOKEYS_GAP", 800);
         let w = win.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(start));
@@ -166,15 +166,15 @@ fn arm_autosend(app: &AppHandle) {
         });
     }
 
-    // KASASPACE_AUTOMOUSE="sel@dx,dy; sel2@0,0" — 셀렉터가 가리키는 요소의
+    // CHIISPACE_AUTOMOUSE="sel@dx,dy; sel2@0,0" — 셀렉터가 가리키는 요소의
     // 중앙을 눌러 (dx,dy) 만큼 끌고 놓는다. dx=dy=0 이면 그냥 클릭이다.
     //
     // 마우스는 사용자에게 떠넘길 수밖에 없던 마지막 구멍이었다. 좌표 기반 드래그를
     // 여기서 만들어 두면 경계선·파일트리처럼 키보드로 못 만드는 경로도 제품 코드를
     // 그대로 타면서 검증된다. OS 마우스를 움직이지 않으므로 사용자 창을 건드리지 않는다.
-    if let Ok(spec) = std::env::var("KASASPACE_AUTOMOUSE") {
-        let start = ms("KASASPACE_AUTOMOUSE_MS", 3000);
-        let gap = ms("KASASPACE_AUTOMOUSE_GAP", 700);
+    if let Ok(spec) = std::env::var("CHIISPACE_AUTOMOUSE") {
+        let start = ms("CHIISPACE_AUTOMOUSE_MS", 3000);
+        let gap = ms("CHIISPACE_AUTOMOUSE_GAP", 700);
         let w = win.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(start));
@@ -201,10 +201,10 @@ fn arm_autosend(app: &AppHandle) {
         });
     }
 
-    // KASASPACE_PROBE="<js 표현식>" — 결과를 화면 위 오버레이에 찍는다.
+    // CHIISPACE_PROBE="<js 표현식>" — 결과를 화면 위 오버레이에 찍는다.
     // 콘솔은 릴리스 웹뷰에서 볼 수 없으니 스크린샷에 남기는 것이 유일한 통로다.
-    if let Ok(expr) = std::env::var("KASASPACE_PROBE") {
-        let delay = ms("KASASPACE_PROBE_MS", 5000);
+    if let Ok(expr) = std::env::var("CHIISPACE_PROBE") {
+        let delay = ms("CHIISPACE_PROBE_MS", 5000);
         let w = win.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(delay));
@@ -221,8 +221,8 @@ fn arm_autosend(app: &AppHandle) {
         });
     }
 
-    if let Ok(text) = std::env::var("KASASPACE_AUTOSEND") {
-        let delay = ms("KASASPACE_AUTOSEND_MS", 3500);
+    if let Ok(text) = std::env::var("CHIISPACE_AUTOSEND") {
+        let delay = ms("CHIISPACE_AUTOSEND_MS", 3500);
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(delay));
             let payload = serde_json::to_string(&format!("{text}\r")).unwrap_or_default();

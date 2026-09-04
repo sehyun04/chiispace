@@ -291,7 +291,7 @@ export default function App() {
             procs.current = { ...m };
             // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
             // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
-            // 릴리스 웹뷰에는 콘솔이 없으니 KASASPACE_PROBE 로 들여다볼 자리가 필요하다.
+            // 릴리스 웹뷰에는 콘솔이 없으니 CHIISPACE_PROBE 로 들여다볼 자리가 필요하다.
             (window as unknown as { __restore?: unknown }).__restore = { bg, seeds: m };
           }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.

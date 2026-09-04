@@ -10,9 +10,9 @@
 # 포커스는 절대 건드리지 않는다(SWP_NOACTIVATE). 앱을 활성화하면 사용자가
 # 그때 치던 글자가 이 창으로 들어간다.
 param(
-  [string]$Exe = "$PSScriptRoot\..\src-tauri\target\debug\kasaspace.exe",
-  [string]$Title = "kasaspace",
-  [string]$Out = "$env:TEMP\kasaspace-shot.png",
+  [string]$Exe = "$PSScriptRoot\..\src-tauri\target\debug\chiispace.exe",
+  [string]$Title = "chiispace",
+  [string]$Out = "$env:TEMP\chiispace-shot.png",
   [int]$WaitSec = 10
 )
 

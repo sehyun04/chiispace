@@ -20,9 +20,9 @@ Windows 전용. Tauri 2 + React + xterm.js.
 락 하나 안에서 끝낸다. 둘로 나누면 그 사이 출력이 유실되거나 두 번 그려진다 — 엔진이
 xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 
-> 폴더와 실행 파일 이름은 아직 `kasaspace` 다. 바꾸면 저장된 세션과
-> `~/.claude/projects/<경로별 폴더>` 에 쌓인 claude 대화가 통째로 끊긴다 — 옮기는 일은
-> 따로 한다.
+> 로컬 폴더 이름만 `kasaspace` 로 남겨 두었다. claude 는 대화를
+> `~/.claude/projects/<경로를 인코딩한 폴더>/` 에 쌓아서, 폴더를 옮기면 지금까지의 대화를
+> 새 경로에서 못 찾는다. 이름과 상관없는 자리라 그냥 둔다.
 
 ## 코드 맵
 
@@ -119,7 +119,7 @@ npm run tauri dev
 ```powershell
 npm run build          # tsc --noEmit 을 먼저 돈다. npx vite build 는 타입을 안 본다
 cd src-tauri; cargo build --release --features custom-protocol
-# -> src-tauri/target/release/kasaspace.exe  (더블클릭으로 뜬다)
+# -> src-tauri/target/release/chiispace.exe  (더블클릭으로 뜬다)
 ```
 
 **`--features custom-protocol` 을 빠뜨리면 안 된다.** Tauri 는 릴리스 여부를 `--release`
@@ -162,12 +162,12 @@ claude 상태줄이 브랜치·폴더 아이콘을 사설 영역 글자(`U+E0A0`
 GUI 를 사람 손 없이 확인하는 손잡이가 앱 안에 들어 있다. env 가 있을 때만 깨어난다.
 
 ```powershell
-$env:KASASPACE_ROOT      = "C:/path/to/repo"                  # 폴더를 연 채로 띄운다
-$env:KASASPACE_AUTOKEYS  = "C-S-d,C-S-t,C-="                  # 단축키를 순서대로 쏜다
-$env:KASASPACE_AUTOSEND  = "dir /w"                           # 이 문자열 + Enter 를 주입
-$env:KASASPACE_AUTOMOUSE = ".seam.vert@180,0"                 # 요소 중앙을 눌러 끌고 놓는다
-$env:KASASPACE_PROBE     = "document.querySelectorAll('.pane').length"
-scripts\shot.ps1 -Exe src-tauri\target\release\kasaspace.exe -Out shot.png
+$env:CHIISPACE_ROOT      = "C:/path/to/repo"                  # 폴더를 연 채로 띄운다
+$env:CHIISPACE_AUTOKEYS  = "C-S-d,C-S-t,C-="                  # 단축키를 순서대로 쏜다
+$env:CHIISPACE_AUTOSEND  = "dir /w"                           # 이 문자열 + Enter 를 주입
+$env:CHIISPACE_AUTOMOUSE = ".seam.vert@180,0"                 # 요소 중앙을 눌러 끌고 놓는다
+$env:CHIISPACE_PROBE     = "document.querySelectorAll('.pane').length"
+scripts\shot.ps1 -Exe src-tauri\target\release\chiispace.exe -Out shot.png
 ```
 
 - `AUTOKEYS` 는 진짜 `KeyboardEvent` 를 쏜다. 단축키 핸들러부터 그 뒤(배치 트리 · 새 PTY ·
@@ -216,7 +216,7 @@ scripts\shot.ps1 -Exe src-tauri\target\release\kasaspace.exe -Out shot.png
 
 ## 이름
 
-`kasaterm` 의 엔진을 빌려 쓴다는 뜻으로 `kasaspace` 였다가, 치이카와(ちいかわ) 쪽을 가져와
+`kasaterm` 의 엔진을 빌려 쓴다는 뜻으로 `chiispace` 였다가, 치이카와(ちいかわ) 쪽을 가져와
 `chiispace` 가 됐다. `kasa` 는 傘(우산), `chii` 는 "なんか小さくてかわいいやつ"의 앞 두
 글자다.
 

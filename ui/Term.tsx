@@ -208,7 +208,7 @@ export function Term({
       send(data);
     });
 
-    // 헤드리스 검증용 손잡이. Rust 의 KASASPACE_AUTOSEND 가 이걸 통해 입력을
+    // 헤드리스 검증용 손잡이. Rust 의 CHIISPACE_AUTOSEND 가 이걸 통해 입력을
     // 넣는다 — term.input() 은 사용자가 친 것과 같은 경로(onData)를 타므로 키
     // 배선까지 실제로 검증된다. OS 로 키를 쏘면 포커스가 다른 창에 있을 때
     // 엉뚱한 앱에 타이핑된다.

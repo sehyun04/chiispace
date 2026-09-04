@@ -1,4 +1,4 @@
-# kasaspace
+# chiispace
 
 터미널을 한 칸으로 두는 작업환경. Tauri + xterm.js, 치이카와 테마.
 PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 당겨 쓴다.

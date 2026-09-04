@@ -7,12 +7,12 @@ use std::process::Command;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 
-/// 시작할 때 열어 둘 폴더. `kasaspace <경로>` 또는 KASASPACE_ROOT.
+/// 시작할 때 열어 둘 폴더. `chiispace <경로>` 또는 CHIISPACE_ROOT.
 /// `code .` 과 같은 기대를 따른다 — 터미널에서 폴더를 지정해 여는 것이 기본 동선이다.
 #[tauri::command]
 pub fn initial_root() -> Option<String> {
     let arg = std::env::args().nth(1).filter(|a| !a.starts_with('-'));
-    let raw = arg.or_else(|| std::env::var("KASASPACE_ROOT").ok())?;
+    let raw = arg.or_else(|| std::env::var("CHIISPACE_ROOT").ok())?;
     let abs = std::fs::canonicalize(&raw).ok()?;
     let s = abs.to_string_lossy().replace('\\', "/");
     // canonicalize 는 Windows 에서 \?\C:\... 를 준다. 그대로 두면 화면에도
@@ -343,7 +343,24 @@ pub fn state_save(app: AppHandle, json: String) {
     }
 }
 
+/// 이름이 chiispace 가 되기 전에 쓰던 자리.
+///
+/// Tauri 는 설정 폴더를 `identifier` 로 잡는다. 그래서 이름을 바꾸는 순간 앱은 빈
+/// 새 폴더를 보게 되고, 사용자에게는 **쓰던 탭과 배치가 통째로 사라진 것**으로 보인다.
+/// 새 자리에 아무것도 없을 때만 옛 자리를 읽어 준다. 쓰기는 늘 새 자리로 하므로
+/// 한 번 켜고 저장이 한 번 돌면 저절로 옮겨진다.
+fn legacy_state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    let dir = app.path().app_config_dir().ok()?;
+    Some(dir.parent()?.join("com.sehyun.kasaspace").join("session.json"))
+}
+
 #[tauri::command]
 pub fn state_load(app: AppHandle) -> Option<String> {
-    std::fs::read_to_string(state_file(&app)?).ok()
+    if let Some(p) = state_file(&app) {
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            return Some(s);
+        }
+    }
+    std::fs::read_to_string(legacy_state_file(&app)?).ok()
 }
