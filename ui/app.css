@@ -227,6 +227,20 @@ body {
   height: 100%;
   object-fit: contain;
 }
+
+/* 여러 칸의 캐릭터가 제각각 흔들리지 않도록 모든 인스턴스가 같은 박자를 공유한다. */
+.dance-face {
+  transform-origin: 50% 88%;
+  transition: transform 180ms ease-in-out;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dance-face {
+    transform: none !important;
+    transition: none;
+  }
+}
 /* 그림이 아직 없는 사람만 원으로 그린다. 색으로라도 칸을 구별해야 해서다. */
 .face.ph {
   display: grid;

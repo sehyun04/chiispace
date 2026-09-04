@@ -282,7 +282,79 @@ struct PaneStatus {
     proc: Option<String>,
     agent: Option<String>,
     busy: bool,
+    working: bool,
     cwd: Option<String>,
+}
+
+// 박동은 작업을 확정하는 보조 신호라 화면에 남아 있는 라이브 스피너도 함께 본다.
+fn pane_shows_working_spinner(session: &PtySession) -> bool {
+    let visible = session.visible_text(40);
+    text_shows_working_spinner(&visible)
+}
+
+fn text_shows_working_spinner(visible: &str) -> bool {
+    let lines: Vec<&str> = visible.lines().collect();
+    for (row, line) in lines.iter().enumerate().rev() {
+        let indent = line.chars().take_while(|c| c.is_whitespace()).count();
+        if indent >= 8 {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let Some(first) = trimmed.chars().next() else {
+            continue;
+        };
+        let code = first as u32;
+        let rest = &trimmed[first.len_utf8()..];
+        let braille = (0x2800..=0x28ff).contains(&code);
+        let star_or_dot = (0x2720..=0x274f).contains(&code) || code == 0x00b7;
+        let timed = rest.split_once('\u{2026}').is_some_and(|(_, tail)| {
+            tail.split_once('(').is_some_and(|(_, inside)| {
+                inside.starts_with(|c: char| c.is_ascii_digit()) && inside.contains('s')
+            })
+        });
+        let candidate = rest.contains("esc to interrupt")
+            || braille
+            || (star_or_dot && (rest.contains("ompacting") || timed));
+        if !candidate {
+            continue;
+        }
+        let stale = lines[row + 1..].iter().any(|below| {
+            below
+                .trim_start()
+                .chars()
+                .next()
+                .is_some_and(|c| matches!(c as u32, 0x23fa | 0x23bf))
+        });
+        if !stale {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod pane_status_tests {
+    use super::text_shows_working_spinner;
+
+    #[test]
+    fn live_agent_spinner_is_working() {
+        let text = format!("output\n{} Working{} (3s)", '\u{2733}', '\u{2026}');
+        assert!(text_shows_working_spinner(&text));
+    }
+
+    #[test]
+    fn idle_prompt_is_not_working() {
+        assert!(!text_shows_working_spinner("Claude Code\n>"));
+    }
+
+    #[test]
+    fn spinner_above_completed_output_is_stale() {
+        let text = format!(
+            "{} Working{} (3s)\n{} completed",
+            '\u{2733}', '\u{2026}', '\u{23fa}'
+        );
+        assert!(!text_shows_working_spinner(&text));
+    }
 }
 
 #[tauri::command]
@@ -294,6 +366,7 @@ fn pane_status(panes: State<Panes>) -> Vec<PaneStatus> {
             proc: s.active_process_name(),
             agent: s.active_agent().map(|a| a.as_str().to_string()),
             busy: s.has_active_job(),
+            working: s.output_heartbeat() || pane_shows_working_spinner(s),
             cwd: s
                 .reported_cwd()
                 .map(|p| p.to_string_lossy().replace('\\', "/")),

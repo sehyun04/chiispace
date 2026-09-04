@@ -5,9 +5,16 @@ import { listen } from "@tauri-apps/api/event";
 // 포커스를 갖고 있어야 하고 읽기에는 권한이 따로 걸려, WebView2 에서
 // NotAllowedError 로 조용히 거부되는 때가 있다.
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { anyFace, cast, Face, faceUrl, hasWorkFace } from "./roster";
+import {
+  anyFace,
+  cast,
+  DanceFace,
+  Face,
+  faceUrl,
+} from "./roster";
 import {
   asSeed,
+  isAgentWorking,
   label,
   liveAttach,
   restoreCmd,
@@ -787,8 +794,16 @@ export default function App() {
                             document.body.classList.add("pane-dragging");
                           }}
                         >
-                          <span className={stat[s.id]?.busy ? "pip work" : "pip"}>
-                            <Face slug={casting[s.id]} agent={!!stat[s.id]?.agent} />
+                          <span
+                            className={
+                              isAgentWorking(stat[s.id], titles[s.id]) ? "pip work" : "pip"
+                            }
+                          >
+                            <Face
+                              slug={casting[s.id]}
+                              agent={!!stat[s.id]?.agent}
+                              dancing={isAgentWorking(stat[s.id], titles[s.id])}
+                            />
                           </span>
                           {renaming === s.id ? (
                             <input
@@ -849,16 +864,16 @@ export default function App() {
                             누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
                             터미널을 고르고 끄는 데 걸리지 않게 한다. */}
                         {stat[s.id]?.agent && faceUrl(casting[s.id]) ? (
-                          <img
-                            className={
-                              stat[s.id]?.busy && !hasWorkFace(casting[s.id])
-                                ? "buddy bob"
-                                : "buddy"
-                            }
-                            src={faceUrl(casting[s.id], stat[s.id]?.busy ? "work" : undefined)}
-                            alt=""
-                            draggable={false}
-                          />
+                          isAgentWorking(stat[s.id], titles[s.id]) ? (
+                            <DanceFace slug={casting[s.id]} className="buddy" />
+                          ) : (
+                            <img
+                              className="buddy"
+                              src={faceUrl(casting[s.id])}
+                              alt=""
+                              draggable={false}
+                            />
+                          )
                         ) : null}
                         <Term
                           id={s.id}
@@ -949,4 +964,3 @@ function SideMark({ open }: { open: boolean }) {
     </svg>
   );
 }
-

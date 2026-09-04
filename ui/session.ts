@@ -15,8 +15,19 @@ export type PaneStat = {
   proc: string | null;
   agent: string | null;
   busy: boolean;
+  working?: boolean;
   cwd: string | null;
 };
+
+// 프로세스가 열려 있는 상태와 출력이 흐르는 작업 상태를 분리해야 대기 중에는 멈춘다.
+export function isAgentWorking(p?: PaneStat, title?: string): boolean {
+  if (p?.agent !== "claude" && p?.agent !== "codex") return false;
+  const mark = title?.trimStart().codePointAt(0);
+  const marked =
+    mark !== undefined &&
+    ((mark >= 0x2720 && mark <= 0x274f) || (mark >= 0x2800 && mark <= 0x28ff));
+  return !!p.working || marked;
+}
 
 /** 이 pane 을 되살리려면 무엇을 쳐야 하는가.
  *

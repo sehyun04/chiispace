@@ -8,7 +8,13 @@
 import { useState } from "react";
 import * as L from "./layout";
 import { cast, Face, leader, members, rosterLabel, Row, userTitle } from "./roster";
-import { label, shortPath, type PaneStat, type ShellKind } from "./session";
+import {
+  isAgentWorking,
+  label,
+  shortPath,
+  type PaneStat,
+  type ShellKind,
+} from "./session";
 import type { GitInfo } from "./git";
 
 type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string; shell?: string };
@@ -132,7 +138,11 @@ export function Sidebar({
                           onSetPicking((v) => (v === sl.id ? null : sl.id));
                         }}
                       >
-                        <Face slug={casting[sl.id]} agent={!!st?.agent} />
+                        <Face
+                          slug={casting[sl.id]}
+                          agent={!!st?.agent}
+                          dancing={isAgentWorking(st, titles[sl.id])}
+                        />
                       </button>
                       <span className="pmeta">
                         <span className="nm">{nm}</span>
