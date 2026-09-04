@@ -905,7 +905,16 @@ export default function App() {
                             ×
                           </button>
                         </header>
-                        {stat[s.id]?.busy ? <div className="busy" /> : null}
+                        {/* 진행 띠는 정말 일하는 중일 때만 흐른다. 에이전트는 프롬프트
+                            앞에 가만히 서 있어도 자기가 전경 작업이라 `busy` 가 내내
+                            참이고, 그대로 두면 띠가 영영 흘러 "일하는 중"이라는 뜻을
+                            잃는다. 셸은 스피너를 판정할 길이 없으니 전경 명령이 도는
+                            동안(=`busy`)이 곧 작업 중이다. */}
+                        {(
+                          stat[s.id]?.agent ? isAgentWorking(stat[s.id]) : stat[s.id]?.busy
+                        ) ? (
+                          <div className="busy" />
+                        ) : null}
 
                         {/* 맡은 아이를 칸 안에 세워 둔다. 헤더의 작은 얼굴만으로는
                             누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
