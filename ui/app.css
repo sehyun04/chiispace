@@ -85,31 +85,32 @@ body {
 .side-section {
   padding: 14px 14px 6px;
 }
-/* 맨 위 줄만 단추 자리를 비켜 준다 */
+/* 맨 위 줄만 단추 자리를 비켜 준다. 글자는 없고 접기 단추와 폴더 단추뿐이라
+   높이는 단추가 정한다 — 위아래 여백을 주면 그만큼 목록이 밀려 내려간다. */
 .side > .side-section:first-child {
-  padding-left: 38px;
-  color: var(--ink-3);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  padding: 5px 7px 4px 38px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.mini {
+/* 접기 단추와 같은 모양으로 둔다. 옆칸 맨 윗줄의 두 단추가 서로 다르게 생기면
+   한쪽이 더 중요해 보이는데, 둘 다 어쩌다 한 번 누르는 것이다. */
+.folderbtn {
   margin-left: auto;
-  font: inherit;
-  font-size: 10px;
-  color: var(--ink-2);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
   cursor: pointer;
 }
-.mini:hover {
-  background: var(--blush);
-  border-color: var(--outline);
+.folderbtn:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
 }
 
 .repo {

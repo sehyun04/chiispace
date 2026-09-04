@@ -83,9 +83,12 @@ export function Sidebar({
   return (
     <aside className="side">
         <div className="side-section">
-          <span>작업</span>
-          <button className="mini" onClick={onPickFolder}>
-            {curRoot ? "폴더 바꾸기" : "폴더 열기"}
+          <button
+            className="folderbtn"
+            onClick={onPickFolder}
+            title={curRoot ? "폴더 바꾸기" : "폴더 열기"}
+          >
+            <FolderMark />
           </button>
         </div>
 
@@ -225,5 +228,16 @@ export function Sidebar({
         </div>
 
     </aside>
+  );
+}
+
+/** 폴더를 여는 자리. 글자로 "폴더 바꾸기"라고 적어 두면 옆칸 맨 윗줄에서 제일
+ *  눈에 띄는 것이 정작 제일 안 쓰는 단추가 된다 — 폴더는 한 번 열면 그만이다. */
+function FolderMark() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 9V7a2 2 0 0 0-2-2h-5.5l-1.7-2.1A2 2 0 0 0 9.2 2H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14.2a2 2 0 0 0 1.94-1.5l1.55-6A2 2 0 0 0 19.75 10H8.24a2 2 0 0 0-1.79 1.1L4 16" />
+    </svg>
   );
 }
