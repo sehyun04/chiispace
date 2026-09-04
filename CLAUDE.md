@@ -131,6 +131,16 @@ upstream 의 `desc.txt` 를 그대로 옮긴 것이고, 그건 원래 그림 생
    실행되면 그 표시를 상속하고, pane 에서 띄운 claude 가 "Transcript saving is off" 로
    뜬다. 대화가 저장되지 않으니 다음에 `--continue` 로 이어 열 것도 없다 — 세션 복원이
    조용히 무의미해진다. 앱 시작 때 `remove_var` 로 끊는다.
+12. **살아 있는 백그라운드 대화는 `--resume` 이 아니라 `attach` 로 붙는다.** claude 는
+   대화를 데몬에 맡겨 백그라운드로 계속 돌릴 수 있고, 그렇게 살아 있는 것을 `--resume`
+   으로 또 열면 열어 주지 않는다("That session is still running as a background session").
+   그러면 그 칸은 셸 프롬프트 앞에 멈춰 서고 사용자 눈에는 "복원이 안 됐다"로 보인다.
+   무엇이 살아 있는지는 `~/.claude/daemon/roster.json` 의 `workers` 가 답이다 —
+   **`jobs/` 폴더를 세면 안 된다.** 거기는 끝난 대화의 자취도 그대로 남아 몇 주 전 것까지
+   살아 있다고 답한다. 워커 값을 통째로 훑어 16진수 8자리를 줍는 것도 안 된다. dispatch
+   nonce 가 세션 id 와 생김새가 같아서 없는 대화를 살아 있다고 답한다(실제로 주웠다).
+   키와 `sessionId` 만 본다. 판정은 **저장할 때가 아니라 열 때** 한다 — 껐다 켜는 사이에
+   그 대화가 백그라운드로 갔을 수도, 멈췄을 수도 있다.
 
 `tap_bytes_with_snapshot()` 을 구독 등록과 화면 채취 둘로 쪼개지 않는 이유는 README 에 있다.
 

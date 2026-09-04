@@ -37,6 +37,29 @@ export function restoreCmd(p: PaneStat, sid?: string): Seed | null {
   return null;
 }
 
+/** 저장된 복원 명령에서 claude 세션 ID 를 꺼낸다. */
+export const seedSession = (cmd: string): string | null =>
+  /--resume\s+([0-9a-f-]{36})/i.exec(cmd)?.[1] ?? null;
+
+/** 살아 있는 백그라운드 대화는 `--resume` 이 아니라 `attach` 로 붙는다.
+ *
+ *  claude 는 대화를 데몬에 맡겨 백그라운드로 계속 돌릴 수 있다. 그렇게 살아
+ *  있는 대화에 `--resume` 을 걸면 열어 주지 않고 거절 문구만 남긴다 — 한 대화에
+ *  두 프로세스가 붙어 같은 기록에 쓰게 되기 때문이다. 그러면 그 칸은 셸 프롬프트
+ *  앞에 멈춰 서고, 사용자 눈에는 "복원이 안 됐다"로 보인다. 실제로 그랬다.
+ *
+ *  `attach` 는 그 살아 있는 대화를 이 칸으로 데려온다. 원래 하려던 일이 그것이다.
+ *
+ *  판정을 저장할 때가 아니라 **열 때** 한다. 껐다 켜는 사이에 그 대화가 백그라운드로
+ *  갔을 수도, 멈췄을 수도 있다 — 저장 시점의 판단은 켤 때쯤이면 이미 낡았다. */
+export function liveAttach(seed: Seed, bg: string[]): Seed {
+  const sid = seedSession(seed.cmd);
+  if (!sid) return seed;
+  const short = sid.slice(0, 8).toLowerCase();
+  if (!bg.includes(short)) return seed;
+  return { ...seed, cmd: `claude attach ${short}` };
+}
+
 /** 예전 세션은 명령을 문자열로만 적어 두었다. */
 export const asSeed = (v: unknown): Seed | null =>
   typeof v === "string" ? { cmd: v } : v && typeof v === "object" ? (v as Seed) : null;

@@ -6,7 +6,15 @@ import { listen } from "@tauri-apps/api/event";
 // NotAllowedError 로 조용히 거부되는 때가 있다.
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { anyFace, cast, Face, faceUrl, hasWorkFace } from "./roster";
-import { asSeed, label, restoreCmd, type PaneStat, type Seed } from "./session";
+import {
+  asSeed,
+  label,
+  liveAttach,
+  restoreCmd,
+  seedSession,
+  type PaneStat,
+  type Seed,
+} from "./session";
 import { Term } from "./Term";
 import { Sidebar } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
@@ -205,18 +213,26 @@ export default function App() {
           if (s.casting) setCasting(s.casting);
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
+            // 지금 백그라운드로 살아 있는 대화들. 이걸 알아야 `--resume` 이
+            // 거절당해 칸이 빈 채로 멈추는 것을 피할 수 있다(session.ts 참고).
+            const bg = await invoke<string[]>("claude_bg_sessions").catch(() => [] as string[]);
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
               const seed = asSeed(v);
               if (seed) {
-                m[id] = seed;
                 // 복원으로 여는 pane 은 어느 대화인지 이미 안다. 미리 붙여 두어야
                 // 아래의 "새로 생긴 것 찾기"가 이 pane 을 건드리지 않는다.
-                const hit = /--resume\s+([0-9a-f-]{36})/.exec(seed.cmd);
-                if (hit) sessionOf.current[id] = hit[1];
+                // 명령이 `attach` 로 바뀌어도 대화는 같으므로 바꾸기 전에 읽는다.
+                const sid = seedSession(seed.cmd);
+                if (sid) sessionOf.current[id] = sid;
+                m[id] = liveAttach(seed, bg);
               }
             }
             setSeeds(m);
+            // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
+            // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
+            // 릴리스 웹뷰에는 콘솔이 없으니 KASASPACE_PROBE 로 들여다볼 자리가 필요하다.
+            (window as unknown as { __restore?: unknown }).__restore = { bg, seeds: m };
           }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
           if (typeof s.nextPane === "number") nextPane.current = s.nextPane;

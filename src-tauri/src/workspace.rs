@@ -191,6 +191,56 @@ fn squash(s: &str) -> String {
         .collect()
 }
 
+/// 지금 백그라운드로 살아 있는 claude 대화들(짧은 id, 앞 8자).
+///
+/// 이걸 알아야 하는 이유는 복원이 깨지기 때문이다. claude 는 대화를 데몬에
+/// 맡겨 백그라운드로 계속 돌릴 수 있고, 그렇게 살아 있는 대화를 `--resume`
+/// 으로 또 열려고 하면 열어 주지 않는다 — 한 대화에 두 프로세스가 붙어 같은
+/// 기록에 쓰게 되기 때문이다. 그때 칸에는 "That session is still running as a
+/// background session" 만 남고 아무것도 복원되지 않는다. 사용자에게는 그냥
+/// "복원이 안 됐다"로 보인다.
+///
+/// 판단 근거는 데몬이 들고 있는 명부다. **`jobs/` 폴더를 세면 안 된다** —
+/// 거기는 끝난 대화의 자취도 그대로 남아 있어서(8월 것이 아직 있다) 이미 죽은
+/// 대화까지 살아 있다고 답하게 된다. `daemon/roster.json` 의 `workers` 는
+/// 살아 있는 것만 담고, 멈추면 그 자리에서 빠진다.
+///
+/// `workers` 는 짧은 id 를 키로 하고 값에 `sessionId` 를 담는다. 그 둘만 본다 —
+/// **값을 통째로 훑어 16진수 8자리를 줍지 마라.** 워커에는 dispatch nonce 처럼
+/// 생김새가 똑같은 값이 같이 들어 있어서, 세션도 아닌 것을 "살아 있다"고 답한다.
+/// 실제로 `e71de23f`(nonce)를 세션으로 주워 왔다.
+#[tauri::command]
+pub fn claude_bg_sessions(app: AppHandle) -> Vec<String> {
+    use tauri::Manager;
+    let Ok(home) = app.path().home_dir() else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(home.join(".claude").join("daemon").join("roster.json"))
+    else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(workers) = v.get("workers").and_then(|w| w.as_object()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (key, val) in workers {
+        let sid = val.get("sessionId").and_then(|s| s.as_str());
+        // 키가 곧 짧은 id 다. 없으면 세션 id 의 앞 토막으로 만든다.
+        let short = sid
+            .map(|s| s.chars().take(8).collect::<String>())
+            .filter(|_| key.len() != 8)
+            .unwrap_or_else(|| key.clone())
+            .to_lowercase();
+        if !short.is_empty() && !out.contains(&short) {
+            out.push(short);
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
     use tauri::Manager;
