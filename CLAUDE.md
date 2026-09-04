@@ -219,6 +219,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 |---|---|
 | `src-tauri/src/lib.rs` (294줄) | PTY ↔ 웹뷰 다리, pane 상태, 검증 손잡이 |
 | `src-tauri/src/workspace.rs` (255줄) | git · 세션 파일 · claude 대화 목록 |
+| `src-tauri/src/shells.rs` (104줄) | 이 컴퓨터에 있는 셸 찾기 |
 | `ui/App.tsx` (913줄) | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
 | `ui/Sidebar.tsx` (182줄) | 옆칸 — 탭 묶음과 칸 목록. 그리기만 하고 판단은 App 이 준다 |
 | `ui/roster.tsx` (101줄) | 치이카와 로스터와 얼굴 · 누가 어느 칸을 맡는가 |

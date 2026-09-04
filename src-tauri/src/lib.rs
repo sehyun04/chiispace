@@ -5,6 +5,7 @@
 //! 쪽이 우리 내부 구조에 묶이지 않고, 엔진도 이 용도를 상정하고 만들어져 있다
 //! (`tap_bytes_with_snapshot` 주석 참고).
 
+mod shells;
 mod workspace;
 
 use std::collections::HashMap;
@@ -40,6 +41,10 @@ fn pty_open(
     cols: u16,
     rows: u16,
     cwd: Option<String>,
+    // 없으면 엔진 기본(%ComSpec%). 목록에 있던 셸이 지워졌거나 다른 컴퓨터에서
+    // 만든 세션을 열면 여기 없는 경로가 들어오는데, 그때는 엔진이 실패를 돌려
+    // 주고 프론트가 그 칸에 빨간 줄로 적는다 — 조용히 다른 셸로 바꾸지 않는다.
+    shell: Option<String>,
 ) -> Result<(), String> {
     if panes.0.lock().unwrap().contains_key(&id) {
         return Ok(());
@@ -48,6 +53,7 @@ fn pty_open(
         cols,
         rows,
         cwd,
+        shell,
         pane_id: id.clone(),
         ..Default::default()
     })
@@ -251,6 +257,7 @@ pub fn run() {
             pty_resize,
             pty_close,
             pane_status,
+            shells::shells,
             workspace::initial_root,
             workspace::fs_pick,
             workspace::git_status,

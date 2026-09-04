@@ -3,6 +3,13 @@
  *  세션 파일에 남길 값과 그 판정이 여기 모여 있다. 무엇을 저장할지 바꾸려면 이
  *  파일만 보면 된다 — 화면이 그것을 어떻게 그리는지와는 상관이 없다. */
 
+/** 이 컴퓨터에서 띄울 수 있는 셸 하나. Rust 의 `shells` 가 찾아 준다.
+ *
+ *  세션에 남기는 것은 `path` 다. `id` 는 화면에서 고를 때만 쓴다 — 같은 이름이
+ *  가리키는 실행 파일이 컴퓨터마다 다르고, 나중에 이름을 고치면 저장된 탭이
+ *  전부 짝을 잃는다. */
+export type ShellKind = { id: string; name: string; path: string };
+
 export type PaneStat = {
   id: string;
   proc: string | null;

@@ -5,12 +5,13 @@
  *
  *  이 파일은 그리기만 한다. 무엇을 그릴지와 눌렀을 때 무엇을 할지는 App 이 준다 —
  *  그래야 옆칸 모양을 손보는 일과 얼개를 손보는 일이 서로를 건드리지 않는다. */
+import { useState } from "react";
 import * as L from "./layout";
 import { cast, Face, leader, members, rosterLabel, Row, userTitle } from "./roster";
-import { label, shortPath, type PaneStat } from "./session";
+import { label, shortPath, type PaneStat, type ShellKind } from "./session";
 import type { GitInfo } from "./git";
 
-type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
+type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string; shell?: string };
 
 export function Sidebar({
   tabs,
@@ -25,6 +26,7 @@ export function Sidebar({
   picking,
   renaming,
   curRoot,
+  shells,
   onPickFolder,
   onNewTab,
   onCloseTab,
@@ -47,8 +49,11 @@ export function Sidebar({
   picking: string | null;
   renaming: string | null;
   curRoot: string | null;
+  /** 이 컴퓨터에 있는 셸. 맨 앞의 것이 기본이다. */
+  shells: ShellKind[];
   onPickFolder: () => void;
-  onNewTab: () => void;
+  /** 셸을 안 주면 지금 탭과 같은 것으로 연다. */
+  onNewTab: (shell?: string) => void;
   onCloseTab: (i: number) => void;
   onClosePane: (id: string) => void;
   /** 그 탭으로 건너간다. 칸까지 주면 그 칸을 잡는다. */
@@ -61,6 +66,13 @@ export function Sidebar({
   // 이름을 고치다 키로 끝냈으면 뒤따르는 blur 는 흘려보낸다. 그러지 않으면 확정이
   // 두 번 일어나 claude 에 /rename 이 두 번 날아간다.
   const renameDone = { current: false };
+  // 셸 고르는 칸이 열려 있는가. 이건 그리기에만 쓰이고 아무 데도 안 남으므로
+  // App 까지 올리지 않는다 — 저기는 여러 작업이 만나는 자리라 얇게 둔다.
+  const [pickShell, setPickShell] = useState(false);
+  // 저장된 것은 경로다. 이름은 그때그때 목록에서 되찾는다 — 이름까지 저장해 두면
+  // 목록의 이름을 고쳤을 때 옛 탭만 옛 이름으로 남는다.
+  const shellName = (p?: string) =>
+    p ? (shells.find((sh) => sh.path === p)?.name ?? p.split(/[\\/]/).pop()) : null;
 
   return (
     <aside className="side">
@@ -81,6 +93,7 @@ export function Sidebar({
               <div key={t.key} className={ti === active ? "tgroup on" : "tgroup"}>
                 <div className="tg-head" onMouseDown={() => onSelectPane(ti)}>
                   <span className="tg-name">{t.root?.split("/").pop() ?? "shell"}</span>
+                  {t.shell ? <span className="tg-shell">{shellName(t.shell)}</span> : null}
                   {ti === active && git.branch ? (
                     <span className="tg-branch">
                       {git.branch}
@@ -162,8 +175,32 @@ export function Sidebar({
             );
           })}
 
-          <button className="newtab" onClick={onNewTab} title="새 탭 (Ctrl+Shift+T)">
-            새 탭
+          {/* 새 탭은 셸을 고르고 나서 열린다. 눌러 두고 그냥 열리게 하면 어느
+              셸인지 나중에야 알게 되고, 이미 프롬프트가 떠 있어 되돌리려면 닫는
+              수밖에 없다. 단축키(Ctrl+Shift+T)는 안 묻고 지금 탭과 같은 셸로 연다. */}
+          {pickShell && shells.length ? (
+            <div className="shellpick">
+              {shells.map((sh) => (
+                <button
+                  key={sh.id}
+                  className="sp"
+                  title={sh.path}
+                  onClick={() => {
+                    setPickShell(false);
+                    onNewTab(sh.path);
+                  }}
+                >
+                  {sh.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <button
+            className={pickShell ? "newtab on" : "newtab"}
+            onClick={() => (shells.length ? setPickShell((v) => !v) : onNewTab())}
+            title="새 탭 (Ctrl+Shift+T 는 지금 셸 그대로)"
+          >
+            {pickShell ? "무엇으로 열까" : "새 탭"}
           </button>
         </div>
 

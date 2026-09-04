@@ -47,6 +47,7 @@ export function Term({
   focused,
   onTitle,
   cwd,
+  shell,
   fontSize,
   seed,
 }: {
@@ -55,6 +56,11 @@ export function Term({
   onTitle: (id: string, title: string) => void;
   /** 연 폴더가 있으면 새 셸은 거기서 시작한다 — 매번 cd 를 치게 하지 않으려고. */
   cwd?: string;
+  /** 띄울 셸의 실행 파일 경로. 없으면 엔진 기본(%ComSpec%).
+   *
+   *  cwd 와 같이 셸을 띄울 때 한 번만 쓰인다 — 돌고 있는 셸을 나중에 바꿔
+   *  끼울 수는 없다. 그래서 아래 effect 의 deps 에도 넣지 않는다. */
+  shell?: string;
   fontSize: number;
   /** 세션을 복원할 때, 이 pane 이 앱을 끄기 전 돌리고 있던 것.
    *
@@ -112,7 +118,7 @@ export function Term({
 
     // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이 곧바로
     // 리사이즈를 맞으며 첫 화면을 다시 그린다 — 좁은 pane 일수록 눈에 띈다.
-    invoke("pty_open", { id, cols: t.cols, rows: t.rows, cwd }).catch((e) =>
+    invoke("pty_open", { id, cols: t.cols, rows: t.rows, cwd, shell }).catch((e) =>
       t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );
 
@@ -228,7 +234,7 @@ export function Term({
       t.dispose();
       term.current = null;
     };
-    // cwd 는 셸을 띄울 때 한 번만 쓰인다. 폴더를 바꿔도 이미 뜬 pane 은
+    // cwd·shell 은 셸을 띄울 때 한 번만 쓰인다. 폴더를 바꿔도 이미 뜬 pane 은
     // 그대로 두는 게 맞다 — 남이 쓰던 셸의 cwd 를 말없이 바꾸면 안 된다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, onTitle]);

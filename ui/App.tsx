@@ -13,6 +13,7 @@ import {
   restoreCmd,
   seedSession,
   type PaneStat,
+  type ShellKind,
   type Seed,
 } from "./session";
 import { Term } from "./Term";
@@ -22,8 +23,12 @@ import * as L from "./layout";
 
 
 
-/** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더를 갖는다. */
-type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string };
+/** 탭 하나 = 작업 하나. 자기 배치와 자기 폴더와 자기 셸을 갖는다.
+ *
+ *  셸이 탭에 붙는 이유: 칸을 나누면(Ctrl+Shift+D) 새 칸은 옆 칸과 같은 일을 하려고
+ *  나눈 것이지 다른 셸을 쓰려는 게 아니다. 다른 셸이 필요하면 탭을 새로 연다.
+ *  없으면 엔진 기본이고, 그것이 지금까지의 동작이라 옛 세션 파일도 그대로 열린다. */
+type Tab = { key: string; layout: L.Node | null; root: string | null; focus: string; shell?: string };
 
 type XTerm = { getSelection(): string; paste(t: string): void; focus(): void };
 
@@ -53,6 +58,9 @@ export default function App() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [git, setGit] = useState<GitInfo>(EMPTY_GIT);
   const [fontSize, setFontSize] = useState(13);
+  // 이 컴퓨터에 실제로 있는 셸. 목록을 박아 두면 없는 것을 골라 칸이 뜨자마자
+  // 죽는데, 그때 화면에는 빈 칸만 남아 왜 안 되는지 알 수 없다.
+  const [shellList, setShellList] = useState<ShellKind[]>([]);
   const [stat, setStat] = useState<Record<string, PaneStat>>({});
   // 첫 pane 은 열 폴더가 정해진 뒤에 띄운다. 먼저 띄우면 셸이 홈에서 시작해
   // 버리고, 이미 뜬 셸의 cwd 는 뒤늦게 바꿔 줄 수 없다.
@@ -135,14 +143,20 @@ export default function App() {
     [],
   );
 
-  const newTab = useCallback(() => {
-    const id = `%${nextPane.current++}`;
-    const root = cur?.root ?? null;
-    setTabs((ts) => {
-      setActive(ts.length);
-      return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id }];
-    });
-  }, [cur]);
+  /** 셸을 안 주면 지금 탭과 같은 것으로 연다. 단축키(Ctrl+Shift+T)가 그 길로 오는데,
+   *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다. */
+  const newTab = useCallback(
+    (shell?: string) => {
+      const id = `%${nextPane.current++}`;
+      const root = cur?.root ?? null;
+      const sh = shell ?? cur?.shell;
+      setTabs((ts) => {
+        setActive(ts.length);
+        return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id, shell: sh }];
+      });
+    },
+    [cur],
+  );
 
   const closeTab = useCallback((i: number) => {
     setTabs((ts) => (ts.length <= 1 ? ts : ts.filter((_, k) => k !== i)));
@@ -285,6 +299,13 @@ export default function App() {
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
   }, [tabs, active, fontSize, booted, stat, names, casting, sideOpen]);
+
+  // 셸 목록은 설치가 바뀌지 않는 한 그대로다. 한 번만 묻는다.
+  useEffect(() => {
+    invoke<ShellKind[]>("shells")
+      .then(setShellList)
+      .catch(() => {});
+  }, []);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -709,6 +730,7 @@ export default function App() {
         renaming={renaming}
         curRoot={curRoot}
         onPickFolder={pick}
+        shells={shellList}
         onNewTab={newTab}
         onCloseTab={closeTab}
         onClosePane={closePane}
@@ -843,6 +865,7 @@ export default function App() {
                           focused={ti === active && t.focus === s.id}
                           onTitle={onTitle}
                           cwd={t.root ?? undefined}
+                          shell={t.shell}
                           fontSize={fontSize}
                           seed={seeds[s.id]}
                         />
