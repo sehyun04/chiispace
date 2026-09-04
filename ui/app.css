@@ -14,8 +14,9 @@ body {
   color: var(--ink);
   font-family: var(--ui-font);
   font-size: 13px;
-  /* 픽셀 폰트라 안티에일리어싱을 끄면 훨씬 선명하다 */
-  -webkit-font-smoothing: none;
+  /* 곡선 폰트라 안티에일리어싱이 있어야 둥근 맛이 산다. 픽셀 폰트 때 쓰던
+     `-webkit-font-smoothing: none` 을 남겨 두면 곡선이 계단으로 부서진다. */
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 

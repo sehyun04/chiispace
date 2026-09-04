@@ -12,10 +12,52 @@
  * 그래서 이건 어두운 터미널이 아니라 밝은 터미널이다. 의도된 것이다.
  */
 
+/* 라틴은 Quicksand, 한글은 주아. 한글 폰트 하나로 끝내지 않은 이유가 있다 —
+ * 한글 폰트 대부분은 백슬래시 자리에 원화(₩)를 그린다(옛 KS X 1001 매핑).
+ * 이 앱은 사이드바에 윈도우 경로를 늘 띄우므로 그게 "C:₩Users₩..." 로 보인다.
+ * 라틴·숫자·기호를 Quicksand 가 먼저 가져가면 그 자리가 제대로 나오고, 한글만
+ * 주아로 떨어진다. 둘 다 둥근 계열이라 섞여도 결이 어긋나지 않는다. */
 @font-face {
-  font-family: "Galmuri11";
-  src: url("./assets/Galmuri11.ttf") format("truetype");
+  font-family: "Quicksand";
+  src: url("./assets/Quicksand.ttf") format("truetype");
+  font-weight: 400;
   font-display: swap;
+}
+@font-face {
+  font-family: "Quicksand";
+  src: url("./assets/QuicksandSB.ttf") format("truetype");
+  font-weight: 600 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Jua";
+  src: url("./assets/Jua.ttf") format("truetype");
+  font-display: swap;
+}
+
+/* 터미널 글자는 D2Koding Ligature Nerd Font(시스템 설치본). 둥근 등폭으로 가고
+ * 싶어도 후보(Sono · Comic Mono · Recursive Casual)에는 박스 문자(─ │ ╭ ├)가
+ * 아예 없다. 없는 글자는 다른 폰트가 대신 그리는데 그 폰트의 자간이 달라 칸
+ * 격자에서 어긋나고, claude 의 프롬프트 상자와 트리가 부서진다.
+ *
+ * Nerd 판이어야 하는 이유는 상태줄이다 — claude 상태줄은 브랜치·폴더 같은
+ * 아이콘을 사설 영역 글자(U+E0A0, U+F07B ...)로 찍는다. 일반 등폭 폰트에는
+ * 그 자리가 비어 있어 전부 두부(□)로 나온다. Cascadia 도 Consolas 도 없다.
+ *
+ * **"Mono" 붙은 변형은 쓰지 마라.** 아이콘뿐 아니라 한글까지 한 칸으로
+ * 좁혀 놓아서 글자가 서로 겹쳐 읽을 수 없게 된다. 그림으로 확인했다.
+ *
+ * 아래 Cascadia 는 그 폰트가 없는 기계를 위한 폴백이다. Consolas 보다 부드럽고
+ * 글자도 더 갖고 있다 — 진행 막대(▁▂)와 도는 표시(⠋)가 Consolas 에는 없다. */
+@font-face {
+  font-family: "Cascadia Code";
+  src: url("./assets/CascadiaCode-Regular.ttf") format("truetype");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Cascadia Code";
+  src: url("./assets/CascadiaCode-Bold.ttf") format("truetype");
+  font-weight: 700;
 }
 
 :root {
@@ -47,8 +89,8 @@
   --drop: 3px 3px 0 var(--outline);
   --drop-sm: 2px 2px 0 var(--outline);
 
-  --ui-font: "Galmuri11", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
-  --mono-font: "Consolas", "D2Coding", "Courier New", monospace;
+  --ui-font: "Quicksand", "Jua", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  --mono-font: "D2KodingLigature Nerd Font", "Cascadia Code", "D2Coding", monospace;
 
   color-scheme: light;
 }

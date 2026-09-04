@@ -88,7 +88,22 @@ cd src-tauri; cargo build --release --features custom-protocol
 `desc.txt` 가 말하는 외형("순백 서양배 모양 몸 · 두꺼운 따뜻한 갈색 테두리 · 분홍 볼터치")이
 곧 UI 규칙이다. 그래서 이건 어두운 터미널이 아니라 **밝은 터미널**이다. 의도된 것이다.
 
-UI 폰트는 Galmuri11(OFL, `ui/assets/`). 터미널 글자는 시스템 등폭.
+UI 폰트는 Quicksand + 주아(둘 다 OFL, `ui/assets/`). 라틴·숫자를 Quicksand 가 먼저
+가져가는 것은 멋이 아니라 필요다 — 한글 폰트는 백슬래시를 원화(₩)로 그려서 사이드바의
+윈도우 경로가 `C:₩Users₩...` 로 보인다.
+
+터미널 글자는 **D2Koding Ligature Nerd Font**(시스템 설치본, 레포에 넣지 않는다 —
+6.6MB 다). claude 상태줄이 브랜치·폴더 아이콘을 사설 영역 글자(`U+E0A0`, `U+F07B` …)로
+찍는데 Nerd 판이 아니면 그 자리가 전부 두부(□)로 나온다. **"Mono" 붙은 변형은 쓰지
+마라** — 한글까지 한 칸으로 좁혀 글자가 겹친다.
+
+없는 기계에서는 Cascadia Code(OFL, `ui/assets/`)로 물러선다. 아이콘은 두부가 되지만
+글자는 멀쩡하고, Consolas 보다 부드러우면서 글자도 더 갖고 있다(진행 막대 `▁▂`,
+도는 표시 `⠋` 가 Consolas 에는 없다).
+
+둥근 등폭(Sono · Comic Mono · Recursive Casual)은 재 보고 접었다 — 박스 문자
+(`─ │ ╭ ├`)가 아예 없어서 다른 폰트가 대신 그리고, 그 폰트의 자간이 달라 칸 격자에서
+어긋난다. claude 의 프롬프트 상자가 부서진다는 뜻이다.
 
 ## 헤드리스 검증
 
@@ -185,4 +200,5 @@ OS 로 키를 쏘는 방식(SendKeys 류)은 쓰지 않는다 — 포커스가 �
 
 ## 라이선스
 
-MIT. `kasa-pty` 는 kasaterm 것(MIT). Galmuri11 은 OFL(`ui/assets/OFL-Galmuri.txt`).
+MIT. `kasa-pty` 는 kasaterm 것(MIT). Quicksand · 주아는 OFL
+(`ui/assets/OFL-Quicksand.txt`, `ui/assets/OFL-Jua.txt`).

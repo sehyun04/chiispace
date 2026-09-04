@@ -75,7 +75,8 @@ export function Term({
 
     const t = new Terminal({
       theme: THEME,
-      fontFamily: '"Consolas", "D2Coding", monospace',
+      // "Mono" 붙은 변형을 쓰면 안 된다 — 한글까지 한 칸에 욱여넣어 글자가 겹친다.
+      fontFamily: '"D2KodingLigature Nerd Font", "Cascadia Code", "D2Coding", monospace',
       fontSize,
       lineHeight: 1.25,
       cursorBlink: true,
