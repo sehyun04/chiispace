@@ -88,6 +88,12 @@ export default function App() {
   // 그 칸에서 에이전트를 실제로 본 적이 있는가. "아직 안 떴다"와 "떴다가 내려갔다"를
   // 가르는 데 쓴다 — 스냅샷만으로는 둘이 똑같아 보인다.
   const sawAgent = useRef<Record<string, boolean>>({});
+  // 그 칸에서 무엇이든 돌고 있는 것을 본 적이 있는가. 복원 명령을 언제 놓아도
+  // 되는지가 여기 달려 있다 — 켠 직후의 빈 셸은 "아직 안 떴다"이지 "끝났다"가 아니다.
+  const sawRun = useRef<Record<string, boolean>>({});
+  // 연달아 몇 번이나 비어 있었나. 끌 때는 에이전트가 PTY 보다 먼저 죽어서
+  // 한 번의 스냅샷으로는 종료 중인지 명령이 끝난 것인지 가릴 수 없다.
+  const idleRuns = useRef<Record<string, number>>({});
   // 그 대화에서 마지막으로 시킨 일. 여러 pane 에 claude 를 띄워 두면 헤더가
   // 전부 "claude" 라 어느 쪽이 무슨 작업이었는지 알 수 없다.
   const [sessionTitle, setSessionTitle] = useState<Record<string, string>>({});
@@ -555,9 +561,29 @@ export default function App() {
     for (const [id, p] of Object.entries(stat)) {
       if (p.agent) sawAgent.current[id] = true;
       const name = restoreCmd(p, sessionOf.current[id]);
-      if (name) procs.current[id] = name;
-      else {
+      if (name) {
+        procs.current[id] = name;
+        sawRun.current[id] = true;
+        idleRuns.current[id] = 0;
+      } else {
+        // 이 칸은 지금 빈 프롬프트다. 그런데 **아직 안 뜬 것**과 **끝난 것**이
+        // 스냅샷에서는 똑같이 보인다.
+        //
+        // 복원한 칸은 셸이 뜨고 복원 명령이 들어가 claude 가 잡히기까지 십여 초가
+        // 걸리는데, 폴링은 800ms 마다 돌고 저장은 400ms 뒤에 쓴다. 그래서 켠 지 1초
+        // 만에 "이 칸은 아무것도 안 돌린다"가 저장되어 **방금 복원한 명령이 통째로
+        // 지워진다.** 그 상태로 앱을 끄면 다음에 켤 때 그 칸은 그냥 셸로 뜬다 —
+        // 사용자에게는 "세션이 또 안 불러와진다"이다. 실제로 그렇게 잃었다.
+        //
+        // 그러니 한 번이라도 무언가 돌던 것을 본 칸만 놓아 준다. 그리고 그마저도
+        // 곧바로는 안 놓는다 — 끌 때는 claude 가 PTY 보다 먼저 죽어서, 종료 중에
+        // 온 한두 번의 빈 스냅샷이 "명령이 끝났다"로 읽히면 같은 것을 잃는다.
+        // 연달아 비어 있을 때만 진짜로 끝난 것이다.
+        if (!sawRun.current[id]) continue;
+        if ((idleRuns.current[id] = (idleRuns.current[id] ?? 0) + 1) < 4) continue;
         delete procs.current[id];
+        delete sawRun.current[id];
+        delete idleRuns.current[id];
         // claude 가 내려갔으면 붙여 둔 대화도 놓는다. 그 pane 에서 다음에
         // 띄우는 것은 다른 대화일 수 있다.
         //

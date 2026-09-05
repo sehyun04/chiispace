@@ -167,6 +167,7 @@ $env:CHIISPACE_AUTOKEYS  = "C-S-d,C-S-t,C-="                  # 단축키를 순
 $env:CHIISPACE_AUTOSEND  = "dir /w"                           # 이 문자열 + Enter 를 주입
 $env:CHIISPACE_AUTOMOUSE = ".seam.vert@180,0"                 # 요소 중앙을 눌러 끌고 놓는다
 $env:CHIISPACE_PROBE     = "document.querySelectorAll('.pane').length"
+$env:CHIISPACE_STATE     = "$env:TEMP\probe-state.json"     # 세션을 이 파일로 읽고 쓴다
 scripts\shot.ps1 -Exe src-tauri\target\release\chiispace.exe -Out shot.png
 ```
 
@@ -177,6 +178,9 @@ scripts\shot.ps1 -Exe src-tauri\target\release\chiispace.exe -Out shot.png
 - `AUTOMOUSE` 는 `sel@dx,dy` 로 끌고 놓는다(`0,0` 이면 클릭). 중간 지점을 한 번 거쳐
   mousemove 를 두 번 보내므로 드래그 도중에만 나는 버그도 잡힌다. 경계선·목록처럼 키보드로
   못 만드는 경로가 여기에 걸린다.
+- `STATE` 는 탭·배치·복원 명령을 그 파일에서 읽고 그 파일에 쓴다. **복원을 검증할 때는
+  반드시 준다** — 안 주면 꾸며 넣은 값이 사용자가 실제로 쓰는 세션 파일에 눌러앉는다.
+  없는 대화 id 가 그렇게 들어가 그 칸이 켤 때마다 빈 새 대화로 뜬 적이 있다.
 - `PROBE` 는 JS 표현식의 결과를 화면 아래 오버레이에 찍는다. 릴리스 웹뷰에는 콘솔이 없어서
   스크린샷에 남기는 것이 유일한 통로다. `window.__bind`(어느 칸이 어느 대화를 쥐었는지),
   `window.__restore`(복원할 때 무엇을 치기로 했는지)를 여기로 들여다본다.

@@ -329,7 +329,25 @@ pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
 // 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면 사용자가 살아 있다고 믿는다.
 // 복원되는 것은 "어떻게 나눠 놓고 어디서 일하고 있었나"까지다.
 
+/// 검증이 쓸 다른 자리. `CHIISPACE_STATE` 가 있으면 그 파일을 세션으로 삼는다.
+///
+/// 복원을 확인하려면 "이 칸이 무엇을 돌리고 있었나"를 꾸며 넣어야 하는데, 그 자리가
+/// 사용자가 실제로 쓰는 파일 하나뿐이면 **검증이 곧 덮어쓰기**가 된다. 실제로 없는
+/// 대화 id 하나가 그렇게 들어가 눌러앉았고, 그 칸은 켤 때마다 빈 새 대화로 떴다 —
+/// 저장이 그 값을 그대로 다시 쓰므로 사용자 손으로는 빠져나올 길이 없다. 검증은
+/// 임시 파일을 주고 돌리면 사용자 상태에 닿지 않는다.
+fn probe_state_file() -> Option<std::path::PathBuf> {
+    let p = std::path::PathBuf::from(std::env::var("CHIISPACE_STATE").ok()?);
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    Some(p)
+}
+
 fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    if let Some(p) = probe_state_file() {
+        return Some(p);
+    }
     use tauri::Manager;
     let dir = app.path().app_config_dir().ok()?;
     std::fs::create_dir_all(&dir).ok()?;
@@ -350,6 +368,11 @@ pub fn state_save(app: AppHandle, json: String) {
 /// 새 자리에 아무것도 없을 때만 옛 자리를 읽어 준다. 쓰기는 늘 새 자리로 하므로
 /// 한 번 켜고 저장이 한 번 돌면 저절로 옮겨진다.
 fn legacy_state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    // 검증용 자리를 줬으면 옛 자리도 보지 않는다. 꾸며 넣은 파일이 비어 있을 때
+    // 사용자 것을 읽어 오면 그 상태로 저장까지 돌아 검증이 다시 사용자에게 샌다.
+    if probe_state_file().is_some() {
+        return None;
+    }
     use tauri::Manager;
     let dir = app.path().app_config_dir().ok()?;
     Some(dir.parent()?.join("com.sehyun.kasaspace").join("session.json"))

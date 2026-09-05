@@ -237,6 +237,13 @@ fn arm_autosend(app: &AppHandle) {
         let delay = ms("CHIISPACE_AUTOSEND_MS", 3500);
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(delay));
+            // 빈 줄을 먼저 던진다. PowerShell 은 시작 심에서 대화형 입력으로 넘어가는
+            // 사이에 먼저 온 한 바이트를 먹어서, 기본 셸이 PowerShell 이 된 뒤로는
+            // `claude ...` 가 `laude ...` 로 들어가 이 손잡이가 통째로 무의미했다.
+            // Term 의 복원 경로가 쓰는 것과 같은 완화다.
+            let nl = serde_json::to_string("\r").unwrap_or_default();
+            let _ = win.eval(&format!("window.__term && window.__term.input({nl})"));
+            std::thread::sleep(std::time::Duration::from_millis(250));
             let payload = serde_json::to_string(&format!("{text}\r")).unwrap_or_default();
             let _ = win.eval(&format!("window.__term && window.__term.input({payload})"));
         });
