@@ -144,7 +144,7 @@ export function Sidebar({
                         <Face
                           slug={casting[sl.id]}
                           agent={!!st?.agent}
-                          dancing={isAgentWorking(st, titles[sl.id])}
+                          dancing={isAgentWorking(st)}
                         />
                       </button>
                       <span className="pmeta">

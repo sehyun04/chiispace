@@ -20,13 +20,9 @@ export type PaneStat = {
 };
 
 // 프로세스가 열려 있는 상태와 출력이 흐르는 작업 상태를 분리해야 대기 중에는 멈춘다.
-export function isAgentWorking(p?: PaneStat, title?: string): boolean {
+export function isAgentWorking(p?: PaneStat): boolean {
   if (p?.agent !== "claude" && p?.agent !== "codex") return false;
-  const mark = title?.trimStart().codePointAt(0);
-  const marked =
-    mark !== undefined &&
-    ((mark >= 0x2720 && mark <= 0x274f) || (mark >= 0x2800 && mark <= 0x28ff));
-  return !!p.working || marked;
+  return !!p.working;
 }
 
 /** 이 pane 을 되살리려면 무엇을 쳐야 하는가.
@@ -100,9 +96,9 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
  *
  *  그런데 `--continue` 가 무엇을 열지는 우리가 미리 안다. 켤 때 그 폴더의 가장 최근
  *  대화가 곧 답이므로, `--continue` 대신 그 id 를 짚어 `--resume` 으로 연다. 그러면
- *  어느 대화인지 지금 알게 되어 다음 저장부터는 `--resume <id>` 로 남는다 — 한 번
- *  `--continue` 로 떨어지면 영영 못 벗어나던 고리가 여기서 끊긴다. 살아 있는
- *  백그라운드 대화인지도 id 가 있어야 가려내 `attach` 로 붙을 수 있다.
+ *   - 어느 대화인지 지금 알게 되어 다음 저장부터는 `--resume <id>` 로 남는다.
+ *    한 번 `--continue` 로 떨어지면 영영 못 벗어나던 고리가 여기서 끊긴다.
+ *  - 살아 있는 백그라운드 대화인지도 id 로 가려 `attach` 로 붙을 수 있다.
  *
  *  나머지 칸은 새 대화로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이 어느
  *  것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다 칸이

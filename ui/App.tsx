@@ -459,8 +459,8 @@ export default function App() {
     // 두 칸이 같은 대화로 열린다 — 사용자가 겪은 게 그것이다.
     //
     // 그래서 붙을 때까지 계속 본다. 다만 무한정은 아니다. 여기서 "새로 생긴 대화"는
-    // 다른 창에서 띄운 claude 의 것일 수도 있어서, 오래 열어 둘수록 남의 것을 집을
-    // 확률만 올라간다. 몇 분이면 사용자가 말을 걸고도 남는다.
+    // 다른 창에서 띄운 claude 의 것일 수도 있어서, 오래 열어 둘수록 남의 대화를
+    // 집을 확률만 올라간다. 몇 분이면 사용자가 말을 걸고도 남는다.
     let left = 60; // 3초 * 60 = 3분
     const look = () => {
       if (!before || !alive) return;
@@ -579,8 +579,6 @@ export default function App() {
         // 곧바로는 안 놓는다 — 끌 때는 claude 가 PTY 보다 먼저 죽어서, 종료 중에
         // 온 한두 번의 빈 스냅샷이 "명령이 끝났다"로 읽히면 같은 것을 잃는다.
         // 연달아 비어 있을 때만 진짜로 끝난 것이다.
-        if (!sawRun.current[id]) continue;
-        if ((idleRuns.current[id] = (idleRuns.current[id] ?? 0) + 1) < 4) continue;
         delete procs.current[id];
         delete sawRun.current[id];
         delete idleRuns.current[id];
@@ -908,13 +906,13 @@ export default function App() {
                         >
                           <span
                             className={
-                              isAgentWorking(stat[s.id], titles[s.id]) ? "pip work" : "pip"
+                              isAgentWorking(stat[s.id]) ? "pip work" : "pip"
                             }
                           >
                             <Face
                               slug={casting[s.id]}
                               agent={!!stat[s.id]?.agent}
-                              dancing={isAgentWorking(stat[s.id], titles[s.id])}
+                              dancing={isAgentWorking(stat[s.id])}
                             />
                           </span>
                           {renaming === s.id ? (
@@ -985,7 +983,7 @@ export default function App() {
                             누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
                             터미널을 고르고 끄는 데 걸리지 않게 한다. */}
                         {stat[s.id]?.agent && faceUrl(casting[s.id]) ? (
-                          isAgentWorking(stat[s.id], titles[s.id]) ? (
+                          isAgentWorking(stat[s.id]) ? (
                             <DanceFace slug={casting[s.id]} className="buddy" />
                           ) : (
                             <img

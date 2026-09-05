@@ -19,6 +19,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 #[derive(Default)]
 struct Panes(Mutex<HashMap<String, Arc<PtySession>>>);
 
+#[derive(Default)]
+struct AgentTurns(Mutex<HashMap<String, bool>>);
+
 #[derive(Clone, serde::Serialize)]
 struct PtyChunk {
     id: String,
@@ -96,11 +99,20 @@ fn pty_open(
 }
 
 #[tauri::command]
-fn pty_write(panes: State<Panes>, id: String, data: String) -> Result<(), String> {
+fn pty_write(
+    panes: State<Panes>,
+    turns: State<AgentTurns>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
     let map = panes.0.lock().unwrap();
     let Some(s) = map.get(&id) else {
         return Err(format!("없는 pane: {id}"));
     };
+    // 에이전트 실행 명령의 Enter는 제외해야 앱 시작과 세션 복원 때 캐릭터가 움직이지 않는다.
+    if data.bytes().any(|b| matches!(b, b'\r' | b'\n')) && s.active_agent().is_some() {
+        turns.0.lock().unwrap().insert(id.clone(), false);
+    }
     s.send_bytes(data.as_bytes()).map_err(|e| e.to_string())
 }
 
@@ -114,9 +126,10 @@ fn pty_resize(panes: State<Panes>, id: String, cols: u16, rows: u16) -> Result<(
 }
 
 #[tauri::command]
-fn pty_close(panes: State<Panes>, id: String) {
+fn pty_close(panes: State<Panes>, turns: State<AgentTurns>, id: String) {
     // Arc 를 떨구면 PTY 도 닫힌다. 리더 스레드는 채널이 끊기며 스스로 끝난다.
     panes.0.lock().unwrap().remove(&id);
+    turns.0.lock().unwrap().remove(&id);
 }
 
 /// "C-S-d" -> ((ctrl, shift, alt), "d")
@@ -261,6 +274,7 @@ pub fn run() {
             std::env::remove_var("CLAUDE_CODE_CHILD_SESSION");
 
             app.manage(Panes::default());
+            app.manage(AgentTurns::default());
             arm_autosend(app.handle());
             Ok(())
         })
@@ -353,7 +367,8 @@ fn text_shows_working_spinner(visible: &str) -> bool {
 
 #[cfg(test)]
 mod pane_status_tests {
-    use super::text_shows_working_spinner;
+    use super::{agent_turn_is_working, text_shows_working_spinner};
+    use std::collections::HashMap;
 
     #[test]
     fn live_agent_spinner_is_working() {
@@ -374,21 +389,51 @@ mod pane_status_tests {
         );
         assert!(!text_shows_working_spinner(&text));
     }
+
+    #[test]
+    fn spinner_requires_a_submitted_agent_turn() {
+        let mut turns = HashMap::new();
+        assert!(!agent_turn_is_working(&mut turns, "%1", true));
+        turns.insert("%1".to_string(), false);
+        assert!(agent_turn_is_working(&mut turns, "%1", true));
+        assert!(!agent_turn_is_working(&mut turns, "%1", false));
+        assert!(!turns.contains_key("%1"));
+    }
+}
+
+fn agent_turn_is_working(turns: &mut HashMap<String, bool>, id: &str, raw: bool) -> bool {
+    let Some(seen_working) = turns.get_mut(id) else {
+        return false;
+    };
+    if raw {
+        *seen_working = true;
+        return true;
+    }
+    if *seen_working {
+        turns.remove(id);
+    }
+    false
 }
 
 #[tauri::command]
-fn pane_status(panes: State<Panes>) -> Vec<PaneStatus> {
+fn pane_status(panes: State<Panes>, turns: State<AgentTurns>) -> Vec<PaneStatus> {
     let map = panes.0.lock().unwrap();
+    let mut turns = turns.0.lock().unwrap();
     map.iter()
-        .map(|(id, s)| PaneStatus {
-            id: id.clone(),
-            proc: s.active_process_name(),
-            agent: s.active_agent().map(|a| a.as_str().to_string()),
-            busy: s.has_active_job(),
-            working: s.output_heartbeat() || pane_shows_working_spinner(s),
-            cwd: s
-                .reported_cwd()
-                .map(|p| p.to_string_lossy().replace('\\', "/")),
+        .map(|(id, s)| {
+            let agent = s.active_agent().map(|a| a.as_str().to_string());
+            let raw_working = agent.is_some()
+                && (s.output_heartbeat() || pane_shows_working_spinner(s));
+            PaneStatus {
+                id: id.clone(),
+                proc: s.active_process_name(),
+                agent,
+                busy: s.has_active_job(),
+                working: agent_turn_is_working(&mut turns, id, raw_working),
+                cwd: s
+                    .reported_cwd()
+                    .map(|p| p.to_string_lossy().replace('\\', "/")),
+            }
         })
         .collect()
 }
