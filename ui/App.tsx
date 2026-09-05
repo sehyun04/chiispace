@@ -77,6 +77,10 @@ export default function App() {
   // 프로세스 자체는 앱과 함께 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면
   // 사용자가 그게 살아 있다고 믿는다.
   const [seeds, setSeeds] = useState<Record<string, Seed>>({});
+  // 복원한 칸에 먼저 찍어 줄 지난 대화. claude 는 `--resume` 할 때 대화를 처음부터
+  // 다시 찍지 않아서, 그 칸은 위로 올려다봐도 스크롤백이 비어 있다. 세션에 남기지
+  // 않고 켤 때마다 다시 읽는다 — 대화는 그 사이에도 자라고, 저장 파일에 넣기엔 크다.
+  const [seedHead, setSeedHead] = useState<Record<string, string>>({});
   // pane 이 무엇을 돌리고 있었는지를 누적해 둔다. 순간 스냅샷(stat)으로만
   // 계산하면 안 된다 — 앱을 끌 때 PTY 가 먼저 사라지면 pane_status 가 빈
   // 목록을 주고, 그 순간 저장이 돌면서 되살릴 정보가 통째로 지워진다.
@@ -313,6 +317,30 @@ export default function App() {
               m[id] = { cmd: `claude --session-id ${sid}`, auto: true };
             }
             setSeeds(m);
+            // 그 칸이 어느 대화였는지는 방금 정해졌다. 셸이 뜨기 전에 지난 대화를
+            // 받아 두어야 Term 이 첫 화면에 그것부터 찍을 수 있다. 하나라도 늦으면
+            // 그 칸만 비므로 병렬로 받고, 실패한 것은 그냥 없는 것으로 둔다.
+            // 여기서 기다린다. 아래 `setTabs` 가 칸을 세우고 그때 Term 이 마운트되며
+            // 첫 화면을 그리는데, 지난 대화가 그 뒤에 도착하면 이미 늦다 — Term 은
+            // 마운트 때의 값만 쓴다(셸이 이미 뜬 터미널에 나중에 끼워 넣으면 셸이
+            // 쓴 것과 순서가 뒤엉킨다). 꼬리만 읽으므로 칸당 수십 ms 다.
+            const got = await Promise.all(
+              Object.entries(m).map(async ([id, seed]) => {
+                // 명령이 아니라 붙여 둔 대화에서 읽는다. 살아 있는 대화는 명령이
+                // `claude attach <앞 8자>` 로 바뀌어 있어서 명령만 보면 못 찾는다.
+                const sid = sessionOf.current[id] ?? seedSession(seed.cmd);
+                const root = rootOf[id];
+                if (!sid || !root) return null;
+                const text = await invoke<string>("claude_transcript", {
+                  root,
+                  id: sid,
+                  turns: 40,
+                }).catch(() => "");
+                return text ? ([id, text] as const) : null;
+              }),
+            );
+            const heads = Object.fromEntries(got.filter((x) => !!x) as [string, string][]);
+            if (Object.keys(heads).length) setSeedHead(heads);
             // 되살릴 명령을 지금 바로 들고 있는다. procs 는 "이 칸이 무엇을
             // 돌리는가"인데, 저장은 그것만 보고 쓴다. 켠 직후 몇 초 동안은 셸이
             // 아직 이 명령을 띄우는 중이라 pane_status 로는 아무것도 안 보이고,
@@ -1002,6 +1030,7 @@ export default function App() {
                           shell={t.shell ?? shellList[0]?.path}
                           fontSize={fontSize}
                           seed={seeds[s.id]}
+                          head={seedHead[s.id]}
                         />
                       </section>
                     </div>

@@ -140,6 +140,7 @@ export function Term({
   shell,
   fontSize,
   seed,
+  head,
 }: {
   id: string;
   focused: boolean;
@@ -158,6 +159,14 @@ export function Term({
    *  쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다. 그 밖의 명령은
    *  쳐 놓기만 한다 — 빌드나 배포가 저 혼자 다시 도는 건 곤란하다. */
   seed?: { cmd: string; auto?: boolean };
+  /** 복원한 칸에 셸보다 먼저 찍어 줄 지난 대화.
+   *
+   *  claude 는 `--resume` 할 때 대화를 처음부터 다시 찍지 않는다 — 배너와 마지막
+   *  몇 개뿐이고, 압축된 대화는 그마저 한 줄이다. 터미널은 자기가 받은 바이트만
+   *  스크롤할 수 있으므로 그 칸은 위로 올려다봐도 아무것도 없다(9MB 짜리 대화를
+   *  되살렸을 때 스크롤백이 0줄이었다). 세션을 되살려 놓고도 무슨 얘기를 하던
+   *  칸인지 모르는 것이라, 셸을 띄우기 전에 우리가 먼저 찍어 스크롤백에 넣는다. */
+  head?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const pin = useRef<HTMLDivElement>(null);
@@ -165,6 +174,7 @@ export function Term({
   const fitter = useRef<FitAddon | null>(null);
   // 최초 마운트 때의 값만 쓴다. deps 에 넣으면 이 값이 바뀔 때마다 PTY 가 다시 열린다.
   const seedOnce = useRef(seed);
+  const headOnce = useRef(head);
 
   useEffect(() => {
     const el = host.current;
@@ -237,6 +247,10 @@ export function Term({
 
     // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이 곧바로
     // 리사이즈를 맞으며 첫 화면을 다시 그린다 — 좁은 pane 일수록 눈에 띈다.
+    // 셸보다 **먼저** 쓴다. 셸이 배너와 프롬프트를 뿌리기 시작한 뒤에 끼워 넣으면
+    // 지난 대화가 그 사이에 박혀 어디까지가 지난 것인지 알 수 없게 된다.
+    if (headOnce.current) t.write(headOnce.current);
+
     invoke("pty_open", { id, cols: t.cols, rows: t.rows, cwd, shell }).catch((e) =>
       t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );

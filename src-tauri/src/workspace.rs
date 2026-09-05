@@ -323,6 +323,125 @@ pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
     out
 }
 
+
+/// 복원한 칸에 붙일 "지난 대화".
+///
+/// claude 는 `--resume` 할 때 대화를 처음부터 다시 찍지 않는다. 배너와 마지막
+/// 몇 개만 그리고 만다(대화가 압축돼 있으면 그것마저 한 줄로 줄어든다). 그런데
+/// 터미널은 자기가 받은 바이트만 스크롤할 수 있으므로, 그 칸은 위로 올려다봐도
+/// 아무것도 없다 — 세션을 되살려 놓고도 무슨 얘기를 하던 칸인지 알 수가 없다.
+/// 실측으로 9MB 짜리 대화를 되살렸을 때 스크롤백은 0줄이었다.
+///
+/// 그래서 셸을 띄우기 전에 우리가 먼저 찍어 준다. 지난 대화가 스크롤백에 들어가
+/// 있으면 위로 올리는 것만으로 되짚을 수 있다.
+///
+/// 파일이 수십 MB 라 통째로 읽지 않는다. 꼬리만 잘라 뒤에서부터 세고, 잘린 첫
+/// 줄은 JSON 이 아니므로 버린다.
+#[tauri::command]
+pub fn claude_transcript(app: AppHandle, root: String, id: String, turns: usize) -> String {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    use tauri::Manager;
+    let Ok(home) = app.path().home_dir() else {
+        return String::new();
+    };
+    let want = squash(&root);
+    let Ok(dirs) = std::fs::read_dir(home.join(".claude").join("projects")) else {
+        return String::new();
+    };
+    let mut path = None;
+    for d in dirs.flatten() {
+        if squash(&d.file_name().to_string_lossy()) == want {
+            let p = d.path().join(format!("{id}.jsonl"));
+            if p.is_file() {
+                path = Some(p);
+            }
+            break;
+        }
+    }
+    let Some(path) = path else { return String::new() };
+    let Ok(mut f) = std::fs::File::open(&path) else {
+        return String::new();
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    // 주고받기 40개가 이 안에 들어오고도 남는다. 더 읽어 봐야 버릴 줄만 는다.
+    const TAIL: u64 = 4 * 1024 * 1024;
+    let cut = len > TAIL;
+    if cut {
+        let _ = f.seek(SeekFrom::Start(len - TAIL));
+    }
+    let mut r = BufReader::new(f);
+    if cut {
+        let mut drop_first = String::new();
+        let _ = r.read_line(&mut drop_first);
+    }
+
+    let mut rows: Vec<(bool, String)> = Vec::new();
+    for line in r.lines().map_while(Result::ok) {
+        // 대부분의 줄은 도구 호출과 그 결과다. 사람이 되짚어 볼 것은 주고받은
+        // 말이므로, 그 표시가 없는 줄은 JSON 으로 뜯지도 않는다.
+        if !line.contains("\"type\":\"user\"") && !line.contains("\"type\":\"assistant\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+        let user = v.get("type").and_then(|t| t.as_str()) == Some("user");
+        // 사이드체인은 서브에이전트가 따로 나눈 얘기다. 본 대화에 섞으면 누가
+        // 무슨 말을 했는지 알 수 없게 된다.
+        if v.get("isSidechain").and_then(|b| b.as_bool()) == Some(true) {
+            continue;
+        }
+        let Some(content) = v.get("message").and_then(|m| m.get("content")) else { continue };
+        let text = match content {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Array(blocks) => blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => continue,
+        };
+        let text = text.trim();
+        // 도구 결과만 든 사용자 레코드는 위 필터에서 빈 문자열이 된다. 명령
+        // 태그(<command-name> 따위)로 시작하는 것도 사람이 친 말이 아니다.
+        if text.is_empty() || text.starts_with('<') {
+            continue;
+        }
+        rows.push((user, text.to_string()));
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    let start = rows.len().saturating_sub(turns);
+    let name = session_title(&path);
+
+    // 터미널에 그대로 쓰는 글이라 줄바꿈은 CRLF 다. LF 만 주면 커서가 열로
+    // 돌아오지 않아 계단처럼 밀린다.
+    let mut out = String::new();
+    let head = if name.is_empty() { "지난 대화".to_string() } else { format!("지난 대화 · {name}") };
+    out.push_str(&format!("\r\n\x1b[38;5;180m──── {head} ────\x1b[0m\r\n"));
+    if start > 0 || cut {
+        out.push_str("\x1b[38;5;245m  (앞부분은 줄였다. 전체는 claude 에서 ctrl+o)\x1b[0m\r\n");
+    }
+    for (user, text) in &rows[start..] {
+        out.push_str("\r\n");
+        for (i, line) in text.lines().enumerate() {
+            // 한 마디가 수백 줄인 것도 있다. 되짚어 보는 데 필요한 만큼만 남긴다.
+            if i >= 40 {
+                out.push_str("\x1b[38;5;245m    …\x1b[0m\r\n");
+                break;
+            }
+            let body = line.replace('\t', "  ");
+            if *user {
+                out.push_str(&format!("\x1b[38;5;173m> \x1b[0m{body}\r\n"));
+            } else {
+                out.push_str(&format!("  \x1b[38;5;250m{body}\x1b[0m\r\n"));
+            }
+        }
+    }
+    out.push_str("\r\n\x1b[38;5;180m──── 여기부터 이어서 ────\x1b[0m\r\n\r\n");
+    out
+}
+
 // ── 세션 ─────────────────────────────────────────────────────────
 //
 // 배치와 연 폴더만 저장한다. PTY 는 되살리지 않는다 — 프로세스는 앱과 함께

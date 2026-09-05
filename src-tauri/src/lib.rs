@@ -296,6 +296,7 @@ pub fn run() {
             workspace::git_status,
             workspace::claude_sessions,
             workspace::claude_bg_sessions,
+            workspace::claude_transcript,
             workspace::state_save,
             workspace::state_load,
         ])
