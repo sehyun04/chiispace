@@ -7,7 +7,7 @@
  *  그래야 옆칸 모양을 손보는 일과 얼개를 손보는 일이 서로를 건드리지 않는다. */
 import { useState } from "react";
 import * as L from "./layout";
-import { cast, Face, leader, members, rosterLabel, Row, userTitle } from "./roster";
+import { cast, Face, leader, members, Row } from "./roster";
 import {
   isAgentWorking,
   label,
@@ -217,9 +217,10 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="side-section">
-          {rosterLabel} · {userTitle}
-        </div>
+        {/* 이 목록은 참고용이다 — 칸을 맡기는 것은 세션 줄의 얼굴을 눌러서 한다.
+            그래서 옆칸의 주인공은 위의 세션 목록이고, 여기는 밑에서 자리를 조금만
+            쓴다. "치이카와 · 대장" 같은 제목은 무엇을 보는 칸인지 알려 주지 않는다. */}
+        <div className="side-section roster-head">아이들</div>
         <div className="roster">
           <Row m={leader} lead />
           {members.map((m) => (

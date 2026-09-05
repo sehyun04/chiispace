@@ -142,11 +142,10 @@ body {
 /* 탭과 pane 을 한 목록으로 둔 자리. 사이드바의 주인이고, 로스터는 아래에서
  * 남는 만큼만 쓴다. 위에 탭 줄을 따로 두지 않는 이유는 App.tsx 에 적어 두었다. */
 .sessions {
-  /* 제 내용만큼만 쓰고 남는 세로는 아래(로스터)로 넘긴다. 목록이 길어지면
-     절반쯤에서 스스로 스크롤한다 — 세션이 늘었다고 로스터를 밀어내면 안 된다. */
-  flex: 0 1 auto;
+  /* 옆칸의 주인공. 남는 세로는 전부 여기가 가져간다 — 로스터는 참고용이라
+     밑에서 자리를 조금만 쓴다. 목록이 길어지면 여기가 스스로 스크롤한다. */
+  flex: 1 1 auto;
   min-height: 0;
-  max-height: 58%;
   overflow-y: auto;
   padding: 2px 8px 10px;
 }
@@ -433,19 +432,30 @@ body {
   font-size: 11px;
 }
 
+.roster-head {
+  padding-top: 6px;
+  padding-bottom: 2px;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* 참고용 목록이라 접시 하나만큼만 쓴다. 남는 세로는 위의 세션 목록이 갖는다. */
 .roster {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+  max-height: 30%;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 8px 10px;
+  padding: 0 8px 8px;
+  font-size: 11px;
 }
 
 .member {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 8px;
-  border-radius: var(--radius-sm);
+  gap: 7px;
+  padding: 2px 6px;
+  border-radius: 7px;
   cursor: default;
 }
 .member:hover {
@@ -453,10 +463,10 @@ body {
 }
 
 .member .pip {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  border: 2px solid var(--outline);
+  border: 1.5px solid var(--outline);
   flex: none;
 }
 
@@ -470,17 +480,18 @@ body {
 
 .member .school {
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: 9px;
+  opacity: 0.85;
 }
 
 .member.lead .who::after {
   content: "대장 곁";
-  margin-left: 6px;
-  padding: 1px 5px;
+  margin-left: 5px;
+  padding: 0 4px;
   border-radius: 999px;
   background: var(--sun);
   color: var(--outline);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 /* ── 무대 ───────────────────────────────────────────────── */
