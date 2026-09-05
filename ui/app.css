@@ -481,7 +481,6 @@ body {
 .member .school {
   color: var(--ink-3);
   font-size: 11px;
-  opacity: 0.85;
 }
 
 .member.lead .who::after {

@@ -416,29 +416,31 @@ pub fn claude_transcript(app: AppHandle, root: String, id: String, turns: usize)
 
     // 터미널에 그대로 쓰는 글이라 줄바꿈은 CRLF 다. LF 만 주면 커서가 열로
     // 돌아오지 않아 계단처럼 밀린다.
+    // 색은 256 팔레트가 아니라 테마 잉크색을 트루컬러로 준다. 256 회색 계단은
+    // 어두운 배경 기준이라 크림 바탕 위에서는 대비 1.75 로 날아간다.
     let mut out = String::new();
     let head = if name.is_empty() { "지난 대화".to_string() } else { format!("지난 대화 · {name}") };
-    out.push_str(&format!("\r\n\x1b[38;5;180m──── {head} ────\x1b[0m\r\n"));
+    out.push_str(&format!("\r\n\x1b[38;2;138;109;38m──── {head} ────\x1b[0m\r\n"));
     if start > 0 || cut {
-        out.push_str("\x1b[38;5;245m  (앞부분은 줄였다. 전체는 claude 에서 ctrl+o)\x1b[0m\r\n");
+        out.push_str("\x1b[38;2;143;119;92m  (앞부분은 줄였다. 전체는 claude 에서 ctrl+o)\x1b[0m\r\n");
     }
     for (user, text) in &rows[start..] {
         out.push_str("\r\n");
         for (i, line) in text.lines().enumerate() {
             // 한 마디가 수백 줄인 것도 있다. 되짚어 보는 데 필요한 만큼만 남긴다.
             if i >= 40 {
-                out.push_str("\x1b[38;5;245m    …\x1b[0m\r\n");
+                out.push_str("\x1b[38;2;143;119;92m    …\x1b[0m\r\n");
                 break;
             }
             let body = line.replace('\t', "  ");
             if *user {
-                out.push_str(&format!("\x1b[38;5;173m> \x1b[0m{body}\r\n"));
+                out.push_str(&format!("\x1b[38;2;195;71;65m> \x1b[0m{body}\r\n"));
             } else {
-                out.push_str(&format!("  \x1b[38;5;250m{body}\x1b[0m\r\n"));
+                out.push_str(&format!("  \x1b[38;2;131;109;90m{body}\x1b[0m\r\n"));
             }
         }
     }
-    out.push_str("\r\n\x1b[38;5;180m──── 여기부터 이어서 ────\x1b[0m\r\n\r\n");
+    out.push_str("\r\n\x1b[38;2;138;109;38m──── 여기부터 이어서 ────\x1b[0m\r\n\r\n");
     out
 }
 

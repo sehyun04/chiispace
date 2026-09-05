@@ -9,6 +9,11 @@ import "@xterm/xterm/css/xterm.css";
 
 /** 치이카와 팔레트로 맞춘 xterm 테마. 밝은 바탕이라 ANSI 색은 채도를 낮춰야
  *  글자가 종이 위에서 튀지 않는다 — 원색 그대로 쓰면 크림 배경에서 눈이 아프다. */
+// 색조는 치이카와 파스텔 그대로, 명도만 내렸다. 이건 **밝은** 터미널이라
+// 파스텔을 그대로 쓰면 크림 바탕 위에서 글자가 안 읽힌다 — 상태줄 노랑이
+// 대비 1.41, claude 가 흐린 글에 쓰는 brightBlack 이 2.29 였다(4.5 는 돼야 한다).
+// 게다가 claude 는 dim(SGR 2)을 자주 쓰는데 xterm 은 그걸 배경 쪽으로 반쯤
+// 섞으므로 그 값이 또 절반이 된다. 색을 새로 고를 때도 대비부터 재라.
 const THEME = {
   background: "#fbf5ea",
   foreground: "#5b4433",
@@ -16,20 +21,20 @@ const THEME = {
   cursorAccent: "#fbf5ea",
   selectionBackground: "#f3bfc355",
   black: "#5b4433",
-  red: "#d98a86",
-  green: "#7fae7d",
-  yellow: "#c9a03c",
-  blue: "#4f9ecb",
-  magenta: "#a08bb6",
-  cyan: "#5aa8bd",
-  white: "#8b7460",
-  brightBlack: "#b5a18c",
-  brightRed: "#e79d99",
-  brightGreen: "#93c191",
-  brightYellow: "#f2ce5b",
-  brightBlue: "#6fb7e0",
-  brightMagenta: "#b8a7c9",
-  brightCyan: "#8fcfe0",
+  red: "#c34741",
+  green: "#4f7b4d",
+  yellow: "#8a6d26",
+  blue: "#2f77a1",
+  magenta: "#81659e",
+  cyan: "#38798b",
+  white: "#836d5a",
+  brightBlack: "#8f775c",
+  brightRed: "#be2b22",
+  brightGreen: "#3d703b",
+  brightYellow: "#7e6003",
+  brightBlue: "#196a99",
+  brightMagenta: "#765796",
+  brightCyan: "#1d6d83",
   brightWhite: "#5b4433",
 };
 
@@ -191,6 +196,11 @@ export function Term({
       // 기본값 1000 은 빌드 로그 한 번에 날아간다. 위로 올려 본 것이 이미
       // 사라진 뒤라면 스크롤백이 있으나 마나다.
       scrollback: 10000,
+      // 팔레트를 고쳐도 claude 는 자기 색을 트루컬러로 직접 보내고 dim 도 쓴다.
+      // 그건 우리 팔레트를 안 거치므로 여전히 크림 위에서 날아간다. xterm 이
+      // 칸마다 대비를 재서 모자라면 글자색만 조여 준다 — 4.5 를 맞춰 두면 이미
+      // 충분한 색은 건드리지 않고 안 보이는 것만 잡힌다.
+      minimumContrastRatio: 4.5,
     });
     term.current = t;
     const fit = new FitAddon();
