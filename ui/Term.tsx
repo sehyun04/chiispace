@@ -33,11 +33,101 @@ const THEME = {
   brightWhite: "#5b4433",
 };
 
+/** ANSI 16색을 테마 순서대로. 팔레트 번호를 색으로 바꿀 때 쓴다. */
+const P16 = [
+  THEME.black, THEME.red, THEME.green, THEME.yellow,
+  THEME.blue, THEME.magenta, THEME.cyan, THEME.white,
+  THEME.brightBlack, THEME.brightRed, THEME.brightGreen, THEME.brightYellow,
+  THEME.brightBlue, THEME.brightMagenta, THEME.brightCyan, THEME.brightWhite,
+];
+
+/** xterm 256 팔레트. 16~231 은 6x6x6 정육면체, 232~255 는 회색 계단이다. */
+function palette(n: number): string {
+  if (n < 16) return P16[n];
+  if (n < 232) {
+    const step = [0, 95, 135, 175, 215, 255];
+    const i = n - 16;
+    return rgb(step[Math.floor(i / 36) % 6], step[Math.floor(i / 6) % 6], step[i % 6]);
+  }
+  const g = 8 + (n - 232) * 10;
+  return rgb(g, g, g);
+}
+
+const rgb = (r: number, g: number, b: number) =>
+  `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+
+const esc = (t: string) =>
+  t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 function decode(b64: string): Uint8Array {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+/** 버퍼 한 줄을 색까지 살려 HTML 로 옮긴다.
+ *
+ *  글자만 뽑는 `translateToString` 으로는 claude 의 입력 상자와 상태줄이
+ *  흑백이 되어, 정작 눈으로 찾으려던 표시(모델·브랜치·경고)가 안 보인다. */
+function lineHtml(line: import("@xterm/xterm").IBufferLine): string {
+  let out = "";
+  let open = "";
+  let buf = "";
+  const flush = () => {
+    if (!buf) return;
+    out += open ? `<span style="${open}">${esc(buf)}</span>` : esc(buf);
+    buf = "";
+  };
+  for (let x = 0; x < line.length; x++) {
+    const c = line.getCell(x);
+    if (!c) continue;
+    // 넓은 글자의 뒤쪽 반 칸은 폭 0 으로 온다. 그대로 넣으면 글자가 겹친다.
+    if (c.getWidth() === 0) continue;
+    let fg = c.isFgDefault() ? "" : c.isFgRGB() ? rgbOf(c.getFgColor()) : palette(c.getFgColor());
+    let bg = c.isBgDefault() ? "" : c.isBgRGB() ? rgbOf(c.getBgColor()) : palette(c.getBgColor());
+    if (c.isInverse()) [fg, bg] = [bg || THEME.background, fg || THEME.foreground];
+    const style =
+      (fg ? `color:${fg};` : "") +
+      (bg ? `background:${bg};` : "") +
+      (c.isBold() ? "font-weight:700;" : "") +
+      (c.isDim() ? "opacity:.7;" : "") +
+      (c.isUnderline() ? "text-decoration:underline;" : "");
+    if (style !== open) {
+      flush();
+      open = style;
+    }
+    buf += c.getChars() || " ";
+  }
+  flush();
+  return `<div>${out || "&nbsp;"}</div>`;
+}
+
+const rgbOf = (n: number) => `#${(n & 0xffffff).toString(16).padStart(6, "0")}`;
+
+/** 맨 아래에 붙여 둘 줄들. claude 의 입력 상자 윗변부터 마지막 글자까지다.
+ *
+ *  상자를 못 찾으면 빈 배열이다 — 아무 줄이나 몇 개 떠서 붙이면 문맥 없는
+ *  글자 조각이 칸 아래에 박혀 오히려 방해가 된다. */
+function tailBlock(t: Terminal): string[] {
+  const buf = t.buffer.active;
+  let last = buf.length - 1;
+  while (last >= 0 && !(buf.getLine(last)?.translateToString(true) ?? "").trim()) last--;
+  if (last < 0) return [];
+  // 상자 윗변(╭ ┌)을 위로 훑는다. 입력이 여러 줄이어도 상자째 다 담기게.
+  const floor = Math.max(0, last - 16);
+  for (let i = last; i >= floor; i--) {
+    const head = (buf.getLine(i)?.translateToString(true) ?? "").trimStart()[0];
+    if (head === "╭" || head === "┌") {
+      const rows: string[] = [];
+      for (let y = i; y <= last; y++) {
+        const ln = buf.getLine(y);
+        if (ln) rows.push(lineHtml(ln));
+      }
+      return rows;
+    }
+  }
+  return [];
 }
 
 type W = Record<string, unknown>;
@@ -70,6 +160,7 @@ export function Term({
   seed?: { cmd: string; auto?: boolean };
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const pin = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fitter = useRef<FitAddon | null>(null);
   // 최초 마운트 때의 값만 쓴다. deps 에 넣으면 이 값이 바뀔 때마다 PTY 가 다시 열린다.
@@ -107,6 +198,34 @@ export function Term({
     // 않는 편이 맞다. false 를 주면 xterm 은 그 변환까지 건너뛴다.
     t.attachCustomWheelEventHandler(() => (t.options.scrollback ?? 0) > 0);
 
+    // 위로 스크롤하면 claude 의 입력 상자와 상태줄도 같이 밀려 올라간다. 지난
+    // 대화를 되짚어 보는 동안에도 지금 무엇을 치는 자리인지는 보여야 하므로,
+    // 올려다보는 동안만 그 몇 줄을 떠서 칸 밑에 붙여 둔다.
+    //
+    // 터미널을 건드려 붙잡아 둘 수는 없다 — 스크롤백은 셸이 쓴 그대로여야 하고,
+    // 거기에 손을 대면 위로 올린 내용이 어긋난다. 그래서 붙잡는 대신 **베껴서
+    // 덧그린다.** 맨 아래에 붙어 있으면 그릴 이유가 없으니 그때는 감춘다.
+    const paintPin = () => {
+      const el = pin.current;
+      if (!el) return;
+      const buf = t.buffer.active;
+      const rows = buf.viewportY < buf.baseY ? tailBlock(t) : [];
+      if (!rows.length) {
+        if (!el.hidden) {
+          el.hidden = true;
+          el.innerHTML = "";
+        }
+        return;
+      }
+      const html = rows.join("");
+      if (el.innerHTML !== html) el.innerHTML = html;
+      el.hidden = false;
+    };
+    t.onScroll(paintPin);
+    // 스크롤을 올려 둔 채로 claude 가 다시 그릴 때가 있다(일하는 중 표시가
+    // 돈다). 그때도 띠가 따라가야 멈춘 화면처럼 보이지 않는다.
+    t.onRender(paintPin);
+
     // 첫 줄부터 그리면 내용이 화면 위쪽에 몰리고 아래가 텅 빈다. 셸이든
     // claude 든 마찬가지다 — 대체 화면을 안 쓰므로 늘 커서가 있는 자리부터
     // 그린다. 미리 화면 높이만큼 빈 줄을 깔아 두면 커서가 맨 아래로 내려가서,
@@ -122,22 +241,47 @@ export function Term({
       t.writeln(`\x1b[31m셸을 못 띄웠다: ${e}\x1b[0m`),
     );
 
+    // 복원 명령은 **셸이 조용해진 뒤에** 넣는다.
+    //
+    // "첫 출력이 오면 500ms 뒤"로 두었더니 PowerShell 에서 첫 글자가 먹혔다
+    // (`claude ...` 가 `laude ...` 로 들어가 "laude 를 인식할 수 없습니다"가 떴다).
+    // cmd 는 즉시 뜨지만 PowerShell 은 배너를 뿌리고 프로필과 프롬프트 심을 얹는
+    // 동안 아직 입력을 받을 준비가 안 돼 있다. 정해진 시간을 늘려 잡으면 느린
+    // 컴퓨터에서 또 깨지므로 **출력이 멎는 것**을 신호로 삼는다. 그래도 끝없이
+    // 무언가 뿌리는 셸이 있을 수 있으니 상한을 둔다.
     let seeded = false;
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    const fire = () => {
+      if (!alive || seeded || !seedOnce.current) return;
+      seeded = true;
+      clearTimeout(quiet);
+      const { cmd, auto } = seedOnce.current;
+      if (!auto) {
+        // paste 는 bracketed paste 로 감싸서 셸이 그것을 명령으로 실행하지
+        // 않고 입력으로만 받는다. 쳐 놓기만 할 것은 이쪽이다.
+        t.paste(cmd);
+        return;
+      }
+      // 빈 줄을 하나 먼저 던지고 나서 명령을 보낸다.
+      //
+      // PowerShell 은 시작할 때 `-NoExit -Command <프롬프트 심>` 을 먼저 도는데,
+      // 그게 끝나고 대화형 입력으로 넘어가는 사이에 **먼저 온 한 바이트를 먹는다.**
+      // 그래서 `claude ...` 가 `laude ...` 로 들어가 "laude 를 인식할 수 없습니다"
+      // 로 끝났다. 출력이 멎기를 기다려 봐도 그대로였다 — 시간 문제가 아니라 그
+      // 전환에서 한 번 삼키는 것이다.
+      //
+      // 그러니 삼켜도 되는 것을 먼저 준다. 빈 줄은 어느 셸에서든 프롬프트만 한 번
+      // 더 그리고 만다. 삼키지 않는 셸(cmd)에서도 손해가 그것뿐이다.
+      send("\r");
+      setTimeout(() => alive && send(cmd + "\r"), 250);
+    };
+    const hardStop = setTimeout(fire, 6000);
     listen<{ id: string; b64: string }>("pty:data", (ev) => {
       if (!alive || ev.payload.id !== id) return;
       t.write(decode(ev.payload.b64));
-      // 셸이 첫 출력을 낸 뒤에 얹는다. 프롬프트가 그려지기 전에 넣으면 글자가
-      // 그 뒤에 오는 출력에 묻혀 안 보인다.
       if (seedOnce.current && !seeded) {
-        seeded = true;
-        const { cmd, auto } = seedOnce.current;
-        setTimeout(() => {
-          if (!alive) return;
-          // 실행은 pty_write 로 직접 보낸다. paste 는 bracketed paste 로 감싸서
-          // 셸이 그것을 명령으로 실행하지 않고 입력으로만 받는다.
-          if (auto) send(cmd + "\r");
-          else t.paste(cmd);
-        }, 500);
+        clearTimeout(quiet);
+        quiet = setTimeout(fire, 600);
       }
     }).then((un) => (alive ? unlisteners.push(un) : un()));
 
@@ -227,6 +371,8 @@ export function Term({
 
     return () => {
       alive = false;
+      clearTimeout(quiet);
+      clearTimeout(hardStop);
       ro.disconnect();
       unlisteners.forEach((un) => un());
       delete ((w.__terms ??= {}) as Record<string, Terminal>)[id];
@@ -270,6 +416,19 @@ export function Term({
   return (
     <div className="pane-body">
       <div className="term-host" ref={host} />
+      {/* 위로 올려다보는 동안만 뜬다. 누르면 맨 아래로 돌아간다 — 그게 이
+          띠를 보고 나서 하고 싶은 유일한 일이다. */}
+      <div
+        className="pinned"
+        ref={pin}
+        hidden
+        style={{ fontSize, lineHeight: 1.25 }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          term.current?.scrollToBottom();
+          term.current?.focus();
+        }}
+      />
     </div>
   );
 }

@@ -824,6 +824,25 @@ body.dragging .slot {
      합쳐져 한 줄이 넘는 빈 띠가 아래에 남고, 줄 수도 하나 손해 본다. */
   inset: 2px 6px 2px 10px;
 }
+/* 위로 올려다보는 동안 칸 밑에 붙는 띠 — claude 의 입력 상자와 상태줄을
+   그대로 베낀 것이다. 터미널 위에 얹히므로 배경을 불투명하게 줘야 아래 글자가
+   비쳐 보이지 않는다. 위쪽에만 옅은 그늘을 둬서 "떠 있는 것"임을 알린다. */
+.pinned {
+  position: absolute;
+  left: 10px;
+  right: 6px;
+  bottom: 2px;
+  z-index: 3;
+  padding: 2px 0 0;
+  background: var(--paper);
+  box-shadow: 0 -8px 12px -6px rgba(91, 68, 51, 0.18);
+  font-family: "D2KodingLigature Nerd Font", "Cascadia Code", "D2Coding", monospace;
+  color: var(--ink);
+  white-space: pre;
+  overflow: hidden;
+  cursor: pointer;
+}
+
 .pane-body .xterm-viewport {
   background: transparent !important;
   scrollbar-width: thin;

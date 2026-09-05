@@ -219,6 +219,10 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const cli = await invoke<string | null>("initial_root").catch(() => null);
+      // 셸 목록은 첫 칸이 뜨기 **전에** 있어야 한다. 목록의 맨 앞이 기본 셸인데,
+      // 늦게 받으면 그 사이에 뜬 칸이 엔진 기본(cmd)으로 열려 버리고 이미 뜬
+      // 셸은 나중에 바꿔 끼울 수 없다. 설치가 바뀌지 않는 한 그대로라 한 번만 묻는다.
+      setShellList(await invoke<ShellKind[]>("shells").catch(() => [] as ShellKind[]));
       const saved = await invoke<string | null>("state_load").catch(() => null);
       if (saved) {
         try {
@@ -282,6 +286,25 @@ export default function App() {
                 if (v.sid) sessionOf.current[id] = v.sid;
                 m[id] = liveAttach(v.seed, bg);
               }
+            }
+
+            // 아직 만들어지지 않은 대화는 `--resume` 이 아니라 `--session-id` 로 연다.
+            //
+            // 우리가 id 를 내서 연 칸에 사용자가 아무 말도 안 하면 claude 는 그
+            // 대화 파일을 만들지 않는다(첫 프롬프트 때 만든다). 그런 칸을 다음에
+            // `--resume` 으로 열면 "No conversation found with session ID" 로 죽고
+            // 칸은 셸 프롬프트 앞에 멈춘다 — 사용자 눈에는 또 복원이 안 된 것이다.
+            // 같은 id 를 그대로 들고 `--session-id` 로 열면 그 칸의 정체는 유지된다.
+            for (const [id, seed] of Object.entries(m)) {
+              const sid = seedSession(seed.cmd);
+              if (!sid || !seed.cmd.includes("--resume")) continue;
+              const root = rootOf[id];
+              if (!root) continue;
+              const list = await invoke<{ id: string }[]>("claude_sessions", { root }).catch(
+                () => [] as { id: string }[],
+              );
+              if (list.some((c) => c.id === sid)) continue;
+              m[id] = { cmd: `claude --session-id ${sid}`, auto: true };
             }
             setSeeds(m);
             // 되살릴 명령을 지금 바로 들고 있는다. procs 는 "이 칸이 무엇을
@@ -349,13 +372,6 @@ export default function App() {
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
   }, [tabs, active, fontSize, booted, stat, names, casting, sideOpen]);
-
-  // 셸 목록은 설치가 바뀌지 않는 한 그대로다. 한 번만 묻는다.
-  useEffect(() => {
-    invoke<ShellKind[]>("shells")
-      .then(setShellList)
-      .catch(() => {});
-  }, []);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -959,7 +975,7 @@ export default function App() {
                           focused={ti === active && t.focus === s.id}
                           onTitle={onTitle}
                           cwd={t.root ?? undefined}
-                          shell={t.shell}
+                          shell={t.shell ?? shellList[0]?.path}
                           fontSize={fontSize}
                           seed={seeds[s.id]}
                         />

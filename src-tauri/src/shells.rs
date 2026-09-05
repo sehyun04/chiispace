@@ -53,13 +53,16 @@ fn found() -> Vec<Shell> {
         }
     };
 
-    add("cmd", "명령 프롬프트", have(sys32.join("cmd.exe")));
+    // PowerShell 이 앞이다 — 맨 앞이 기본이 되므로 이 순서가 곧 "새 칸은 무엇으로
+    // 여는가"다. cmd 는 히스토리도 탭 완성도 없어 기본으로 둘 이유가 없다.
+    // pwsh 7 이 깔려 있으면 그쪽이 더 앞이다.
+    add("pwsh", "PowerShell 7", on_path("pwsh.exe"));
     add(
         "powershell",
         "Windows PowerShell",
         have(sys32.join(r"WindowsPowerShell\v1.0\powershell.exe")),
     );
-    add("pwsh", "PowerShell 7", on_path("pwsh.exe"));
+    add("cmd", "명령 프롬프트", have(sys32.join("cmd.exe")));
 
     // Git Bash 는 `bin\bash.exe` 로 띄운다. `usr\bin\bash.exe` 도 돌긴 하지만
     // MSYS 환경을 갖춰 주는 건 앞쪽 래퍼라, 그쪽으로 띄우면 PATH 에 유닉스
