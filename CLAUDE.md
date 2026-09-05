@@ -182,6 +182,18 @@ upstream 의 `desc.txt` 를 그대로 옮긴 것이고, 그건 원래 그림 생
    훑을 수 없으므로 꼬리 512KB 를 보고, 거기 이름이 없으면 머리 512KB 도 본다 — 이름은
    대화 앞머리에서 한 번 붙고 마는 수가 있다.
 
+18. **claude 의 대체 화면 금지는 우리가 직접 건다.** `PtyOptions.env` 로
+   `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` 을 넘긴다. 예전 엔진 rev 는 이걸 무조건
+   걸어 줬는데, `f77f46ed` 부터는 `KASATERM_CLAUDE_CLASSIC=1` 일 때만 건다 — kasaterm
+   은 자기 렌더러에 「맨 위 질문 고정」 띠가 있어서 스크롤백 대신 화면 안정성을 골랐고,
+   그 결정이 rev 를 올리면 따라온다. 우리에겐 그 띠가 없어 **터미널 스크롤백이 지난
+   대화를 되짚는 유일한 길**이라 되돌려야 한다. 안 하면 claude 칸에서 위로 스크롤해도
+   아무것도 없다(실제로 rev 올린 뒤 그렇게 잃었다). `opts.env` 는 엔진이 다른 환경
+   변수를 다 얹은 뒤에 얹으므로 이쪽이 이긴다.
+   확인은 `window.__terms[id].buffer.active.type` 으로 한다 — `normal` 이면 걸린 것이고
+   `alternate` 면 안 걸린 것이다. `baseY` 만 보면 안 된다. 갓 복원한 칸은 claude 가
+   화면 한 장만 다시 그리므로 제대로 걸려 있어도 0 이다.
+
 `tap_bytes_with_snapshot()` 을 구독 등록과 화면 채취 둘로 쪼개지 않는 이유는 README 에 있다.
 
 **빌드가 갑자기 ``crate `softbuffer` required to be available in rlib format`` 으로 깨지면
