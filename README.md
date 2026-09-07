@@ -230,6 +230,9 @@ node --test --test-concurrency=1 scripts/bridge.test.mjs scripts/collab.test.mjs
 
 사용자 앱이 실행 중이면 빌드에 `--target-dir target/agent-bridge`를 붙여 별도 폴더에 만들고
 `CHIISPACE_TEST_EXE`에도 그쪽 exe를 지정한다. CLI도 함께 빌드해야 한다.
+이 경로는 임시 검증용이다. 사용자용 실행 경로는 `src-tauri/target/release/chiispace.exe`로
+고정하고, 검증 후 앱·CLI를 그 위치에 함께 반영한다. 실행 중이면 사용자가 작업을 정리하고
+종료한 뒤 반영하며, 임시 경로를 새 실행 위치로 안내하지 않는다.
 협업 검증은 `rustc`로 테스트용 Claude/Codex 대역 exe를 임시 폴더에 만들고 실제 PTY와
 MCP를 연결한다. 유료 모델은 호출하지 않으며 모델이 자연어 지침을 따르는지까지 검증하는
 테스트는 아니다. 초안·작업 중 대기, 결과 회수, 실패·취소, 재시작·칸 종료와 전역 설정 해시를

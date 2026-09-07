@@ -52,7 +52,14 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 `src-tauri/src/launchers.rs`, `src-tauri/src/launch.rs`, `src-tauri/src/mcp.rs`, `ui/agent-input.ts`.
 CLI·자연어 위임 사용법은 README의 "칸 사이 연결".
 앱과 CLI는 함께 빌드한다(`cargo build --release --features custom-protocol --bins`).
-실행 중인 사용자 exe와 충돌하지 않게 이번 산출물은 `src-tauri/target/agent-bridge/release/`에 둔다.
+**사용자용 실행 경로는 `src-tauri/target/release/chiispace.exe`로 고정한다.**
+`target/agent-bridge/release/`는 실행 파일 잠금을 피하는 임시 빌드·검증 경로일 뿐,
+사용자에게 새 실행 위치로 안내하지 않는다. 검증 후 앱·CLI를 기존 `target/release/`에 함께 반영한다.
+기존 exe가 실행 중이면 사용자에게 작업 정리 후 종료를 요청한다. 임의로 앱을 닫거나 경로를 바꾸지 않는다.
+
+2026-09-07 반영 완료: 사용자가 앱을 종료한 뒤 9월 6일 최신 앱·CLI를 기존 `target/release/`에 복사했다.
+두 파일의 SHA-256이 검증된 빌드와 같고 기존 경로에서 CLI 실행도 확인했다. 앱은 임의로 다시 켜지 않았다.
+이전 exe 백업: `src-tauri/target/release/backups/before-update-20260907-175137-148c7f7c/chiispace.exe`.
 
 남은 일은 실모델 자연어 위임 확인, 필요시 네이티브 팀 메시지 연결, 창 분리·설정·터미널 검색이다.
 MCP 협업은 붙었지만 Claude `SendMessage`나 팀 인박스 연동은 아직 없다.
