@@ -58,6 +58,57 @@ pub struct Queue {
 #[derive(Default)]
 pub struct Collab(pub Mutex<Queue>);
 
+fn terminal_reply(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    if matches!(text, "\x1b[I" | "\x1b[O") {
+        return true;
+    }
+    let numbers = |value: &str| {
+        !value.is_empty()
+            && value
+                .split(';')
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    if let Some(csi) = text.strip_prefix("\x1b[") {
+        if let Some(params) = csi.strip_suffix('R') {
+            let params = params.strip_prefix('?').unwrap_or(params);
+            return numbers(params) && params.split(';').count() == 2;
+        }
+        if let Some(params) = csi.strip_suffix('c') {
+            return params.strip_prefix(['?', '>']).is_some_and(numbers);
+        }
+        if let Some(params) = csi.strip_suffix("$y") {
+            let params = params.strip_prefix('?').unwrap_or(params);
+            return numbers(params) && params.split(';').count() == 2;
+        }
+        if let Some(params) = csi.strip_suffix('t') {
+            return numbers(params)
+                && params.split(';').count() == 3
+                && matches!(params.split(';').next(), Some("4" | "6" | "8"));
+        }
+        return csi == "0n";
+    }
+    let Some(osc) = text
+        .strip_prefix("\x1b]")
+        .and_then(|s| s.strip_suffix("\x1b\\").or_else(|| s.strip_suffix('\x07')))
+    else {
+        return false;
+    };
+    let Some((index, rgb)) = osc.split_once(";rgb:") else {
+        return false;
+    };
+    (matches!(index, "10" | "11" | "12")
+        || index
+            .strip_prefix("4;")
+            .is_some_and(|n| n.parse::<u8>().is_ok()))
+        && rgb.split('/').count() == 3
+        && rgb
+            .split('/')
+            .all(|c| (1..=4).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 impl Queue {
     fn next(&mut self, prefix: &str) -> String {
         self.serial += 1;
@@ -65,7 +116,8 @@ impl Queue {
     }
 
     pub fn input(&mut self, pane: &str, bytes: &[u8]) {
-        if bytes.is_empty() || matches!(bytes, b"\x1b[I" | b"\x1b[O") {
+        // xterm의 조회 응답도 onData로 돌아오지만 사용자 초안이나 입력 시각을 바꾸지는 않는다.
+        if bytes.is_empty() || terminal_reply(bytes) {
             return;
         }
         let input = self.inputs.entry(pane.into()).or_insert(Input {
@@ -505,6 +557,56 @@ mod tests {
         q.inputs.get_mut("b").unwrap().touched -= Duration::from_secs(3);
         assert!(q.input_ready("b"));
         assert_eq!(q.inputs["b"].revision, 3);
+    }
+
+    #[test]
+    fn terminal_reports_do_not_create_drafts_or_delay_delivery() {
+        let mut q = queue();
+        q.input("b", b"\r");
+        q.inputs.get_mut("b").unwrap().touched -= Duration::from_secs(3);
+        for reply in [
+            "\x1b[12;3R",
+            "\x1b[?12;3R",
+            "\x1b[?1;2c",
+            "\x1b[>0;276;0c",
+            "\x1b[0n",
+            "\x1b[?2004;1$y",
+            "\x1b[8;40;120t",
+            "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+            "\x1b]11;rgb:fb/f5/ea\x07",
+            "\x1b]4;15;rgb:ffff/ffff/ffff\x1b\\",
+            "\x1b[I",
+            "\x1b[O",
+        ] {
+            q.input("b", reply.as_bytes());
+            assert!(
+                q.input_ready("b"),
+                "terminal reply became a draft: {reply:?}"
+            );
+            assert_eq!(q.inputs["b"].revision, 1);
+        }
+    }
+
+    #[test]
+    fn terminal_reports_preserve_drafts_and_do_not_hide_user_input() {
+        let mut q = queue();
+        q.input("b", b"draft");
+        q.input("b", b"\x1b[12;3R");
+        assert!(q.inputs["b"].draft);
+        assert_eq!(q.inputs["b"].revision, 1);
+        for input in [
+            "\x1b[H",
+            "\x1b[A",
+            "\x1b[200~text\x1b[201~",
+            "\x1b[12;3Rtext",
+            "text\x1b[12;3R",
+            "\x1b[;R",
+            "\x1b]11;rgb:not-a-color\x07",
+        ] {
+            q.input("b", b"\r");
+            q.input("b", input.as_bytes());
+            assert!(q.inputs["b"].draft, "user input was ignored: {input:?}");
+        }
     }
 
     #[test]

@@ -63,6 +63,21 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
   for (const key of Object.keys(env)) {
     if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT") delete env[key];
   }
+  // ConPTY의 조회 가로채기를 피하고 xterm의 자동 응답 -> onData -> PTY 경로를 검증한다.
+  env.CHIISPACE_PROBE = `(() => {
+    const queried = new WeakSet();
+    setInterval(() => {
+      for (const term of Object.values(window.__terms ?? {})) {
+        const buffer = term.buffer.active;
+        if (queried.has(term) || !buffer.getLine(buffer.baseY)?.translateToString(true).includes("fixture")) continue;
+        queried.add(term);
+        term.write("\\x1b]11;?\\x1b\\\\", () => {
+          term.write("\\x1b[s\\x1b[3;1Hterminal query complete\\x1b[u");
+        });
+      }
+    }, 100);
+    return "terminal reply regression";
+  })()`;
   const app = spawn(exe, [], { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   app.stderr.on("data", (c) => process.stderr.write(c));
   app.stdout.on("data", (c) => process.stdout.write(c));
@@ -95,6 +110,12 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
     const context = await collab("context", {});
     assert.equal(context.self, "%0");
     assert.equal(context.panes.find((p) => p.id === "%0").neighbors.right, "%1");
+
+    await until(async () => (await peek("%1")).text.includes("terminal query complete"));
+    assert.equal((await collab("context", {})).panes.find((p) => p.id === "%1").draft, false, "터미널 자동 응답을 초안으로 오인");
+    const startup = await collab("delegate", { target: "right", description: "empty prompt after terminal query" });
+    await until(async () => (await collab("status", { task_id: startup.id })).status === "completed");
+    assert.equal(events("%1").filter((e) => e.event === "claimed" && e.task.id === startup.id).length, 1);
 
     await send("%1", "작성 중인 초안");
     await send("%0", `delegate ${JSON.stringify({ target: "right", description: "한글 테스트" })}\r`);
