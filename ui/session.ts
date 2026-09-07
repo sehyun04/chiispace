@@ -84,8 +84,24 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
   const sid = seedSession(seed.cmd);
   if (!sid) return seed;
   const short = sid.slice(0, 8).toLowerCase();
-  if (!bg.includes(short)) return seed;
+  if (!isBackgroundSession(sid, bg)) return seed;
   return { ...seed, cmd: `claude attach ${short}` };
+}
+
+export function isBackgroundSession(sid: string, bg: readonly string[]): boolean {
+  return bg.some((id) => id.slice(0, 8).toLowerCase() === sid.slice(0, 8).toLowerCase());
+}
+
+// 데몬이 만든 파일도 새 대화로 보이므로, 사용자 칸에 붙이기 전에 걸러야 한다.
+export function freshSession<T extends { id: string }>(
+  sessions: readonly T[],
+  bg: readonly string[],
+  seen: Set<string>,
+  taken: ReadonlySet<string>,
+): T | undefined {
+  // 탐색 중 워커가 끝나 명부에서 빠져도 그 파일이 사용자 대화로 바뀌지는 않는다.
+  for (const s of sessions) if (isBackgroundSession(s.id, bg)) seen.add(s.id);
+  return sessions.find((s) => !seen.has(s.id) && !taken.has(s.id));
 }
 
 /** 세션 ID 를 모르는 claude 칸들을 서로 다른 대화로 갈라 준다.
@@ -94,11 +110,9 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
  *  가장 최근"이라 그런 칸이 둘이면 **둘 다 같은 대화로 열린다** — 사용자 눈에는
  *  복원이 고장 난 것이고, 게다가 한 대화에 두 프로세스가 붙는다. 실제로 그렇게 열렸다.
  *
- *  그런데 `--continue` 가 무엇을 열지는 우리가 미리 안다. 켤 때 그 폴더의 가장 최근
- *  대화가 곧 답이므로, `--continue` 대신 그 id 를 짚어 `--resume` 으로 연다. 그러면
- *   - 어느 대화인지 지금 알게 되어 다음 저장부터는 `--resume <id>` 로 남는다.
- *    한 번 `--continue` 로 떨어지면 영영 못 벗어나던 고리가 여기서 끊긴다.
- *  - 살아 있는 백그라운드 대화인지도 id 로 가려 `attach` 로 붙을 수 있다.
+ *  백그라운드 작업이 최신 파일을 계속 갱신하므로 그 대화는 후보에서 뺀다.
+ *  남은 것 중 가장 최근 하나만 이어 열고 id 를 붙여 다음 저장부터 명확히 짚는다.
+ *  그 대화를 다른 칸이 쓰면 더 오래된 것을 추측하지 않고 새 대화로 연다.
  *
  *  나머지 칸은 새 대화로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이 어느
  *  것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다 칸이
@@ -110,10 +124,12 @@ export function liveAttach(seed: Seed, bg: string[]): Seed {
  *  남의 대화를 물어 엉뚱한 이름이 떴다. 우리가 낸 id 는 틀릴 수가 없다. */
 export function splitContinue(
   panes: string[],
-  newest: string | undefined,
+  sessions: readonly { id: string }[],
   taken: Set<string>,
+  bg: readonly string[],
 ): Record<string, { seed: Seed; sid?: string }> {
   const out: Record<string, { seed: Seed; sid?: string }> = {};
+  const newest = sessions.find((s) => !isBackgroundSession(s.id, bg))?.id;
   let first = newest && !taken.has(newest) ? newest : undefined;
   for (const id of panes) {
     if (first) {

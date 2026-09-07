@@ -8,7 +8,60 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ---
 
-## 핸드오프 — 2026-09-05
+## 핸드오프 — 2026-09-06
+
+**사용자 우선순위: 세션 오연결 수정 → 칸 사이 에이전트 연결. 캐릭터 보강은 최후순위이고,
+사용자가 직접 요청할 때만 한다.**
+
+이번 변경은 `5415d78` 다음의 세션 복원·칸 사이 협업 작업이다.
+
+- 자동 복원과 새 대화 탐색에서 `claude_bg_sessions`에 있는 대화를 제외했다.
+  탐색 중 백그라운드로 확인한 파일은 워커가 끝난 뒤에도 후보로 되돌리지 않는다.
+  이미 ID가 지정된 대화는 `attach` 복원을 유지한다. 폴더를 모르는 `--continue`도
+  칸마다 고유한 `--session-id`로 바꿔 연다. 회귀 검증은 `scripts/session.test.mjs`.
+- `kasa-socket`을 PTY와 같은 `f77f46ed` rev로 붙였다. 인스턴스별 named pipe와
+  `chiispace-cli.exe`로 칸 목록·화면 조회, 텍스트·키 전송, 분할·포커스 이동·닫기를 지원한다.
+  분할은 기본적으로 포커스를 옮기지 않고 새 PTY가 준비된 뒤 성공을 답한다.
+- 화면 조회는 xterm 버퍼를 읽는다. 엔진의 `visible_text()`는 한글의 두 번째 표시 칸을
+  공백으로 내보내 `한글`이 `한 글`이 되므로 이 용도로 쓰지 않는다.
+- 실제 앱 검증은 `scripts/bridge.test.mjs`가 임시 세션과 앱 두 개로 한다.
+  사용자 세션의 실행 전후 해시를 확인하며, 사용자 창은 닫지 않는다.
+- 각 칸에서 새로 실행한 Claude/Codex에 실행별 stdio MCP를 붙였다. 앱 캐시의 exe 래퍼를
+  칸 PATH에 앞세우고 전역 설정은 건드리지 않는다. 별칭 우회는 `CHIISPACE_CLI agent claude|codex`.
+  Claude `attach`·설정/인증 명령·에이전트 내부 중첩 실행은 연결을 다시 배정하지 않는다.
+- 협업은 context → delegate → queued/delivered → claim → complete → status 흐름이다.
+  상대의 실제 하네스·출력·스피너, xterm 입력 커서, PTY 입력 이력과 revision을 확인한다.
+  초안이나 작업 중 화면에는 넣지 않으며 짧은 작업 ID만 알리고 본문·결과는 MCP로 받는다.
+  사용자 입력과 전송이 같은 큐 락을 사용한다. 초안 해제는 Enter 또는 Ctrl+C 기준으로 보수적이다.
+- 칸/에이전트 재시작 시 연결 lease와 미완료 작업을 폐기한다. 완료 기록은 앱 메모리의
+  최대 256개, 미완료 64개, queued 만료 15분. 실행 중인 작업을 강제로 끊거나 자동 재전송하지 않는다.
+- Windows named pipe accept 사이의 BUSY는 CLI가 전송 전에만 재연결한다. 전송 후 재시도는
+  중복 작업 위험 때문에 하지 않는다. `scripts/collab.test.mjs`는 모델 대역 exe로 실제 PTY·MCP를
+  검증하며 유료 모델을 호출하지 않는다. 자연어 해석 자체의 실모델 검증은 별도다.
+
+검증 완료: 세션 회귀 6개, 입력 보호 2개, Rust 13개, 실제 앱 연결·협업 통합 2개 통과.
+협업 통합은 cmd와 PowerShell에서 확인했고 실제 Codex의 읽기 전용 `mcp get` 설정 파싱도 통과했다.
+프런트·릴리스 빌드 통과. 사용자 세션·전역 설정은 통합 검증 전후 해시가 같았다.
+
+별도 관찰: 앱 두 개를 정확히 동시에 기동하는 테스트에서 한쪽 초기화가 타임아웃됐다.
+순차 기동한 두 앱의 연결 격리는 통과한다. `bridge.test.mjs`는 순차 기동으로 검증하며,
+동시 기동 문제의 원인은 아직 진단하지 않았다. 연결 테스트 통과를 동시 기동 검증으로 해석하지 않는다.
+
+관련 파일: `ui/session.ts`, `ui/App.tsx`, `ui/bridge.ts`, `src-tauri/src/bridge.rs`,
+`src-tauri/src/bin/chiispace-cli.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/collab.rs`,
+`src-tauri/src/launchers.rs`, `src-tauri/src/launch.rs`, `src-tauri/src/mcp.rs`, `ui/agent-input.ts`.
+CLI·자연어 위임 사용법은 README의 "칸 사이 연결".
+앱과 CLI는 함께 빌드한다(`cargo build --release --features custom-protocol --bins`).
+실행 중인 사용자 exe와 충돌하지 않게 이번 산출물은 `src-tauri/target/agent-bridge/release/`에 둔다.
+
+남은 일은 실모델 자연어 위임 확인, 필요시 네이티브 팀 메시지 연결, 창 분리·설정·터미널 검색이다.
+MCP 협업은 붙었지만 Claude `SendMessage`나 팀 인박스 연동은 아직 없다.
+과거에 잘못 연결된 사용자 세션 ID를 자동으로 재배정하지는 않는다. 어느 대화였는지 근거 없이
+바꾸면 다시 남의 대화가 열릴 수 있다.
+
+아래 9월 5일 내용은 당시 기록이다. 그때의 "다음에 할 것"보다 위의 현재 상태를 우선한다.
+
+## 이전 핸드오프 — 2026-09-05
 
 **직전 세션: 세션 복원이 "또 안 된다"는 신고로 시작해 원인 둘을 잡고, 복원한 칸의 지난
 대화와 글자 대비까지 손봤다. 워킹트리 깨끗.**

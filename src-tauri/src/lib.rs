@@ -7,6 +7,10 @@
 
 mod shells;
 mod workspace;
+mod bridge;
+mod collab;
+mod launch_config;
+mod launchers;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -68,7 +72,17 @@ fn pty_open(
         // 안 된다"는 말이 나오면 여기부터 봐라 — 실제로 그렇게 한 번 잃었다.
         //
         // `opts.env` 는 엔진이 다른 환경 변수를 다 얹은 **뒤에** 얹으므로 이쪽이 이긴다.
-        env: vec![("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN".into(), "1".into())],
+        env: vec![
+            ("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN".into(), "1".into()),
+            ("CHIISPACE_SOCKET_PATH".into(), app.state::<bridge::Bridge>().path.clone()),
+            ("KASATERM_SOCKET_PATH".into(), app.state::<bridge::Bridge>().path.clone()),
+            ("CMUX_SOCKET_PATH".into(), app.state::<bridge::Bridge>().path.clone()),
+            ("CHIISPACE_PANE_ID".into(), id.clone()),
+            ("CMUX_SURFACE_ID".into(), id.clone()),
+            ("CHIISPACE_CLI".into(), std::env::current_exe().map_err(|e| e.to_string())?
+                .with_file_name(if cfg!(windows) { "chiispace-cli.exe" } else { "chiispace-cli" })
+                .to_string_lossy().into_owned()),
+        ].into_iter().chain(app.state::<launchers::Launchers>().env.clone()).collect(),
         pane_id: id.clone(),
         ..Default::default()
     })
@@ -100,15 +114,18 @@ fn pty_open(
 
 #[tauri::command]
 fn pty_write(
+    collab: State<collab::Collab>,
     panes: State<Panes>,
     turns: State<AgentTurns>,
     id: String,
     data: String,
 ) -> Result<(), String> {
+    let mut queue = collab.0.lock().unwrap();
     let map = panes.0.lock().unwrap();
     let Some(s) = map.get(&id) else {
         return Err(format!("없는 pane: {id}"));
     };
+    queue.input(&id, data.as_bytes());
     // 에이전트 실행 명령의 Enter는 제외해야 앱 시작과 세션 복원 때 캐릭터가 움직이지 않는다.
     if data.bytes().any(|b| matches!(b, b'\r' | b'\n')) && s.active_agent().is_some() {
         turns.0.lock().unwrap().insert(id.clone(), false);
@@ -126,7 +143,9 @@ fn pty_resize(panes: State<Panes>, id: String, cols: u16, rows: u16) -> Result<(
 }
 
 #[tauri::command]
-fn pty_close(panes: State<Panes>, turns: State<AgentTurns>, id: String) {
+fn pty_close(collab: State<collab::Collab>, panes: State<Panes>, turns: State<AgentTurns>, id: String) {
+    let mut queue = collab.0.lock().unwrap();
+    queue.closed(&id);
     // Arc 를 떨구면 PTY 도 닫힌다. 리더 스레드는 채널이 끊기며 스스로 끝난다.
     panes.0.lock().unwrap().remove(&id);
     turns.0.lock().unwrap().remove(&id);
@@ -275,6 +294,9 @@ pub fn run() {
 
             app.manage(Panes::default());
             app.manage(AgentTurns::default());
+            app.manage(collab::Collab::default());
+            bridge::start(app.handle())?;
+            app.manage(launchers::install(app.path().app_cache_dir()?)?);
             arm_autosend(app.handle());
             Ok(())
         })
@@ -290,6 +312,10 @@ pub fn run() {
             pty_resize,
             pty_close,
             pane_status,
+            bridge::bridge_sync,
+            bridge::bridge_reply,
+            collab::collab_pending,
+            collab::collab_deliver,
             shells::shells,
             workspace::initial_root,
             workspace::fs_pick,

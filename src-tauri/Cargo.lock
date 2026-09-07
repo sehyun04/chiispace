@@ -524,6 +524,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "kasa-pty",
+ "kasa-socket",
  "serde",
  "serde_json",
  "tauri",
@@ -2138,6 +2139,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kasa-socket"
+version = "0.2.0"
+source = "git+https://github.com/2rami/kasaterm?rev=f77f46edfb8d954bf81df103bd320d2196fd267d#f77f46edfb8d954bf81df103bd320d2196fd267d"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "serde_json",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2667,7 +2680,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

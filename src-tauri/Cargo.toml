@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "터미널을 한 칸으로 두는 작업환경"
+default-run = "chiispace"
 
 [lib]
 # Windows 에서 lib 이름이 bin 과 같으면 충돌한다(rust-lang/cargo#8519).
@@ -39,6 +40,7 @@ base64 = "0.22"
 #
 # GPU 셀 렌더러(kasa-cells)는 쓰지 않는다 — 화면은 웹뷰의 xterm.js 가 그린다.
 kasa-pty = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d954bf81df103bd320d2196fd267d" }
+kasa-socket = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d954bf81df103bd320d2196fd267d" }
 
 # 엔진을 같이 고쳐 가며 실험할 때만 주석을 푼다. git 대신 옆 폴더의 작업 트리를 쓴다.
 # [patch."https://github.com/2rami/kasaterm"]

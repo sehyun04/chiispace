@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   anyFace,
+  bySlug,
   cast,
   DanceFace,
   Face,
@@ -14,6 +15,7 @@ import {
 } from "./roster";
 import {
   asSeed,
+  freshSession,
   isAgentWorking,
   label,
   liveAttach,
@@ -28,6 +30,7 @@ import { Term } from "./Term";
 import { Sidebar } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
+import { usePaneBridge } from "./bridge";
 
 
 
@@ -224,6 +227,49 @@ export default function App() {
     if (picked) patch((t) => ({ ...t, root: picked }));
   }, [patch]);
 
+  usePaneBridge(booted, {
+    workspaces: tabs.map((t) => ({ id: t.key, name: t.root?.split(/[\\/]/).pop() || "셸" })),
+    surfaces: tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []).map((id) => ({
+      id, workspace_id: t.key, cwd: stat[id]?.cwd ?? t.root,
+      title: names[id] || sessionTitle[id] || label(id, stat, titles),
+      character: bySlug.get(casting[id])?.name ?? null,
+    }))),
+    current: cur?.key ?? null,
+    focused: cur?.focus ?? null,
+    neighbors: Object.fromEntries(tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []).map((id) => [
+      id, Object.fromEntries((["left", "right", "up", "down"] as const)
+        .map((dir) => [dir, t.layout ? L.neighbor(t.layout, id, dir) : null]).filter(([, id]) => id)),
+    ]))),
+  }, (request) => {
+    const ti = tabsNow.current.findIndex((t) => t.layout && L.leaves(t.layout).includes(request.surface));
+    if (ti < 0) throw new Error(`없는 칸: ${request.surface}`);
+    if (request.action === "focus") {
+      selectPane(ti, request.surface);
+      return request.surface;
+    }
+    if (request.action === "close") {
+      closePane(request.surface);
+      return request.surface;
+    }
+    if (request.action !== "split") throw new Error("지원하지 않는 칸 작업");
+    const id = `%${nextPane.current++}`;
+    let direction = request.direction;
+    if (!direction || direction === "auto") {
+      const box = document.querySelector(`[data-pane="${CSS.escape(request.surface)}"]`)?.getBoundingClientRect();
+      direction = box && box.height > box.width ? "down" : "right";
+    }
+    const dir = direction === "left" || direction === "right" ? "h" : "v";
+    const before = direction === "left" || direction === "up";
+    setTabs((ts) => ts.map((t, i) => {
+      if (i !== ti || !t.layout) return t;
+      let layout = L.splitLeaf(t.layout, request.surface, dir, id);
+      if (before) layout = L.swapLeaves(layout, request.surface, id);
+      return { ...t, layout: L.balance(layout), focus: request.focus ? id : t.focus };
+    }));
+    if (request.focus) setActive(ti);
+    return id;
+  });
+
   // 부팅. 저장된 세션을 되살리되, 명령줄로 폴더를 지정했으면 그쪽이 이긴다 —
   // 사용자가 방금 말한 것이 지난번 기억보다 우선이다.
   useEffect(() => {
@@ -254,7 +300,7 @@ export default function App() {
           if (s.procs) {
             // 지금 백그라운드로 살아 있는 대화들. 이걸 알아야 `--resume` 이
             // 거절당해 칸이 빈 채로 멈추는 것을 피할 수 있다(session.ts 참고).
-            const bg = await invoke<string[]>("claude_bg_sessions").catch(() => [] as string[]);
+            const bg = await invoke<string[]>("claude_bg_sessions").catch(() => null);
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
               const seed = asSeed(v);
@@ -264,13 +310,12 @@ export default function App() {
                 // 명령이 `attach` 로 바뀌어도 대화는 같으므로 바꾸기 전에 읽는다.
                 const sid = seedSession(seed.cmd);
                 if (sid) sessionOf.current[id] = sid;
-                m[id] = liveAttach(seed, bg);
+                m[id] = liveAttach(seed, bg ?? []);
               }
             }
             // 저장된 `claude --continue` 를 그대로 치면 안 된다. 그런 칸이 둘이면
-            // 둘 다 그 폴더의 가장 최근 대화로 열린다 — 실제로 두 칸이 같은 세션으로
-            // 열렸다. 무엇이 열릴지는 지금 알 수 있으니(가장 최근이 곧 그것이다)
-            // id 로 바꿔 짚고, 나머지 칸은 새 대화로 연다. 자세한 것은 session.ts.
+            // 둘 다 같은 대화로 열리거나 백그라운드 작업을 집는다. 사용자 대화 하나만
+            // id 로 짚고, 나머지는 새로 연다. 자세한 것은 session.ts.
             const rootOf: Record<string, string | null> = {};
             for (const t of s.tabs ?? []) {
               for (const id of t.layout ? L.leaves(t.layout) : []) rootOf[id] = t.root;
@@ -282,19 +327,14 @@ export default function App() {
               byRoot.set(r, [...(byRoot.get(r) ?? []), id]);
             }
             for (const [root, ids] of byRoot) {
-              if (!root) {
-                // 폴더를 모르면 무엇이 열릴지도 모른다. 그래도 겹치지는 않게
-                // `--continue` 는 맨 앞 칸에만 남긴다.
-                for (const id of ids.slice(1)) m[id] = { cmd: "claude", auto: true };
-                continue;
-              }
-              const list = await invoke<{ id: string }[]>("claude_sessions", { root }).catch(
-                () => [] as { id: string }[],
-              );
-              const picked = splitContinue(ids, list[0]?.id, new Set(Object.values(sessionOf.current)));
+              // 폴더나 백그라운드 목록을 모르면 기존 대화의 소유자를 추측할 수 없다.
+              const list = root && bg !== null
+                ? await invoke<{ id: string }[]>("claude_sessions", { root }).catch(() => [])
+                : [];
+              const picked = splitContinue(ids, list, new Set(Object.values(sessionOf.current)), bg ?? []);
               for (const [id, v] of Object.entries(picked)) {
                 if (v.sid) sessionOf.current[id] = v.sid;
-                m[id] = liveAttach(v.seed, bg);
+                m[id] = v.seed;
               }
             }
 
@@ -498,15 +538,18 @@ export default function App() {
         clearInterval(h);
         return;
       }
-      invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", {
-        root: curRoot,
-      })
-        .then((list) => {
+      // 탐색 중에도 워커가 생기거나 끝나므로 매번 현재 명부와 함께 조회한다.
+      Promise.all([
+        invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot }),
+        invoke<string[]>("claude_bg_sessions"),
+      ])
+        .then(([list, bg]) => {
           if (!alive) return;
           const taken = new Set(Object.values(sessionOf.current));
           const titles: Record<string, string> = {};
           for (const paneId of need) {
-            const fresh = list.find((c) => !seen.has(c.id) && !taken.has(c.id));
+            if (sessionOf.current[paneId]) continue;
+            const fresh = freshSession(list, bg, seen, taken);
             // 새로 생긴 대화가 없으면 아무것도 붙이지 않는다. 남의 대화를 집는
             // 것보다 다음 차례를 기다리는 편이 낫다.
             if (!fresh) break;

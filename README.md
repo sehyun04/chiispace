@@ -90,6 +90,60 @@ PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 �
 `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙고(vite 가 모아 준다),
 `scripts/make-motion.py` 가 그 한 장에서 "일하는 중" 움직임을 구워 준다.
 
+**칸 사이 연결** — `kasa-socket`을 PTY와 같은 rev로 당겨 쓴다. 각 앱은 별도 Windows
+named pipe를 열고, 칸의 셸에 `CHIISPACE_SOCKET_PATH`, `CHIISPACE_PANE_ID`,
+`CHIISPACE_CLI`를 넘긴다. `KASATERM_SOCKET_PATH`와 `CMUX_SOCKET_PATH`도 같은 주소다.
+에이전트는 CLI로 다른 칸의 목록·화면을 읽고, 텍스트·키를 보내거나 칸을 나누고 닫을 수 있다.
+배치는 React가 계속 소유하며, 분할은 새 PTY가 준비된 뒤 응답한다. 기본 분할은 포커스를 옮기지 않는다.
+
+```powershell
+& $env:CHIISPACE_CLI list
+& $env:CHIISPACE_CLI peek '%2' 30
+& $env:CHIISPACE_CLI text '%2' '검토 결과를 알려줘'
+& $env:CHIISPACE_CLI key '%2' Enter
+& $env:CHIISPACE_CLI split right
+```
+
+`text`는 원시 텍스트 전송이며 Enter를 덧붙이지 않는다. 여러 줄이나 제어 문자가 들어 있으면
+그것도 그대로 전달되므로, 터미널 입력과 같은 의미다. 긴 글은 `text-stdin <칸 ID>`로 넣는다.
+`split`은 칸 안에서는 호출한 칸을 기준으로 하고, 밖에서는 기준 ID를 지정해야 한다.
+`focus`, `close`, `board`, `ping`도 지원한다. 밖에서 호출하려면 `--socket <주소>`를 앞에 붙인다.
+이는 터미널 입력을 통한 연결이며 Claude의 `SendMessage`·팀 인박스와는 별개다.
+CLI는 앱 exe와 같은 폴더에 두어야 한다.
+
+**에이전트끼리 작업 맡기기** — 새 버전에서 각 칸의 `claude` 또는 `codex`를 시작하면
+협업 MCP 도구가 실행별로 붙는다. 예를 들어 오른쪽 칸에 에이전트를 켜 둔 뒤 왼쪽 칸에서
+"오른쪽 칸에 테스트 맡기고 결과 알려줘"라고 요청한다. 상대가 여러 명이면 이름이나 방향을
+지정한다. `chiispace_context`로 자기 ID·이웃·연결 상태를 확인할 수 있다.
+
+- `chiispace_delegate`: ID, 방향(`left/right/up/down`), 중복되지 않는 칸 이름·캐릭터로 요청
+- `chiispace_status`: 작업 ID로 대기·전달·수행·완료·실패와 실제 결과 조회, 최대 25초 대기
+- `chiispace_claim` / `chiispace_complete`: 받은 에이전트의 작업 수락과 결과 보고
+- `chiispace_cancel`: 아직 전달 전인 자기 작업 취소. 실행 중인 상대를 중단하지 않는다
+- `chiispace_peek`: 포커스를 옮기지 않고 상대 화면 조회
+
+상대가 작업 중이거나 입력 중이면 대기하고, 빈 에이전트 입력창을 확인한 뒤 작업 ID만 알린다.
+본문과 결과는 MCP로 주고받는다. 완료는 상대가 결과를 보고해야 확정되며 화면 출력을 보고
+추측하지 않는다. 요청한 에이전트는 상태 도구로 결과를 회수한다. 기존 raw `text`·`key` CLI는
+이 대기열을 거치지 않으므로 작업 위임에는 MCP 도구를 쓴다.
+
+Windows 앱의 PATH에 실행 래퍼를 우선 배치한다. 전역 PATH, Claude 설정, Codex `config.toml`,
+프로젝트 지침은 바꾸지 않는다. 모델·권한 설정과 사용자가 넘긴 인자는 유지한다.
+OpenAI Docs의 [실행별 MCP 설정](https://developers.openai.com/codex/mcp/)과
+[Claude MCP 설정](https://code.claude.com/docs/en/mcp)을 사용하며 각 에이전트의 기존 도구 승인 절차를 따른다.
+별칭이나 셸 프로필이 PATH를 덮으면 PowerShell에서 아래처럼 명시적으로 실행한다.
+
+```powershell
+& $env:CHIISPACE_CLI agent claude
+& $env:CHIISPACE_CLI agent codex
+```
+
+이미 실행 중인 에이전트나 `claude attach`로 붙은 외부 백그라운드 세션에는 새 도구를 소급해
+넣지 않는다. 해당 칸에서 새로 실행해야 한다. 대기열은 앱 메모리에만 있으며, 칸·에이전트가
+종료/재시작되면 관련 미완료 작업을 실패로 닫는다. 대기는 15분, 미완료 작업은 64개까지다.
+프롬프트 형태를 확인할 수 없거나 초안을 지운 뒤에도 대기하면 빈 입력창에서 Ctrl+C로
+입력 상태를 정리한다. Claude 네이티브 팀 인박스나 `SendMessage` 연결은 아니다.
+
 그 밖에 복사/붙여넣기(bracketed paste 포함, OS 클립보드 직접 사용) · git 브랜치와 변경
 파일 수 · 글자 크기 · 링크 열기 · 스크롤백 10000 · 한글 입력.
 
@@ -122,8 +176,9 @@ npm run tauri dev
 
 ```powershell
 npm run build          # tsc --noEmit 을 먼저 돈다. npx vite build 는 타입을 안 본다
-cd src-tauri; cargo build --release --features custom-protocol
+cd src-tauri; cargo build --release --features custom-protocol --bins
 # -> src-tauri/target/release/chiispace.exe  (더블클릭으로 뜬다)
+# -> src-tauri/target/release/chiispace-cli.exe  (칸 연결용)
 ```
 
 **`--features custom-protocol` 을 빠뜨리면 안 된다.** Tauri 는 릴리스 여부를 `--release`
@@ -162,6 +217,25 @@ claude 상태줄이 브랜치·폴더 아이콘을 사설 영역 글자(`U+E0A0`
 프롬프트 상자가 부서진다는 뜻이다.
 
 ## 헤드리스 검증
+
+세션 선택 회귀 테스트는 `npm test`, Rust 검증은
+`cargo test --manifest-path src-tauri/Cargo.toml --release --features custom-protocol`로 돌린다.
+실제 칸 연결은 아래처럼 별도 앱 두 개를 순차 기동하고 임시 세션으로 검증한다. 일반 `npm test`에서는
+실제 앱 검증을 건너뛴다. 사용자 세션 파일은 실행 전후 SHA-256을 비교한다.
+
+```powershell
+$env:CHIISPACE_TEST_EXE = (Resolve-Path src-tauri/target/release/chiispace.exe).Path
+node --test --test-concurrency=1 scripts/bridge.test.mjs scripts/collab.test.mjs
+```
+
+사용자 앱이 실행 중이면 빌드에 `--target-dir target/agent-bridge`를 붙여 별도 폴더에 만들고
+`CHIISPACE_TEST_EXE`에도 그쪽 exe를 지정한다. CLI도 함께 빌드해야 한다.
+협업 검증은 `rustc`로 테스트용 Claude/Codex 대역 exe를 임시 폴더에 만들고 실제 PTY와
+MCP를 연결한다. 유료 모델은 호출하지 않으며 모델이 자연어 지침을 따르는지까지 검증하는
+테스트는 아니다. 초안·작업 중 대기, 결과 회수, 실패·취소, 재시작·칸 종료와 전역 설정 해시를
+확인한다. `CHIISPACE_TEST_SHELL`로 PowerShell 등 셸 경로를 지정할 수 있다.
+`CHIISPACE_TEST_CODEX_JS`에 설치된 `@openai/codex/bin/codex.js` 경로를 주면 실제 Codex의
+읽기 전용 `mcp get` 명령으로 주입한 설정 파싱도 검증한다.
 
 GUI 를 사람 손 없이 확인하는 손잡이가 앱 안에 들어 있다. env 가 있을 때만 깨어난다.
 
@@ -215,10 +289,12 @@ scripts\shot.ps1 -Exe src-tauri\target\release\chiispace.exe -Out shot.png
 
 ## 아직 안 되는 것
 
-- **칸 사이 에이전트 연결** — 이 레포의 본론이자 가장 큰 구멍. upstream 에
-  `kasa-socket`(cmux 호환 소켓 서버)이 있으니 `kasa-pty` 처럼 당겨 쓰면 된다
+- **네이티브 팀 연동** — 실행별 MCP와 빈 입력창 전달 대기열은 연결됐다. 에이전트 자동 생성,
+  Claude 팀 인박스·SendMessage 연결, 재시작을 넘는 작업 예약은 아직 없다
+- **앱 동시 기동** — 두 프로세스를 정확히 동시에 띄우는 검증에서 한쪽 초기화 타임아웃이
+  관찰됐다. 순차 기동한 두 앱의 연결 격리는 통과하며 동시 기동 문제의 원인은 미진단이다
 - **캐릭터 그림** — 자리와 배정은 다 됐고 20명 중 12명이 들어왔다. 남은 묘사는
-  `ui/assets/faces/PROMPTS.md` 에 그림 생성에 넣을 수 있게 정리돼 있다
+  `ui/assets/faces/PROMPTS.md` 에 있다. 최후순위이며 사용자가 요청할 때만 작업한다
 - 창 분리(undock) · 설정 화면 · 테마 전환 · 터미널 내 검색
 - 원본 그림이 1254px 이라 exe 가 22MB 다. 256px 로 줄이면 대부분이 빠진다
 
