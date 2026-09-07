@@ -42,6 +42,12 @@ base64 = "0.22"
 kasa-pty = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d954bf81df103bd320d2196fd267d" }
 kasa-socket = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d954bf81df103bd320d2196fd267d" }
 
+# 다른 창이 붙들고 있는 claude 대화를 가려내려면 그 pid 가 아직 그 프로세스인지
+# 봐야 한다(pid 는 돌려 쓰인다). 명부에는 프로세스 생성 시각이 같이 있으므로
+# OpenProcess + GetProcessTimes 로 맞춰 본다.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 # 엔진을 같이 고쳐 가며 실험할 때만 주석을 푼다. git 대신 옆 폴더의 작업 트리를 쓴다.
 # [patch."https://github.com/2rami/kasaterm"]
 # kasa-pty = { path = "../../kasaterm/crates/kasa-pty" }

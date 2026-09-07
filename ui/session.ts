@@ -80,19 +80,45 @@ function uuid(): string {
  *
  *  판정을 저장할 때가 아니라 **열 때** 한다. 껐다 켜는 사이에 그 대화가 백그라운드로
  *  갔을 수도, 멈췄을 수도 있다 — 저장 시점의 판단은 켤 때쯤이면 이미 낡았다. */
-export function liveAttach(seed: Seed, bg: string[]): Seed {
+export function liveAttach(seed: Seed, bg: string[], live: readonly string[] = []): Seed {
   const sid = seedSession(seed.cmd);
   if (!sid) return seed;
-  const short = sid.slice(0, 8).toLowerCase();
-  if (!isBackgroundSession(sid, bg)) return seed;
-  return { ...seed, cmd: `claude attach ${short}` };
+  if (isBackgroundSession(sid, bg))
+    return { ...seed, cmd: `claude attach ${sid.slice(0, 8).toLowerCase()}` };
+  // 다른 창이 전경으로 붙들고 있으면 데려올 길이 없다. `attach` 는 데몬에 맡긴
+  // 대화에만 통하고, `--resume` 은 거절당하며 그 칸을 죽인다. 그렇다고 다른
+  // 대화로 바꿔 열면 이 칸이 무엇이었는지를 잃는다 — 정체는 그대로 두고
+  // **실행만 안 한다.** 사용자가 저쪽 창을 닫고 Enter 한 번이면 그대로 열린다.
+  if (isLiveSession(sid, live)) return { ...seed, auto: false };
+  return seed;
 }
 
+/** 짧은 id(앞 8자)로 비교한다. 백그라운드 명부의 키가 그 길이라서다. */
+const same = (list: readonly string[], sid: string) =>
+  list.some((id) => id.slice(0, 8).toLowerCase() === sid.slice(0, 8).toLowerCase());
+
 export function isBackgroundSession(sid: string, bg: readonly string[]): boolean {
-  return bg.some((id) => id.slice(0, 8).toLowerCase() === sid.slice(0, 8).toLowerCase());
+  return same(bg, sid);
+}
+
+/** 다른 창(터미널)이 지금 열어 두고 있는 대화인가.
+ *
+ *  백그라운드 대화와 달리 데려올 방법이 없어서 **후보에서 빼는 것**이 유일한 대처다.
+ *  이걸 안 걸러서 사용자가 매번 겪은 고리가 있다: 이 레포에서 claude 를 켜 두고
+ *  일을 시키면 그 대화 파일이 계속 갱신되니 "그 폴더의 가장 최근"이 늘 그것이고,
+ *  `--continue` 를 대신할 대화를 고를 때마다 **사용자가 지금 쓰고 있는 대화**가
+ *  뽑힌다. 그 칸은 뜨자마자 거절당해 죽고, 앱을 켤 때마다 그대로 되풀이된다. */
+export function isLiveSession(sid: string, live: readonly string[]): boolean {
+  return same(live, sid);
 }
 
 // 데몬이 만든 파일도 새 대화로 보이므로, 사용자 칸에 붙이기 전에 걸러야 한다.
+//
+// **여기에는 `isLiveSession` 을 걸면 안 된다.** 이 탐색이 찾는 것은 방금 이 칸에서
+// 뜬 claude 의 대화이고, 그 대화는 당연히 지금 살아 있다 — 살아 있다고 빼 버리면
+// 손으로 친 claude 는 영영 id 가 안 붙고 저장이 `--continue` 로 떨어진다.
+// 남의 대화는 다른 방법으로 막는다: 탐색을 시작할 때 이미 있던 것을 `seen` 에
+// 담아 두고 그 뒤에 **새로 생긴 것만** 본다.
 export function freshSession<T extends { id: string }>(
   sessions: readonly T[],
   bg: readonly string[],
@@ -112,7 +138,10 @@ export function freshSession<T extends { id: string }>(
  *
  *  백그라운드 작업이 최신 파일을 계속 갱신하므로 그 대화는 후보에서 뺀다.
  *  남은 것 중 가장 최근 하나만 이어 열고 id 를 붙여 다음 저장부터 명확히 짚는다.
- *  그 대화를 다른 칸이 쓰면 더 오래된 것을 추측하지 않고 새 대화로 연다.
+ *  그 대화를 다른 칸이 쓰거나 **다른 창이 열어 두고 있으면** 더 오래된 것을 추측하지
+ *  않고 새 대화로 연다. 사용자가 이 폴더에서 claude 를 켜 두고 일을 시키면 그 대화가
+ *  늘 가장 최근이라, 이걸 안 보면 켤 때마다 사용자가 쓰는 대화를 뺏으려 들다 거절당해
+ *  그 칸이 죽는다 — 앱을 켤 때마다 재현되던 것이 이것이다.
  *
  *  나머지 칸은 새 대화로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이 어느
  *  것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다 칸이
@@ -127,10 +156,15 @@ export function splitContinue(
   sessions: readonly { id: string }[],
   taken: Set<string>,
   bg: readonly string[],
+  live: readonly string[] = [],
 ): Record<string, { seed: Seed; sid?: string }> {
   const out: Record<string, { seed: Seed; sid?: string }> = {};
   const newest = sessions.find((s) => !isBackgroundSession(s.id, bg))?.id;
-  let first = newest && !taken.has(newest) ? newest : undefined;
+  // 그 대화가 다른 창에 열려 있으면 **더 오래된 것으로 물러서지 않는다.** 워커
+  // 파일과 달리 그건 남의 것이 아니라 "지금 못 쓰는 것"이라, 건너뛰고 고른 다음
+  // 것이 이 칸의 대화라는 근거가 없다. 이미 다른 칸이 가져간 때와 같이 다룬다.
+  const free = !!newest && !taken.has(newest) && !isLiveSession(newest, live);
+  let first = free ? newest : undefined;
   for (const id of panes) {
     if (first) {
       out[id] = { seed: { cmd: `claude --resume ${first}`, auto: true }, sid: first };

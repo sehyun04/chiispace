@@ -301,6 +301,9 @@ export default function App() {
             // 지금 백그라운드로 살아 있는 대화들. 이걸 알아야 `--resume` 이
             // 거절당해 칸이 빈 채로 멈추는 것을 피할 수 있다(session.ts 참고).
             const bg = await invoke<string[]>("claude_bg_sessions").catch(() => null);
+            // 다른 창이 지금 열어 두고 있는 대화. 이걸 모르면 사용자가 쓰고 있는
+            // 대화를 칸이 뺏으려 들고, 거절당해 그 칸이 죽는다(session.ts 참고).
+            const live = await invoke<string[]>("claude_live_sessions").catch(() => null);
             const m: Record<string, Seed> = {};
             for (const [id, v] of Object.entries(s.procs)) {
               const seed = asSeed(v);
@@ -310,7 +313,7 @@ export default function App() {
                 // 명령이 `attach` 로 바뀌어도 대화는 같으므로 바꾸기 전에 읽는다.
                 const sid = seedSession(seed.cmd);
                 if (sid) sessionOf.current[id] = sid;
-                m[id] = liveAttach(seed, bg ?? []);
+                m[id] = liveAttach(seed, bg ?? [], live ?? []);
               }
             }
             // 저장된 `claude --continue` 를 그대로 치면 안 된다. 그런 칸이 둘이면
@@ -328,10 +331,18 @@ export default function App() {
             }
             for (const [root, ids] of byRoot) {
               // 폴더나 백그라운드 목록을 모르면 기존 대화의 소유자를 추측할 수 없다.
-              const list = root && bg !== null
+              // 무엇이 살아 있는지 모르면 추측하지 않는다 — 둘 중 하나라도 못
+              // 읽었으면 후보를 고를 근거가 없고, 잘못 고르면 남의 대화를 뺏는다.
+              const list = root && bg !== null && live !== null
                 ? await invoke<{ id: string }[]>("claude_sessions", { root }).catch(() => [])
                 : [];
-              const picked = splitContinue(ids, list, new Set(Object.values(sessionOf.current)), bg ?? []);
+              const picked = splitContinue(
+                ids,
+                list,
+                new Set(Object.values(sessionOf.current)),
+                bg ?? [],
+                live ?? [],
+              );
               for (const [id, v] of Object.entries(picked)) {
                 if (v.sid) sessionOf.current[id] = v.sid;
                 m[id] = v.seed;
@@ -389,7 +400,7 @@ export default function App() {
             // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
             // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
             // 릴리스 웹뷰에는 콘솔이 없으니 CHIISPACE_PROBE 로 들여다볼 자리가 필요하다.
-            (window as unknown as { __restore?: unknown }).__restore = { bg, seeds: m };
+            (window as unknown as { __restore?: unknown }).__restore = { bg, live, seeds: m };
           }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
           if (typeof s.nextPane === "number") nextPane.current = s.nextPane;

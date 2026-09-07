@@ -53,3 +53,25 @@ test("탐색 중 워커가 종료돼도 그 파일을 사용자 대화로 재분
   assert.equal(freshSession([{ id: worker }], [], seen, new Set()), undefined);
   assert.equal(freshSession(sessions, [], seen, new Set())?.id, human);
 });
+
+test("다른 창이 열어 둔 대화는 --continue 대체 후보에서 뺀다", () => {
+  // 사용자가 이 폴더에서 claude 를 켜 두고 일을 시키면 그 대화가 늘 가장 최근이라,
+  // 안 빼면 켤 때마다 그 대화를 뺏으려 들다 거절당해 그 칸이 죽는다.
+  const result = splitContinue(["%1"], sessions, new Set(), [worker], [human]);
+  assert.match(result["%1"].seed.cmd, /^claude --session-id /);
+  assert.notEqual(result["%1"].sid, human);
+  assert.notEqual(result["%1"].sid, older);
+});
+
+test("다른 창이 붙들고 있는 대화는 정체를 지키되 실행하지 않는다", () => {
+  // `attach` 는 데몬에 맡긴 대화에만 통한다. 명령을 바꾸면 이 칸이 무엇이었는지를
+  // 잃으므로 명령은 그대로 두고 실행만 미룬다 — 저쪽 창을 닫고 Enter 하면 열린다.
+  const seed = { cmd: `claude --resume ${human}`, auto: true };
+  assert.deepEqual(liveAttach(seed, [], [human]), { cmd: seed.cmd, auto: false });
+  // 살아 있는 것이 백그라운드면 여전히 데려온다.
+  assert.deepEqual(liveAttach({ cmd: `claude --resume ${worker}`, auto: true }, [worker], [worker]), {
+    cmd: "claude attach abcdef12", auto: true,
+  });
+  // 아무 데서도 안 열려 있으면 그대로 이어 연다.
+  assert.deepEqual(liveAttach(seed, [], [worker]), seed);
+});

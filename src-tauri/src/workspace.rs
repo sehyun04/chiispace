@@ -285,6 +285,110 @@ pub fn claude_bg_sessions(app: AppHandle) -> Vec<String> {
     out
 }
 
+/// 지금 다른 창이 전경으로 붙들고 있는 claude 대화들.
+///
+/// `claude_bg_sessions` 와 짝이지만 **대처가 다르다.** 백그라운드로 넘긴 대화는
+/// `attach` 로 이 칸에 데려올 수 있는 반면, 다른 터미널 창이 열어 둔 대화는 데려올
+/// 길이 없다. 그런 대화에 `--resume` 을 걸면 claude 가 "another Claude Code on this
+/// machine already has ... for this conversation" 만 남기고 죽어서 그 칸은 셸 프롬프트
+/// 앞에 멈춘다. 그러니 **후보에서 빼는 것**이 유일한 대처다.
+///
+/// 이게 없으면 사용자가 실제로 겪은 고리가 돈다: 사용자가 이 레포에서 claude 를
+/// 켜 두고 일을 시키는 동안 그 대화 파일이 계속 갱신되니 **그 폴더의 가장 최근**이
+/// 늘 그것이고, `--continue` 를 대신할 대화를 고르면 매번 그 대화가 뽑힌다. 켤 때마다
+/// 자기가 쓰고 있는 대화를 칸이 뺏으려 들다 실패하는 것이라, 앱을 켤 때마다 재현된다.
+///
+/// 명부는 `~/.claude/sessions/<pid>.json` 이고 claude 가 뜰 때 하나씩 쓴다. 끝난
+/// 프로세스의 것이 지워지지 않고 남으므로 pid 가 살아 있는지 봐야 하고, pid 는 돌려
+/// 쓰이니 `procStart`(프로세스 생성 시각)까지 맞춘다 — 그러지 않으면 몇 주 전에 죽은
+/// 대화가 "지금 열려 있다"가 되어 되살릴 수 있는 대화를 영영 안 되살린다.
+#[tauri::command]
+pub fn claude_live_sessions(app: AppHandle) -> Vec<String> {
+    use tauri::Manager;
+    let Ok(home) = app.path().home_dir() else {
+        return Vec::new();
+    };
+    live_sessions_at(&home.join(".claude").join("sessions"))
+}
+
+fn live_sessions_at(dir: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        // 같은 폴더에 `<pid>.<해시>.key` 도 같이 쌓인다.
+        if path.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let (Some(sid), Some(pid)) = (
+            v.get("sessionId").and_then(|s| s.as_str()),
+            v.get("pid").and_then(|p| p.as_u64()),
+        ) else {
+            continue;
+        };
+        let start = v
+            .get("procStart")
+            .and_then(|s| s.as_str())
+            .and_then(|s| s.parse::<u64>().ok());
+        if !alive(pid as u32, start) {
+            continue;
+        }
+        let sid = sid.to_lowercase();
+        if !out.contains(&sid) {
+            out.push(sid);
+        }
+    }
+    out
+}
+
+/// 그 pid 가 아직 그 프로세스인가.
+///
+/// 못 재는 경우는 "살아 있다"로 답한다. 틀리는 두 방향의 값이 다르기 때문이다 —
+/// 죽은 것을 살아 있다고 하면 그 대화를 안 이어 여는 것으로 끝나지만(칸은 새 대화로
+/// 뜬다), 살아 있는 것을 죽었다고 하면 다른 창이 쓰는 대화를 뺏으려다 칸이 죽는다.
+#[cfg(windows)]
+fn alive(pid: u32, start: Option<u64>) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return false;
+        }
+        let mut created = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut exit, mut kernel, mut user) = (created, created, created);
+        let ok = GetProcessTimes(h, &mut created, &mut exit, &mut kernel, &mut user) != 0;
+        CloseHandle(h);
+        let Some(want) = start else {
+            return true;
+        };
+        if !ok {
+            return true;
+        }
+        ((created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64) == want
+    }
+}
+
+/// 이 앱은 Windows 전용이지만(ConPTY) 다른 곳에서도 컴파일은 되게 둔다.
+/// 확인할 길이 없으면 "살아 있다"로 답한다 — 위의 이유와 같다.
+#[cfg(not(windows))]
+fn alive(_pid: u32, _start: Option<u64>) -> bool {
+    true
+}
+
 #[tauri::command]
 pub fn claude_sessions(app: AppHandle, root: String) -> Vec<ClaudeSession> {
     use tauri::Manager;
@@ -507,4 +611,40 @@ pub fn state_load(app: AppHandle) -> Option<String> {
         }
     }
     std::fs::read_to_string(legacy_state_file(&app)?).ok()
+}
+
+#[cfg(test)]
+mod live_session_tests {
+    use super::live_sessions_at;
+
+    /// 죽은 pid 와 pid 만 같고 다른 프로세스인 것은 "열려 있다"가 아니다.
+    /// 명부 파일이 지워지지 않고 쌓이므로 이 둘을 못 거르면 몇 주 전 대화까지
+    /// 살아 있다고 답하고, 되살릴 수 있는 대화를 영영 안 되살린다.
+    #[test]
+    fn only_running_processes_count_as_live() {
+        let dir = std::env::temp_dir().join(format!("chiispace-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = std::process::id();
+        let write = |name: &str, body: String| std::fs::write(dir.join(name), body).unwrap();
+        write(
+            "mine.json",
+            format!(r#"{{"pid":{me},"sessionId":"AAAA1111-0000-0000-0000-000000000000"}}"#),
+        );
+        write(
+            "dead.json",
+            r#"{"pid":4294967291,"sessionId":"bbbb2222-0000-0000-0000-000000000000"}"#.into(),
+        );
+        write(
+            "reused.json",
+            format!(r#"{{"pid":{me},"procStart":"1","sessionId":"cccc3333-0000-0000-0000-000000000000"}}"#),
+        );
+        // 키 파일은 같은 폴더에 있지만 대화 명부가 아니다.
+        write("mine.abc.key", "not json".into());
+
+        let live = live_sessions_at(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        // 대소문자는 우리가 맞춰 준다 — 저장된 명령의 id 와 그대로 비교하기 때문이다.
+        assert_eq!(live, vec!["aaaa1111-0000-0000-0000-000000000000".to_string()]);
+    }
 }
