@@ -24,6 +24,7 @@ if (name === "claude") {
   assert.equal(args[0], "-c");
   assert.equal(args[1], `mcp_servers.chiispace.command=${JSON.stringify(process.env.CHIISPACE_CLI)}`);
   assert.match(args[5], /CHIISPACE_AGENT_TOKEN/);
+  assert.equal(args[8], "--no-alt-screen");
 }
 writeFileSync(path.join(root, `${pane}.agent.json`), JSON.stringify({ pane, token: process.env.CHIISPACE_AGENT_TOKEN, args, name }));
 const mcp = spawn(process.env.CHIISPACE_CLI, ["mcp"], { windowsHide: true, stdio: ["pipe", "pipe", "inherit"] });
@@ -69,7 +70,11 @@ process.stdin.on("data", async (text) => {
       const command = draft;
       draft = "";
       log({ event: "input", command });
-      if (command === "busy") {
+      if (command === "scrollback") {
+        process.stdout.write("\r\nSCROLL-HISTORY-BEGIN\r\n");
+        for (let i = 0; i < 100; i++) process.stdout.write(`previous conversation ${i}\r\n`);
+        process.stdout.write("SCROLL-HISTORY-END\r\n❯ ");
+      } else if (command === "busy") {
         process.stdout.write("\x1b[2J\x1b[HWorking... esc to interrupt\r\n❯ ");
         setTimeout(prompt, 6000);
       } else if (command === "exit") {

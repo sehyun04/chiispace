@@ -66,9 +66,19 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
   // ConPTY의 조회 가로채기를 피하고 xterm의 자동 응답 -> onData -> PTY 경로를 검증한다.
   env.CHIISPACE_PROBE = `(() => {
     const queried = new WeakSet();
+    const scrolled = new WeakSet();
     setInterval(() => {
       for (const term of Object.values(window.__terms ?? {})) {
         const buffer = term.buffer.active;
+        const live = Array.from({ length: term.rows }, (_, y) => buffer.getLine(buffer.baseY + y)?.translateToString(true) ?? "").join("\\n");
+        if (!scrolled.has(term) && live.includes("SCROLL-HISTORY-END")) {
+          scrolled.add(term);
+          const history = Array.from({ length: buffer.baseY }, (_, y) => buffer.getLine(y)?.translateToString(true) ?? "").join("\\n");
+          term.scrollToTop();
+          const ok = buffer.type === "normal" && buffer.baseY > 20 && buffer.viewportY === 0 && history.includes("SCROLL-HISTORY-BEGIN");
+          term.write("\\r\\n" + (ok ? "SCROLL-CHECK-OK" : "SCROLL-CHECK-FAILED") + "\\r\\n");
+          term.scrollToBottom();
+        }
         if (queried.has(term) || !buffer.getLine(buffer.baseY)?.translateToString(true).includes("fixture")) continue;
         queried.add(term);
         term.write("\\x1b]11;?\\x1b\\\\", () => {
@@ -117,6 +127,9 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
     await until(async () => (await collab("status", { task_id: startup.id })).status === "completed");
     assert.equal(events("%1").filter((e) => e.event === "claimed" && e.task.id === startup.id).length, 1);
 
+    await send("%0", "scrollback\r");
+    await until(async () => (await peek("%0")).text.includes("SCROLL-CHECK-OK"));
+
     await send("%1", "작성 중인 초안");
     await send("%0", `delegate ${JSON.stringify({ target: "right", description: "한글 테스트" })}\r`);
     const delegated = await until(() => events("%0").find((e) => e.event === "delegated"));
@@ -146,6 +159,8 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
     await delay(500);
     await send("%1", "claude\r");
     await until(() => agent("%1").token !== old.token);
+    // 래퍼 등록 직후에는 MCP 초기화가 아직 끝나지 않을 수 있다.
+    await until(async () => (await collab("context", {})).panes.some((p) => p.id === "%1" && p.connected));
     await assert.rejects(() => call("chiispace.context", { pane: "%1", token: old.token }), /만료/);
     assert.equal(events("%1").filter((e) => e.event === "claimed" && e.task.id === stale.id).length, 0);
     const close = await collab("delegate", { target: "right", description: "close" });

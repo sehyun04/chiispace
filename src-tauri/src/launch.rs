@@ -32,6 +32,8 @@ pub fn config_args(name: &str, cli: &Path, pane: &str, socket: &str, token: &str
         format!("mcp_servers.chiispace.env={{{env}}}"),
         "-c".into(),
         "mcp_servers.chiispace.enabled=true".into(),
+        // 대체 화면에는 xterm 스크롤백이 없어서 Codex의 지난 출력이 휠로 보이지 않는다.
+        "--no-alt-screen".into(),
     ]
 }
 
@@ -69,6 +71,19 @@ fn interactive(args: &[String]) -> bool {
     })
 }
 
+fn append_args(mut defaults: Vec<String>, args: Vec<String>) -> Vec<String> {
+    // 사용자가 이미 우회 옵션을 붙여 실행하던 명령도 중복 플래그 오류 없이 유지한다.
+    if args
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "--no-alt-screen")
+    {
+        defaults.retain(|arg| arg != "--no-alt-screen");
+    }
+    defaults.extend(args);
+    defaults
+}
+
 pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
     let own = std::env::current_exe()?;
     let config: Config =
@@ -82,20 +97,21 @@ pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
     // 에이전트가 내부 작업용 CLI를 다시 부르면 부모 칸의 연결을 빼앗으면 안 된다.
     let nested = std::env::var("CHIISPACE_AGENT_TOKEN").is_ok_and(|t| !t.is_empty());
     let injected = interactive(&args) && !nested;
+    let mut defaults = Vec::new();
     if injected {
         let registration = crate::rpc::collab("register", json!({"harness":name}))?;
         let token = registration["token"].as_str().context("연결 토큰 누락")?;
         std::env::set_var("CHIISPACE_AGENT_TOKEN", token);
         command.env("CHIISPACE_AGENT_TOKEN", token);
-        command.args(config_args(
+        defaults = config_args(
             name,
             &config.cli,
             &std::env::var("CHIISPACE_PANE_ID")?,
             &std::env::var("CHIISPACE_SOCKET_PATH")?,
             token,
-        ));
+        );
     }
-    command.args(args);
+    command.args(append_args(defaults, args));
     let status = command.status().context("에이전트 시작 실패");
     if injected {
         let _ = crate::rpc::collab("unregister", json!({}));
@@ -127,11 +143,52 @@ mod tests {
             "%7"
         );
         let codex = config_args("codex", path, "%7", r"\\.\pipe\chiispace-1", "lease");
-        assert_eq!(codex.len(), 8);
+        assert_eq!(codex.len(), 9);
+        assert_eq!(codex.last().unwrap(), "--no-alt-screen");
         assert!(codex
             .iter()
             .all(|s| !s.contains("approval") && !s.contains("developer_instructions")));
         let command: String = serde_json::from_str(codex[1].split_once('=').unwrap().1).unwrap();
         assert_eq!(command, path.to_str().unwrap());
+    }
+
+    #[test]
+    fn codex_resume_keeps_scrollback_and_original_session_argument() {
+        let args = append_args(
+            config_args("codex", Path::new("cli.exe"), "%7", "pipe", "lease"),
+            vec![
+                "resume".into(),
+                "01234567-89ab-cdef-0123-456789abcdef".into(),
+            ],
+        );
+        assert_eq!(
+            args.iter().filter(|arg| *arg == "--no-alt-screen").count(),
+            1
+        );
+        assert_eq!(
+            &args[9..],
+            ["resume", "01234567-89ab-cdef-0123-456789abcdef"]
+        );
+        assert!(
+            !config_args("claude", Path::new("cli.exe"), "%7", "pipe", "lease")
+                .iter()
+                .any(|arg| arg == "--no-alt-screen")
+        );
+    }
+
+    #[test]
+    fn explicit_scrollback_flag_is_not_duplicated_or_confused_with_a_prompt() {
+        let defaults = vec!["--no-alt-screen".into()];
+        assert_eq!(
+            append_args(
+                defaults.clone(),
+                vec!["--no-alt-screen".into(), "resume".into()]
+            ),
+            vec!["--no-alt-screen", "resume"]
+        );
+        assert_eq!(
+            append_args(defaults, vec!["--".into(), "--no-alt-screen".into()]),
+            vec!["--no-alt-screen", "--", "--no-alt-screen"]
+        );
     }
 }
