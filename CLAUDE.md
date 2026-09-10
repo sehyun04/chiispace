@@ -8,9 +8,29 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ---
 
-## 핸드오프 — 2026-09-09
+## 핸드오프 — 2026-09-10
 
-- Codex 출력이 위로 스크롤되지 않는 문제: 실행 래퍼에 `--no-alt-screen`이 빠져 있었다.
+- 9월 9일의 `--no-alt-screen` 수정만으로는 해결되지 않았다. 설치된 Codex 0.153.4에서
+  normal buffer·mouse tracking 없음인데도 긴 출력 뒤 `baseY=0`인 것을 재현했다.
+  Windows 10 기본 ConPTY가 영역 스크롤을 커서 이동·화면 덮어쓰기로 내보내기 때문이다.
+- Microsoft ConPTY `1.24.260710001`을 빌드 때 SHA-256으로 검증하고 앱에 내장한다.
+  `src-tauri/src/conpty.rs`가 앱 캐시의 버전·아키텍처별 디렉터리에 배치하고 절대 경로로
+  먼저 로드한다. `portable-pty`가 그 모듈을 재사용한다. 엔진 rev·전역 설정은 바꾸지 않는다.
+  런타임 라이선스도 내장한다. 사용자 배포는 여전히 기존 위치의 앱·CLI 두 파일이다.
+- 새 ConPTY에서는 엔진과 xterm의 이중 조회 응답이 눈에 드러났다. 늦은 DA·OSC 색 응답이
+  셸 명령/Codex 초안으로 들어가므로 `ui/terminal-queries.ts`에서 엔진 소유 조회만 위임한다.
+  색 변경은 통과시키며 IME 배선은 건드리지 않는다.
+- `scripts/codex-scroll.test.mjs`는 설치된 네이티브 Codex와 별도 CODEX_HOME·앱 세션으로
+  `/status` 6개의 누적, DOM 휠 상단·하단 이동, 입력 오염 여부를 검증한다. 모델 호출은 없다.
+  앞선 대역 스크롤 검증을 실제 Codex 검증으로 잘못 설명하지 않는다.
+- Codex 대화 ID 자동 추적·재시작 복원은 별개로 아직 없다. `resume --last`로 추측하지 않는다.
+- 검증: 프런트·릴리스 빌드, Rust 19개, JS 단위 12개, 실제 앱 연결·협업·Codex 통합 3개 통과.
+  실제 Codex 휠 검증은 cmd와 PowerShell에서 모두 통과했으며 사용자 세션·Codex 설정 해시는
+  실행 전후 동일했다. 앱 캐시의 내장 ConPTY가 실제 로드된 경로도 확인했다.
+
+## 이전 핸드오프 — 2026-09-09
+
+- 당시 확인한 실행 래퍼의 누락 옵션은 `--no-alt-screen`이었다. 이것만으로 해결된 것은 아니다.
   Codex에만 실행별 옵션을 붙이며 Claude·전역 설정·원래 resume 대상은 바꾸지 않는다.
   이미 사용자가 같은 옵션을 준 경우 중복하지 않는다. `--` 뒤의 프롬프트 문자열은 옵션으로 해석하지 않는다.
 - `scripts/collab.test.mjs`에서 Codex 대역에 화면보다 긴 출력을 만들고 xterm의 normal buffer,

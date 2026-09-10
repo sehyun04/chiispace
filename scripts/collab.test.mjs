@@ -63,7 +63,7 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
   for (const key of Object.keys(env)) {
     if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT") delete env[key];
   }
-  // ConPTY의 조회 가로채기를 피하고 xterm의 자동 응답 -> onData -> PTY 경로를 검증한다.
+  // 엔진을 거친 조회를 xterm에서 다시 받아도 중복 응답이 초안으로 새면 안 된다.
   env.CHIISPACE_PROBE = `(() => {
     const queried = new WeakSet();
     const scrolled = new WeakSet();

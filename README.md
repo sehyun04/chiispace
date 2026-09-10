@@ -81,9 +81,14 @@ PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 �
   `--no-alt-screen`을 붙여 대체 화면으로 전환하지 않게 한다. 새 대화와 `codex resume`
   모두 적용되며, 이미 같은 옵션을 붙인 명령에는 중복하지 않는다. 전역 설정은 바꾸지 않는다.
   OpenAI Docs의 [CLI 옵션](https://developers.openai.com/codex/cli/reference/) 기준이다.
+  **이 옵션만으로는 Windows 10에서 부족하다.** OS 기본 ConPTY가 Codex의 영역 스크롤을
+  화면 덮어쓰기로 바꿔 스크롤백이 0줄로 남는 것을 실제 Codex에서 재현했다.
+  [Microsoft ConPTY 1.24.260710001](https://www.nuget.org/packages/microsoft.windows.console.conpty/)
+  을 앱에 내장하고 앱 캐시에서 로드한다. 사용자가 DLL을 설치하거나 exe 위치를 바꿀 필요는 없다.
+  PTY 엔진이 이미 답한 장치·커서·색 조회에는 xterm이 중복 응답하지 않아야 한다.
+  그렇지 않으면 늦게 온 응답이 셸 명령이나 Codex 초안으로 들어간다.
   기존 앱에서 실행 중인 Codex에는 소급 적용되지 않는다. 새 버전으로 앱을 다시 연 뒤
-  `codex resume`에서 원하는 대화를 선택하면 된다. 이전 버전에서는
-  `codex --no-alt-screen resume`으로 같은 방식으로 실행할 수 있다.
+  `codex resume`에서 원하는 대화를 선택하면 된다. 칸별 Codex 대화 ID의 자동 복원은 아직 없다.
 - 빌드·배포 같은 일반 명령은 **실행하지 않고 프롬프트에 쳐 두기만 한다.** 저 혼자 다시
   도는 건 곤란하다. 이어 여는 것은 대화를 불러오는 것뿐이라 부작용이 없어 그것만 실행한다.
 
@@ -188,6 +193,11 @@ cd src-tauri; cargo build --release --features custom-protocol --bins
 # -> src-tauri/target/release/chiispace-cli.exe  (칸 연결용)
 ```
 
+Windows 첫 빌드에서는 `scripts/prepare-conpty.ps1`이 Microsoft NuGet에서 고정 버전의
+ConPTY 패키지를 받아 SHA-256을 검사하고 `OUT_DIR`에 풀어 둔다. 이후 빌드는 검증한 캐시를
+재사용한다. DLL·호스트·MIT 고지를 exe에 포함하므로 배포 파일은 여전히 앱과 CLI 두 개다.
+실행할 때 앱 캐시의 버전·아키텍처별 디렉터리에 원자적으로 배치하고 바이트 일치를 확인한다.
+
 **`--features custom-protocol` 을 빠뜨리면 안 된다.** Tauri 는 릴리스 여부를 `--release`
 가 아니라 이 feature 로 가른다. 꺼져 있으면 `generate_context!` 가 dev 모드로 컴파일되어
 dist 를 exe 안에 박지 않고 `devUrl`(vite) 을 본다. 그러면 release exe 인데 창에
@@ -246,6 +256,12 @@ MCP를 연결한다. 유료 모델은 호출하지 않으며 모델이 자연어
 확인한다. `CHIISPACE_TEST_SHELL`로 PowerShell 등 셸 경로를 지정할 수 있다.
 `CHIISPACE_TEST_CODEX_JS`에 설치된 `@openai/codex/bin/codex.js` 경로를 주면 실제 Codex의
 읽기 전용 `mcp get` 명령으로 주입한 설정 파싱도 검증한다.
+
+Codex 스크롤은 대역 출력이나 `scrollToTop()`만으로 검증하지 않는다. 설치된 네이티브 Codex의
+exe 경로를 `CHIISPACE_TEST_REAL_CODEX`에 넣고 `node --test scripts/codex-scroll.test.mjs`를 실행한다.
+별도 `CODEX_HOME`·앱 세션·오프라인 제공자를 사용하며, 모델 요청 없이 `/status` 출력 6개가
+누락·중복 없이 쌓이는지와 실제 DOM 휠 이벤트로 상단·하단 이동이 되는지를 확인한다.
+사용자 대화·인증을 가져오지 않으며 OS 키보드나 마우스를 조작하지 않는다.
 
 GUI 를 사람 손 없이 확인하는 손잡이가 앱 안에 들어 있다. env 가 있을 때만 깨어난다.
 

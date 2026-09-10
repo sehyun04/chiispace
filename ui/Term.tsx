@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { delegateTerminalQueries } from "./terminal-queries";
 import "@xterm/xterm/css/xterm.css";
 
 /** 치이카와 팔레트로 맞춘 xterm 테마. 밝은 바탕이라 ANSI 색은 채도를 낮춰야
@@ -202,6 +203,7 @@ export function Term({
       // 충분한 색은 건드리지 않고 안 보이는 것만 잡힌다.
       minimumContrastRatio: 4.5,
     });
+    delegateTerminalQueries(t);
     term.current = t;
     const fit = new FitAddon();
     t.loadAddon(fit);

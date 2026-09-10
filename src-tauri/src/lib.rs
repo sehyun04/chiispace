@@ -11,6 +11,7 @@ mod bridge;
 mod collab;
 mod launch_config;
 mod launchers;
+mod conpty;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -286,6 +287,7 @@ fn arm_autosend(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            conpty::load(&app.path().app_cache_dir()?)?;
             // 이 앱이 claude code 안에서 실행되면 자식 세션 표시를 물려받는데,
             // 그러면 pane 에서 띄운 claude 가 "Transcript saving is off" 로 뜬다.
             // 대화가 저장되지 않으니 다음에 --continue 로 이어 열 것도 없다.
