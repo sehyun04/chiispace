@@ -12,6 +12,7 @@ mod collab;
 mod launch_config;
 mod launchers;
 mod conpty;
+mod pty_stream;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -90,26 +91,16 @@ fn pty_open(
     .map_err(|e| e.to_string())?;
     let session = Arc::new(session);
 
-    // 구독 등록과 현재 화면 채취가 한 번에 끝난다. 둘로 나누면 그 사이 출력이
-    // 유실되거나 두 번 그려진다 — 엔진이 그래서 이 함수를 따로 두고 있다.
-    let (rx, seed) = session.tap_bytes_with_snapshot();
-    app.emit("pty:data", chunk(&id, &seed)).ok();
-
+    let weak = Arc::downgrade(&session);
+    panes.0.lock().unwrap().insert(id.clone(), session);
     let sink = app.clone();
     let pane = id.clone();
     std::thread::spawn(move || {
-        while let Ok(bytes) = rx.recv() {
-            if sink.emit("pty:data", chunk(&pane, &bytes)).is_err() {
-                break; // 웹뷰가 사라졌다.
-            }
-        }
-        // 셸이 끝났다고 알린다. 이것을 "배치에서 지워라"로 받을지는 웹뷰가
-        // 정한다 — 한꺼번에 여럿이 끝나는 것은 사용자가 닫은 것이 아니라
-        // 함께 무너지는 중이므로, 그쪽에서 세어 보고 거른다.
-        sink.emit("pty:exit", pane).ok();
+        pty_stream::forward(weak, |event| match event {
+            pty_stream::Event::Data(bytes) => sink.emit("pty:data", chunk(&pane, &bytes)).is_ok(),
+            pty_stream::Event::Exit => sink.emit("pty:exit", pane.clone()).is_ok(),
+        });
     });
-
-    panes.0.lock().unwrap().insert(id, session);
     Ok(())
 }
 

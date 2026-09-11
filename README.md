@@ -29,6 +29,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | | |
 |---|---|
 | `src-tauri/src/lib.rs` | PTY ↔ 웹뷰 다리, 칸 상태, 헤드리스 검증 손잡이 |
+| `src-tauri/src/pty_stream.rs` | 출력 지연 재연결과 실제 셸 종료 구분 |
 | `src-tauri/src/workspace.rs` | git · 세션 파일 · claude 대화 목록과 이름 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
@@ -87,8 +88,8 @@ PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 �
   을 앱에 내장하고 앱 캐시에서 로드한다. 사용자가 DLL을 설치하거나 exe 위치를 바꿀 필요는 없다.
   PTY 엔진이 이미 답한 장치·커서·색 조회에는 xterm이 중복 응답하지 않아야 한다.
   그렇지 않으면 늦게 온 응답이 셸 명령이나 Codex 초안으로 들어간다.
-  2026-09-10: 내장 런타임 버전 배포 후 종료 신고가 있어 사용자용 exe는 직전 버전으로 원복했다.
-  아래의 내장 런타임 설명은 현재 소스 기준이며, 재배포 상태는 CLAUDE.md의 긴급 배포 항목을 따른다.
+  출력 전송이 밀려 구독이 끊겨도 칸을 닫지 않고 엔진의 화면·스크롤백으로 다시 연결한다.
+  실제 셸 종료는 별도로 확인한다. 재연결은 엔진에 남아 있는 이력 범위이며 모든 원시 출력의 보관은 아니다.
   기존 앱에서 실행 중인 Codex에는 소급 적용되지 않는다. 새 버전으로 앱을 다시 연 뒤
   `codex resume`에서 원하는 대화를 선택하면 된다. 칸별 Codex 대화 ID의 자동 복원은 아직 없다.
 - 빌드·배포 같은 일반 명령은 **실행하지 않고 프롬프트에 쳐 두기만 한다.** 저 혼자 다시
@@ -264,6 +265,15 @@ exe 경로를 `CHIISPACE_TEST_REAL_CODEX`에 넣고 `node --test scripts/codex-s
 별도 `CODEX_HOME`·앱 세션·오프라인 제공자를 사용하며, 모델 요청 없이 `/status` 출력 6개가
 누락·중복 없이 쌓이는지와 실제 DOM 휠 이벤트로 상단·하단 이동이 되는지를 확인한다.
 사용자 대화·인증을 가져오지 않으며 OS 키보드나 마우스를 조작하지 않는다.
+`CHIISPACE_TEST_CODEX_PATH=inherited`를 함께 주면 네이티브 경로를 앞세우지 않고 평소 PATH의
+실행 래퍼(npm 설치에서는 Node)를 검증한다. PowerShell 테스트는 `/quit` 이후 종료 코드 0과
+기존 셸이 남아 있는지도 확인한다. 격리에는 OpenAI Docs의
+[CODEX_HOME 환경 변수](https://learn.chatgpt.com/docs/config-file/environment-variables)를 사용한다.
+
+Rust의 `pty_stream` 검증은 화면 소비를 일부러 지연시켜 64청크 구독 한도를 넘긴다.
+이때 칸을 종료하지 않고 재연결하는지, 이후 입력과 실제 셸 종료도 처리하는지 확인한다.
+`scripts/pty-stream.test.mjs`는 제품의 복구 바이트로 xterm의 끊긴 VT·UTF-8 상태를 복구하고
+조회 응답 중복 차단이 유지되는지 검증한다.
 
 GUI 를 사람 손 없이 확인하는 손잡이가 앱 안에 들어 있다. env 가 있을 때만 깨어난다.
 

@@ -65,7 +65,7 @@ trust_level = "trusted"
   const endpoint = `http://127.0.0.1:${server.address().port}${probePath}`;
   const env = { ...process.env, CHIISPACE_STATE: state, CODEX_HOME: codexState };
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path");
-  env[pathKey] = `${path.dirname(codex)};${env[pathKey]}`;
+  if (process.env.CHIISPACE_TEST_CODEX_PATH !== "inherited") env[pathKey] = `${path.dirname(codex)};${env[pathKey]}`;
   for (const key of Object.keys(env)) {
     if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT") delete env[key];
   }
@@ -111,7 +111,10 @@ trust_level = "trusted"
     // PowerShell이 시작 심에서 대화형 입력으로 넘어갈 때 첫 바이트를 삼킬 수 있다.
     commands.push({ input: "\r" });
     await delay(500);
-    commands.push({ input: "codex --sandbox read-only\r" });
+    const launch = /powershell|pwsh/i.test(process.env.CHIISPACE_TEST_SHELL || "")
+      ? 'codex --sandbox read-only; Write-Output "CODEX_EXIT=$LASTEXITCODE"\r'
+      : "codex --sandbox read-only\r";
+    commands.push({ input: launch });
     await until(() => latest.text.includes("Ask Codex to do anything") && latest.text.includes("OpenAI Codex"));
     await delay(1500);
     const count = () => (latest.history.match(/Token usage:\s+0 total/g) ?? []).length;
@@ -141,6 +144,15 @@ trust_level = "trusted"
     assert.ok(!observations.some((o) => /Working \(|Thread name:|›.*rgb:/.test(o.text)), "조회 응답이 프롬프트로 전송됨");
     assert.ok(!observations.flatMap((o) => o.input).some((s) => /rgb:|\x1b\[\?1;2c/.test(s)), "xterm의 조회 중복 응답");
     console.log(`실제 Codex: 스크롤백 ${latest.baseY}줄, 상태 출력 6개, 휠 상단·하단 이동 확인`);
+    if (/powershell|pwsh/i.test(process.env.CHIISPACE_TEST_SHELL || "")) {
+      commands.push({ input: "/quit" });
+      await until(() => latest.text.includes("› /quit"));
+      await delay(800);
+      commands.push({ input: "\r" });
+      await until(() => latest.text.includes("CODEX_EXIT=0"));
+      assert.equal(app.exitCode, null, "Codex 종료가 앱 종료로 전파됨");
+      console.log("Codex 정상 종료 코드 0, 기존 셸 유지 확인");
+    }
   } catch (error) {
     writeFileSync(path.join(root, "observations.json"), JSON.stringify(observations));
     console.error("마지막 테스트 화면", latest);
