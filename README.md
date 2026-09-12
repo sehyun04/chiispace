@@ -5,6 +5,9 @@
 
 Windows 전용. Tauri 2 + React + xterm.js.
 
+초기 제작부터 구현·오류 수정·검증·배포·남은 작업까지는 [누적 작업 정리](docs/WORKLOG.md)에 모았다.
+현재 인수인계와 회귀 방지 규칙은 [CLAUDE.md](CLAUDE.md)를 따른다.
+
 **터미널은 만들지 않는다.** PTY 생성과 VT 파싱은
 [2rami/kasaterm](https://github.com/2rami/kasaterm) 의 `kasa-pty` 를 git 의존성으로 그대로
 당겨 쓰고, 화면은 웹뷰의 xterm.js 가 그린다. 이 레포의 코드는 그 위에 올라가는 것 — 배치,
