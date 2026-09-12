@@ -17,6 +17,7 @@ export type PaneStat = {
   busy: boolean;
   working?: boolean;
   cwd: string | null;
+  codex?: { run: string; session: CodexSession | null; failed: boolean } | null;
 };
 
 // 프로세스가 열려 있는 상태와 출력이 흐르는 작업 상태를 분리해야 대기 중에는 멈춘다.
@@ -34,9 +35,28 @@ export function isAgentWorking(p?: PaneStat): boolean {
  *
  *  claude 는 이전 대화를 이어 여는 방법이 따로 있다. 세션을 되돌리려는 참이니
  *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
-export type Seed = { cmd: string; auto?: boolean };
+export type CodexSession = { id: string; home: string; cwd: string; args?: string[]; resumable?: boolean };
+export type Seed = { cmd: string; auto?: boolean; codex?: CodexSession };
+
+export function codexSeed(session: CodexSession, auto = true): Seed {
+  const absolute = (value: unknown) => typeof value === "string" && value.length <= 32768
+    && !/[\0\r\n]/.test(value) && /^(?:[A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(value);
+  if (!session || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(session.id)
+    || !absolute(session.home) || !absolute(session.cwd)
+    || (session.args !== undefined && (!Array.isArray(session.args) || session.args.length > 128
+      || session.args.some((s) => typeof s !== "string" || s.length > 32768 || /[\0\r\n]/.test(s)))))
+    throw new Error("잘못된 Codex 복원 정보");
+  const bytes = new TextEncoder().encode(JSON.stringify(session));
+  let raw = "";
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  const encoded = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return { cmd: `chiispace-cli.exe codex-resume ${encoded}`, auto, codex: session };
+}
 
 export function restoreCmd(p: PaneStat, sid?: string): Seed | null {
+  const otherAgent = p.agent && p.agent !== "codex";
+  if (p.codex?.session && !otherAgent) return codexSeed(p.codex.session, !p.codex.failed);
+  if (p.codex && !p.codex.failed && !otherAgent) return { cmd: "codex", auto: true };
   // 에이전트는 이어 열어 준다. 이건 대화를 불러오는 것뿐이라 부작용이 없고,
   // 명령만 쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다.
   //
@@ -179,7 +199,8 @@ export function splitContinue(
 
 /** 예전 세션은 명령을 문자열로만 적어 두었다. */
 export const asSeed = (v: unknown): Seed | null =>
-  typeof v === "string" ? { cmd: v } : v && typeof v === "object" ? (v as Seed) : null;
+  typeof v === "string" ? { cmd: v }
+    : v && typeof v === "object" && "cmd" in v && typeof v.cmd === "string" ? (v as Seed) : null;
 
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 export const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);

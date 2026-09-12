@@ -33,6 +33,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 |---|---|
 | `src-tauri/src/lib.rs` | PTY ↔ 웹뷰 다리, 칸 상태, 헤드리스 검증 손잡이 |
 | `src-tauri/src/pty_stream.rs` | 출력 지연 재연결과 실제 셸 종료 구분 |
+| `src-tauri/src/codex_transport.rs` | 로컬 Codex 연결과 실제 대화 시작·복원 응답 |
+| `src-tauri/src/codex_session.rs` | Codex 대화 ID·폴더·복원 옵션 검증 |
 | `src-tauri/src/workspace.rs` | git · 세션 파일 · claude 대화 목록과 이름 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
@@ -93,8 +95,24 @@ PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 �
   그렇지 않으면 늦게 온 응답이 셸 명령이나 Codex 초안으로 들어간다.
   출력 전송이 밀려 구독이 끊겨도 칸을 닫지 않고 엔진의 화면·스크롤백으로 다시 연결한다.
   실제 셸 종료는 별도로 확인한다. 재연결은 엔진에 남아 있는 이력 범위이며 모든 원시 출력의 보관은 아니다.
-  기존 앱에서 실행 중인 Codex에는 소급 적용되지 않는다. 새 버전으로 앱을 다시 연 뒤
-  `codex resume`에서 원하는 대화를 선택하면 된다. 칸별 Codex 대화 ID의 자동 복원은 아직 없다.
+  기존 앱에서 실행 중인 Codex에는 소급 적용되지 않는다.
+- **Codex도 칸별로 자기 대화를 자동 복원한다.** 실행 래퍼가
+  [App Server](https://learn.chatgpt.com/docs/app-server)의 실제 `thread/start`·`thread/resume`·`thread/fork`
+  응답에서 ID를 받고, 상태 폴더(`CODEX_HOME`)·작업 폴더와 함께 저장한다. `/new`로 바꾸면 새 ID로 갱신한다.
+  터미널 화면과 입력은 기존 Codex TUI를 그대로 사용한다. 로컬 서버는 실행별로 분리하고
+  `127.0.0.1`·임의 포트·실행별 인증을 사용하며 브라우저의 Origin 요청은 거절한다.
+  서버와 자식 프로세스는 Windows Job으로 묶어 실행 종료 때 남지 않게 한다.
+  **메시지를 한 번도 보내지 않은 빈 대화는 Codex가 저장하지 않으므로 새 빈 대화로 연다.**
+  실제 메시지를 받은 대화는 저장된 ID로만 연다. 다른 창이 사용 중이거나 없는 ID면
+  다른 대화를 추측하지 않고 ID·복원 명령을 남긴 채 자동 실행을 멈춘다. 문제를 정리한 뒤 Enter로 재시도한다.
+  명시적인 모델·프로필·샌드박스·승인 옵션과 허용된 모델·권한 `-c` 값은 보존한다.
+  원문 프롬프트·첨부·MCP 인증 등 임의의 `-c` 값은 앱 세션에 복제하지 않는다.
+  **이전 버전에서 ID 없이 저장된 Codex 칸은 첫 실행에 대화 선택 목록을 연다.** 원래 대화를
+  한 번 선택하면 이후부터 자동 복원한다. `--last`로 대상을 추측하지 않는다.
+  이 기능은 치이스페 실행 래퍼를 거친 로컬 대화형 Codex에 적용된다. 래퍼를 우회한 절대 경로·별칭,
+  사용자가 직접 지정한 외부 `--remote`, 비대화형 명령은 대화 ID 자동 연결 대상이 아니다.
+  Codex `0.153.4`의 네이티브·npm/Node 경로로 검증했다. 공식 문서상 WebSocket 연결은 실험적이므로
+  Codex 버전을 바꿀 때는 아래 실제 복원 검증을 다시 수행한다.
 - 빌드·배포 같은 일반 명령은 **실행하지 않고 프롬프트에 쳐 두기만 한다.** 저 혼자 다시
   도는 건 곤란하다. 이어 여는 것은 대화를 불러오는 것뿐이라 부작용이 없어 그것만 실행한다.
 
@@ -272,6 +290,12 @@ exe 경로를 `CHIISPACE_TEST_REAL_CODEX`에 넣고 `node --test scripts/codex-s
 실행 래퍼(npm 설치에서는 Node)를 검증한다. PowerShell 테스트는 `/quit` 이후 종료 코드 0과
 기존 셸이 남아 있는지도 확인한다. 격리에는 OpenAI Docs의
 [CODEX_HOME 환경 변수](https://learn.chatgpt.com/docs/config-file/environment-variables)를 사용한다.
+
+Codex 대화 복원은 같은 실행 파일 환경 변수로 `node --test scripts/codex-resume.test.mjs`를 실행한다.
+별도 상태 폴더와 로컬 가짜 Responses 서버만 사용하며 유료·외부 모델을 호출하지 않는다.
+두 칸의 ID·본문 일치, 빈 대화, 재시작, `/new`, 숨겨진 탭, 다른 창의 사용 중인 ID와 없는 ID를 검증한다.
+`CHIISPACE_TEST_CODEX_PATH=inherited`로 npm/Node 경로도 검증한다. 정상 경로뿐 아니라
+복원 실패 뒤에도 원래 ID·옆 칸·앱이 남는지 확인하고 사용자 세션·설정 해시를 비교한다.
 
 Rust의 `pty_stream` 검증은 화면 소비를 일부러 지연시켜 64청크 구독 한도를 넘긴다.
 이때 칸을 종료하지 않고 재연결하는지, 이후 입력과 실제 셸 종료도 처리하는지 확인한다.

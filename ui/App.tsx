@@ -20,6 +20,7 @@ import {
   label,
   liveAttach,
   restoreCmd,
+  codexSeed,
   seedSession,
   splitContinue,
   type PaneStat,
@@ -308,6 +309,16 @@ export default function App() {
             for (const [id, v] of Object.entries(s.procs)) {
               const seed = asSeed(v);
               if (seed) {
+                if (seed.codex) {
+                  try { m[id] = codexSeed(seed.codex, seed.auto !== false); }
+                  catch { m[id] = { cmd: "codex resume", auto: false }; }
+                  continue;
+                }
+                if (seed.cmd === "codex") {
+                  // 이전 버전에는 칸별 ID가 없었다. 새 대화나 최근 대화를 임의로 열지 않는다.
+                  m[id] = { cmd: "codex resume", auto: seed.auto !== false };
+                  continue;
+                }
                 // 복원으로 여는 pane 은 어느 대화인지 이미 안다. 미리 붙여 두어야
                 // 아래의 "새로 생긴 것 찾기"가 이 pane 을 건드리지 않는다.
                 // 명령이 `attach` 로 바뀌어도 대화는 같으므로 바꾸기 전에 읽는다.
@@ -661,6 +672,9 @@ export default function App() {
         // 곧바로는 안 놓는다 — 끌 때는 claude 가 PTY 보다 먼저 죽어서, 종료 중에
         // 온 한두 번의 빈 스냅샷이 "명령이 끝났다"로 읽히면 같은 것을 잃는다.
         // 연달아 비어 있을 때만 진짜로 끝난 것이다.
+        if (!sawRun.current[id]) continue;
+        idleRuns.current[id] = (idleRuns.current[id] ?? 0) + 1;
+        if (idleRuns.current[id] < 4) continue;
         delete procs.current[id];
         delete sawRun.current[id];
         delete idleRuns.current[id];

@@ -8,6 +8,10 @@ mod launch_config;
 mod mcp;
 #[path = "../rpc.rs"]
 mod rpc;
+#[path = "../codex_session.rs"]
+mod codex_session;
+#[path = "../codex_transport.rs"]
+mod codex_transport;
 
 use anyhow::{anyhow, bail, Context, Result};
 use kasa_socket::Request;
@@ -86,6 +90,20 @@ fn run() -> Result<()> {
     }
     if args.first().map(String::as_str) == Some("mcp") {
         return mcp::run();
+    }
+    if args.first().map(String::as_str) == Some("codex-resume") {
+        if args.len() != 2 { bail!("Codex 복원 인자가 올바르지 않습니다"); }
+        use base64::Engine;
+        if args[1].len() > 100_000 { bail!("Codex 복원 정보가 너무 큽니다"); }
+        let session: codex_session::Session = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&args[1])?)?;
+        session.validate()?;
+        std::env::set_var("CODEX_HOME", &session.home);
+        std::env::set_current_dir(&session.cwd).context("Codex 작업 폴더를 열지 못했습니다")?;
+        let mut options = session.args.clone();
+        if session.resumable { options.extend(["resume".into(), session.id.clone()]); }
+        let resume = session.resumable.then_some(session);
+        std::process::exit(launch::run_agent_with_resume("codex", options, resume)?);
     }
     if args.is_empty() || args.first().is_some_and(|s| s == "--help" || s == "-h") {
         println!("chiispace-cli [--socket 주소] 명령\n\nlist | board | ping\npeek <칸 ID> [줄 수]\ntext <칸 ID> <텍스트>\ntext-stdin <칸 ID>\nkey <칸 ID> <Enter|Ctrl+C|Up|...>\nsplit [left|right|up|down|auto] [기준 칸 ID]\nfocus <칸 ID>\nclose <칸 ID>\nagent <claude|codex> [에이전트 인자...]\n\n칸 안에서는 CHIISPACE_SOCKET_PATH와 CHIISPACE_PANE_ID를 사용합니다.\ntext는 원시 텍스트 전송입니다. Enter 제출은 key로 별도 전송합니다.\nagent는 CHIISPACE_CLI 환경 변수의 실행 파일로 호출하세요.");

@@ -1,11 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { freshSession, liveAttach, splitContinue, seedSession } from "../ui/session.ts";
+import { freshSession, liveAttach, splitContinue, seedSession, codexSeed, restoreCmd, asSeed } from "../ui/session.ts";
 
 const worker = "abcdef12-1111-4111-8111-111111111111";
 const human = "12345678-2222-4222-8222-222222222222";
 const older = "87654321-3333-4333-8333-333333333333";
 const sessions = [worker, human, older].map((id) => ({ id, title: id }));
+
+test("Codex 칸은 Claude ID와 섞지 않고 자신의 ID·상태 폴더·작업 폴더를 복원", () => {
+  const session = { id: human, home: "C:\\한글 & ' ; $\\codex", cwd: "C:\\project space" };
+  const seed = restoreCmd({ agent: "codex", codex: { run: "run-a", session, failed: false } }, worker);
+  assert.deepEqual(seed.codex, session);
+  assert.equal(seed.auto, true);
+  assert.match(seed.cmd, /^chiispace-cli\.exe codex-resume [A-Za-z0-9_-]+$/);
+  assert.deepEqual(JSON.parse(Buffer.from(seed.cmd.split(" ")[2], "base64url").toString()), session);
+  assert.equal(seedSession(seed.cmd), null);
+  assert.equal(restoreCmd({ agent: "claude" }, worker).cmd, `claude --resume ${worker}`);
+});
+
+test("새 Codex 실행은 이전 칸의 ID를 추측하지 않고 복원 실패는 명령만 보관", () => {
+  assert.deepEqual(restoreCmd({ agent: "codex", codex: { run: "run-b", session: null, failed: false } }, human),
+    { cmd: "codex", auto: true });
+  const session = { id: older, home: "C:\\codex", cwd: "C:\\project" };
+  assert.equal(restoreCmd({ agent: null, proc: "powershell", codex: { run: "run-a", session, failed: true } }).auto, false);
+  assert.throws(() => codexSeed({ ...session, id: "invalid; exit" }));
+  assert.throws(() => codexSeed({ ...session, cwd: "relative" }));
+  assert.equal(restoreCmd({ agent: "claude", codex: { run: "old", session, failed: true } }, human).cmd, `claude --resume ${human}`);
+});
+
+test("깨진 복원 항목 하나를 유효한 명령으로 취급하지 않음", () => {
+  for (const bad of [null, 123, {}, { auto: true }, { cmd: false }]) assert.equal(asSeed(bad), null);
+  assert.deepEqual(asSeed("codex"), { cmd: "codex" });
+});
 
 test("최신 백그라운드 대화를 제외하고 사용자 대화 하나만 복원", () => {
   const result = splitContinue(["%1", "%2"], sessions, new Set(), ["ABCDEF12"]);

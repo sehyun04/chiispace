@@ -7,6 +7,11 @@ const pane = process.env.CHIISPACE_PANE_ID;
 const root = process.env.CHIISPACE_FIXTURE_ROOT;
 const name = process.argv[2];
 const args = process.argv.slice(3);
+// 이 대역은 MCP만 검증하며 실제 Codex의 TUI 연결은 codex-resume.test가 검증한다.
+for (const option of ["--remote", "--remote-auth-token-env"]) {
+  const at = args.indexOf(option);
+  if (at >= 0) args.splice(at, 2);
+}
 const log = (event) => appendFileSync(path.join(root, `${pane}.jsonl`), JSON.stringify(event) + "\n");
 if (args[0] === "--version") {
   log({ event: "version", args });

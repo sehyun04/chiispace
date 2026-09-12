@@ -53,6 +53,14 @@ pub struct Queue {
     agents: HashMap<String, Agent>,
     tasks: VecDeque<Task>,
     inputs: HashMap<String, Input>,
+    pub codex: HashMap<String, CodexBinding>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct CodexBinding {
+    pub run: String,
+    pub session: Option<crate::codex_session::Session>,
+    pub failed: bool,
 }
 
 #[derive(Default)]
@@ -132,6 +140,7 @@ impl Queue {
     }
 
     pub fn closed(&mut self, pane: &str) {
+        self.codex.remove(pane);
         self.agents.remove(pane);
         self.inputs.remove(pane);
         for task in &mut self.tasks {
@@ -252,6 +261,12 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
         if !matches!(harness, "claude" | "codex") {
             bail!("지원하지 않는 에이전트");
         }
+        let resume = if harness == "codex" {
+            let session = params.get("resume").filter(|v| !v.is_null())
+                .map(|v| serde_json::from_value::<crate::codex_session::Session>(v.clone())).transpose()?;
+            if let Some(s) = &session { s.validate()?; }
+            session
+        } else { None };
         let mut q = collab.0.lock().unwrap();
         // 같은 pane ID라도 다시 실행된 에이전트에 과거 작업을 넘기지 않는다.
         q.closed(pane);
@@ -264,6 +279,9 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
                 connected: false,
             },
         );
+        if harness == "codex" {
+            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, failed: false });
+        }
         return Ok(json!({"token": token}));
     }
     let token = value(params, "token")?;
@@ -279,7 +297,19 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             Ok(json!({}))
         }
         "chiispace.unregister" => {
+            let mut binding = q.codex.get(pane).cloned();
+            if let Some(b) = &mut binding { b.failed = params["failed"].as_bool().unwrap_or(false); }
             q.closed(pane);
+            if let Some(b) = binding.filter(|b| b.failed && b.session.is_some()) { q.codex.insert(pane.into(), b); }
+            Ok(json!({}))
+        }
+        "chiispace.codex_session" => {
+            if q.authenticate(pane, token)?.harness != "codex" { bail!("Codex 실행이 아닙니다"); }
+            let session: crate::codex_session::Session = serde_json::from_value(params["session"].clone())?;
+            session.validate()?;
+            q.codex.insert(pane.into(), CodexBinding {
+                run: token.into(), session: Some(session), failed: false,
+            });
             Ok(json!({}))
         }
         "chiispace.context" => {

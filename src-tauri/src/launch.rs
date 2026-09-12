@@ -85,6 +85,10 @@ fn append_args(mut defaults: Vec<String>, args: Vec<String>) -> Vec<String> {
 }
 
 pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
+    run_agent_with_resume(name, args, None)
+}
+
+pub fn run_agent_with_resume(name: &str, args: Vec<String>, resume: Option<crate::codex_session::Session>) -> Result<i32> {
     let own = std::env::current_exe()?;
     let config: Config =
         serde_json::from_slice(&std::fs::read(own.with_file_name("launch.json"))?)?;
@@ -99,7 +103,7 @@ pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
     let injected = interactive(&args) && !nested;
     let mut defaults = Vec::new();
     if injected {
-        let registration = crate::rpc::collab("register", json!({"harness":name}))?;
+        let registration = crate::rpc::collab("register", json!({"harness":name,"resume":resume}))?;
         let token = registration["token"].as_str().context("연결 토큰 누락")?;
         std::env::set_var("CHIISPACE_AGENT_TOKEN", token);
         command.env("CHIISPACE_AGENT_TOKEN", token);
@@ -111,17 +115,53 @@ pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
             token,
         );
     }
-    command.args(append_args(defaults, args));
-    let status = command.status().context("에이전트 시작 실패");
+    let own_transport = name == "codex" && injected && codex_interactive(&args)
+        && !args.iter().take_while(|s| *s != "--").any(|s| s == "--remote" || s.starts_with("--remote="));
+    let options = crate::codex_session::restore_options(&args);
+    let args = append_args(defaults, args);
+    let status = if own_transport { crate::codex_transport::run(program, args, options) }
+        else { command.args(args).status().context("에이전트 시작 실패").map(|s| s.code().unwrap_or(1)) };
     if injected {
-        let _ = crate::rpc::collab("unregister", json!({}));
+        let _ = crate::rpc::collab("unregister", json!({"failed":status.as_ref().map_or(true, |code| *code != 0)}));
     }
-    Ok(status?.code().unwrap_or(1))
+    status
+}
+
+fn codex_interactive(args: &[String]) -> bool {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--" { return true; }
+        if matches!(arg, "--help" | "-h" | "--version" | "-V") { return false; }
+        if matches!(arg, "-c" | "--config" | "-m" | "--model" | "-p" | "--profile" |
+            "-s" | "--sandbox" | "-a" | "--ask-for-approval" | "-C" | "--cd" |
+            "--add-dir" | "--local-provider" | "--enable" | "--disable" | "--remote" |
+            "--remote-auth-token-env" | "-i" | "--image") { i += 2; continue; }
+        if !arg.starts_with('-') {
+            // 옵션의 값이 exec·review 같은 단어여도 하위 명령으로 오인하지 않는다.
+            return !matches!(arg, "exec" | "e" | "review" | "sandbox" | "debug" | "features" |
+                "apply" | "archive" | "delete" | "unarchive" | "migrate-rollouts" | "cloud" |
+                "exec-server" | "mcp" | "login" | "logout" | "plugin" | "app-server" | "mcp-server" |
+                "agents" | "queue" | "app" | "completion" | "update" | "doctor" | "remote-control" | "help");
+        }
+        i += 1;
+    }
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_interactive_codex_commands_use_the_session_transport() {
+        for args in [vec![], vec!["resume", "id"], vec!["-m", "review"], vec!["--", "exec"]] {
+            assert!(codex_interactive(&args.into_iter().map(Into::into).collect::<Vec<_>>()));
+        }
+        for args in [vec!["exec", "prompt"], vec!["-c", "model='x'", "mcp", "list"], vec!["--version"]] {
+            assert!(!codex_interactive(&args.into_iter().map(Into::into).collect::<Vec<_>>()));
+        }
+    }
 
     #[test]
     fn setup_and_background_attach_do_not_replace_agent_connection() {

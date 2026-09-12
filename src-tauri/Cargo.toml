@@ -33,6 +33,7 @@ anyhow = "1"
 # PTY 바이트를 웹뷰로 보낼 때 JSON 문자열에 안전하게 싣기 위해. 부분 UTF-8
 # 시퀀스가 청크 경계에 걸리면 문자열로는 깨지지만 base64 는 바이트를 그대로 나른다.
 base64 = "0.22"
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 
 # 터미널 엔진. 여기 소스는 우리가 갖지 않는다 — upstream(2rami/kasaterm)의
 # 크레이트를 그대로 당겨 쓴다. rev 를 박아 두는 이유: upstream main 은 활발히
@@ -46,7 +47,7 @@ kasa-socket = { git = "https://github.com/2rami/kasaterm", rev = "f77f46edfb8d95
 # 봐야 한다(pid 는 돌려 쓰인다). 명부에는 프로세스 생성 시각이 같이 있으므로
 # OpenProcess + GetProcessTimes 로 맞춰 본다.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_JobObjects", "Win32_Security"] }
 
 # 엔진을 같이 고쳐 가며 실험할 때만 주석을 푼다. git 대신 옆 폴더의 작업 트리를 쓴다.
 # [patch."https://github.com/2rami/kasaterm"]

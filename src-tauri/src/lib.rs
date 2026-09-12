@@ -13,6 +13,7 @@ mod launch_config;
 mod launchers;
 mod conpty;
 mod pty_stream;
+mod codex_session;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -338,6 +339,7 @@ struct PaneStatus {
     busy: bool,
     working: bool,
     cwd: Option<String>,
+    codex: Option<collab::CodexBinding>,
 }
 
 // 박동은 작업을 확정하는 보조 신호라 화면에 남아 있는 라이브 스피너도 함께 본다.
@@ -437,7 +439,8 @@ fn agent_turn_is_working(turns: &mut HashMap<String, bool>, id: &str, raw: bool)
 }
 
 #[tauri::command]
-fn pane_status(panes: State<Panes>, turns: State<AgentTurns>) -> Vec<PaneStatus> {
+fn pane_status(panes: State<Panes>, turns: State<AgentTurns>, collab: State<collab::Collab>) -> Vec<PaneStatus> {
+    let codex = collab.0.lock().unwrap().codex.clone();
     let map = panes.0.lock().unwrap();
     let mut turns = turns.0.lock().unwrap();
     map.iter()
@@ -454,6 +457,7 @@ fn pane_status(panes: State<Panes>, turns: State<AgentTurns>) -> Vec<PaneStatus>
                 cwd: s
                     .reported_cwd()
                     .map(|p| p.to_string_lossy().replace('\\', "/")),
+                codex: codex.get(id).cloned(),
             }
         })
         .collect()
