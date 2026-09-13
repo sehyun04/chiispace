@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -86,6 +86,12 @@ trust_level = "trusted"
   writeFileSync(state, JSON.stringify(initial));
   const apps = [];
   const readState = (file = state) => JSON.parse(readFileSync(file, "utf8"));
+  function turnContexts(id) {
+    const sessions = path.join(home, "sessions");
+    const file = readdirSync(sessions, { recursive: true }).find((name) => name.endsWith(`${id}.jsonl`));
+    return file ? readFileSync(path.join(sessions, file), "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line)).filter((record) => record.type === "turn_context").map((record) => record.payload) : [];
+  }
   async function launch(file = state) {
     const key = `/${randomUUID()}`;
     const client = { latest: {}, commands: [] };
@@ -140,7 +146,7 @@ trust_level = "trusted"
     for (const id of ["%0", "%1"]) {
       clientBlank(active, id);
       await delay(500);
-      await input(active, id, `codex --sandbox read-only${id === "%1" ? " --profile restore-test" : ""}`);
+      await input(active, id, `codex --sandbox read-only --ask-for-approval never${id === "%1" ? " --profile restore-test" : ""}`);
       await until(() => active.latest[id]?.text.includes("Ask Codex to do anything"));
       await until(() => readState().procs[id]?.codex?.id);
     }
@@ -169,11 +175,15 @@ trust_level = "trusted"
     saved = readState();
     assert.equal(saved.procs["%0"].codex.id, a);
     assert.equal(saved.procs["%1"].codex.id, b);
-    assert.deepEqual(saved.procs["%0"].codex.args, ["--sandbox", "read-only"]);
-    assert.deepEqual(saved.procs["%1"].codex.args, ["--sandbox", "read-only", "--profile", "restore-test"]);
+    assert.deepEqual(saved.procs["%0"].codex.args, ["--sandbox", "read-only", "--ask-for-approval", "never"]);
+    assert.deepEqual(saved.procs["%1"].codex.args, ["--sandbox", "read-only", "--ask-for-approval", "never", "--profile", "restore-test"]);
     assert.ok(models.includes("profile-model"), "실행별 모델 프로필 미적용");
+    for (const id of [a, b]) assert.equal(turnContexts(id).at(-1)?.sandbox_policy.type, "read-only", "첫 실행의 읽기 전용 권한 미적용");
     console.log("두 칸의 고유 ID 저장과 읽기 전용 실행 옵션 보존 확인");
 
+    // 복원 시 저장된 과거 권한보다 이번 실행의 명시적인 제한이 우선해야 한다.
+    saved.procs["%1"].codex.args[3] = "on-request";
+    writeFileSync(state, JSON.stringify(saved));
     active = await launch();
     for (const [id, marker, other, sid] of [["%0", "CHIISPACE_SESSION_A", "CHIISPACE_SESSION_B", a], ["%1", "CHIISPACE_SESSION_B", "CHIISPACE_SESSION_A", b]]) {
       await until(() => active.latest[id]?.history.includes(marker) && active.latest[id]?.text.includes("Ask Codex to do anything"));
@@ -185,6 +195,10 @@ trust_level = "trusted"
     await input(active, "%1", "CHIISPACE_PROFILE_RESTORED");
     await until(() => modelRequests > requestsBefore && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
     assert.equal(models.at(-1), "profile-model", "복원 뒤 모델 프로필 변경");
+    await until(() => turnContexts(b).length >= 2);
+    assert.equal(turnContexts(b).at(-1).sandbox_policy.type, "read-only", "복원 뒤 읽기 전용 권한 변경");
+    assert.equal(turnContexts(b).at(-1).approval_policy, "on-request", "복원 실행의 명시적 승인 정책 미적용");
+    console.log("복원 뒤 실제 turn의 읽기 전용·명시적 승인 정책 적용 확인");
 
     const secondState = path.join(root, "other-window.json");
     writeFileSync(secondState, JSON.stringify(readState()));
@@ -228,6 +242,15 @@ trust_level = "trusted"
     await until(() => active.latest["%1"]?.history.includes("CHIISPACE_SESSION_B"));
     assert.equal(active.app.exitCode, null);
     console.log("없는 대화 ID는 보존·자동 재시도 중단, 옆 칸과 앱 생존 확인");
+    await close(active);
+    const permissionProfileState = path.join(root, "permission-profile.json");
+    writeFileSync(permissionProfileState, JSON.stringify(readState()));
+    writeFileSync(path.join(home, "restore-test.config.toml"), 'model = "profile-model"\nsandbox_mode = "workspace-write"\n');
+    active = await launch(permissionProfileState);
+    await until(() => readState(permissionProfileState).procs["%1"]?.auto === false);
+    assert.equal(readState(permissionProfileState).procs["%1"].codex.id, b);
+    assert.equal(active.app.exitCode, null);
+    console.log("Codex가 거절한 권한 포함 프로필은 제거·권한 변경 없이 ID 보존 확인");
     assert.ok(modelRequests >= 3);
   } catch (error) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ state: readState(), panes: active?.latest }));

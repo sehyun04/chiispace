@@ -26,6 +26,82 @@ impl Drop for Server {
     }
 }
 
+#[cfg(windows)]
+struct SessionLock(std::os::windows::io::OwnedHandle);
+#[cfg(windows)]
+impl SessionLock {
+    fn acquire(home: &str, id: &str) -> Result<Self> {
+        use std::{
+            hash::{DefaultHasher, Hash, Hasher},
+            os::windows::io::FromRawHandle,
+        };
+        use windows_sys::Win32::{
+            Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0},
+            System::Threading::{CreateMutexW, WaitForSingleObject},
+        };
+        if !crate::codex_session::valid_id(id) {
+            bail!("Codex 대화 ID가 올바르지 않습니다");
+        }
+        let mut hash = DefaultHasher::new();
+        std::fs::canonicalize(home)?
+            .to_string_lossy()
+            .to_lowercase()
+            .hash(&mut hash);
+        let name: Vec<u16> = format!(
+            "Local\\chiispace-codex-{:016x}-{}",
+            hash.finish(),
+            id.to_ascii_lowercase()
+        )
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+        let raw = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if raw.is_null() {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let handle = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(raw) };
+        match unsafe { WaitForSingleObject(raw, 0) } {
+            WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self(handle)),
+            _ => bail!(
+                "다른 치이스페 칸이 사용 중인 Codex 대화입니다. 그 실행을 종료한 뒤 다시 여세요"
+            ),
+        }
+    }
+}
+#[cfg(windows)]
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            windows_sys::Win32::System::Threading::ReleaseMutex(self.0.as_raw_handle());
+        }
+    }
+}
+
+#[derive(Default)]
+struct SessionLocks {
+    #[cfg(windows)]
+    held: HashMap<String, SessionLock>,
+}
+impl SessionLocks {
+    fn claim(&mut self, home: &str, id: &str) -> Result<()> {
+        #[cfg(windows)]
+        {
+            let id = id.to_ascii_lowercase();
+            if !self.held.contains_key(&id) {
+                self.held
+                    .insert(id.clone(), SessionLock::acquire(home, &id)?);
+            }
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (home, id);
+            bail!("Codex 대화 복원 잠금은 Windows에서만 지원합니다");
+        }
+    }
+}
+
 // 앱 강제 종료 때도 이 실행이 만든 서버와 손자 프로세스가 남지 않아야 한다.
 #[cfg(windows)]
 struct Job(std::os::windows::io::OwnedHandle);
@@ -121,6 +197,7 @@ impl Tracker {
 }
 
 pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result<i32> {
+    let (args, server_args, permission_overrides) = permission_args(args)?;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     listener.set_nonblocking(true)?;
     let address = listener.local_addr()?;
@@ -156,8 +233,7 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
                 }
                 Err(e) => return Err(e.into()),
             };
-            stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-            stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+            prepare_handshake(&stream)?;
             let bearer = format!("Bearer {secret}");
             let socket =
                 tungstenite::accept_hdr(stream, |request: &Request, response: Response| {
@@ -179,6 +255,7 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
             let mut server_cmd = Command::new(&program.exe);
             server_cmd
                 .args(&program.args)
+                .args(&server_args)
                 .args(["app-server", "--listen", "stdio://"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -213,10 +290,13 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
                 }
             });
             let mut tracker = Tracker::default();
+            // Codex 버전별 중복 복원 허용 여부와 무관하게 칸 사이의 대화 소유권을 지킨다.
+            let mut locks = SessionLocks::default();
             while !stopping.load(Ordering::Relaxed) {
                 for line in rx.try_iter().take(64) {
                     if let Ok(value) = serde_json::from_str(&line) {
                         if let Some(mut session) = tracker.response(&value, &home) {
+                            locks.claim(&home, &session.id)?;
                             session.args = options.clone();
                             // 본문을 복제하면 개인 대화·인증이 앱 세션 파일로 퍼질 수 있다.
                             if let Err(error) =
@@ -233,10 +313,27 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
                 }
                 match socket.read() {
                     Ok(Message::Text(text)) => {
-                        if let Ok(value) = serde_json::from_str(&text) {
+                        let mut forwarded = text.to_string();
+                        if let Ok(mut value) = serde_json::from_str::<Value>(&text) {
+                            if value["method"] == "thread/resume" {
+                                if let Some(id) = value["params"]["threadId"].as_str() {
+                                    if let Err(error) = locks.claim(&home, id) {
+                                        socket.send(Message::Text(
+                                            json!({"id":value["id"], "error":{
+                                                "code":-32000, "message":error.to_string()
+                                            }})
+                                            .to_string()
+                                            .into(),
+                                        ))?;
+                                        continue;
+                                    }
+                                }
+                            }
+                            apply_permissions(&mut value, &permission_overrides);
                             tracker.request(&value);
+                            forwarded = value.to_string();
                         }
-                        input.write_all(text.as_bytes())?;
+                        input.write_all(forwarded.as_bytes())?;
                         input.write_all(b"\n")?;
                         input.flush()?;
                     }
@@ -276,9 +373,188 @@ fn authenticated(request: &Request, bearer: &str) -> bool {
         && !request.headers().contains_key("origin")
 }
 
+fn prepare_handshake(stream: &std::net::TcpStream) -> Result<()> {
+    // Windows의 accept 소켓은 리스너의 비차단 모드를 상속할 수 있다.
+    // 첫 HTTP 바이트가 아직 없다는 이유로 정상 WebSocket 연결을 닫으면 안 된다.
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    Ok(())
+}
+
+fn apply_permissions(value: &mut Value, permissions: &serde_json::Map<String, Value>) {
+    if matches!(
+        value["method"].as_str(),
+        Some("thread/start" | "thread/resume" | "thread/fork")
+    ) {
+        if let Some(params) = value["params"].as_object_mut() {
+            // TUI의 프로필·-c 값이 명시적인 --sandbox 제한보다 우선해 권한을 넓히면 안 된다.
+            params.extend(permissions.clone());
+        }
+    }
+}
+
+fn permission_args(
+    args: Vec<String>,
+) -> Result<(Vec<String>, Vec<String>, serde_json::Map<String, Value>)> {
+    let mut client = Vec::new();
+    let mut server = Vec::new();
+    let mut permissions = serde_json::Map::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            client.push(arg);
+            client.extend(args);
+            break;
+        }
+        let (flag, attached) = arg
+            .split_once('=')
+            .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
+        let key = match flag {
+            "--sandbox" | "-s" => Some("sandbox_mode"),
+            "--ask-for-approval" | "-a" => Some("approval_policy"),
+            _ => None,
+        };
+        if let Some(key) = key {
+            let value = attached
+                .map(str::to_owned)
+                .or_else(|| args.next())
+                .ok_or_else(|| anyhow!("{flag} 옵션 값 누락"))?;
+            let valid = if key == "sandbox_mode" {
+                matches!(
+                    value.as_str(),
+                    "read-only" | "workspace-write" | "danger-full-access"
+                )
+            } else {
+                matches!(
+                    value.as_str(),
+                    "untrusted" | "on-failure" | "on-request" | "never"
+                )
+            };
+            if !valid {
+                bail!("{flag} 옵션 값이 올바르지 않습니다: {value}");
+            }
+            let field = if key == "sandbox_mode" {
+                "sandbox"
+            } else {
+                "approvalPolicy"
+            };
+            permissions.insert(field.into(), json!(value));
+            // 0.154의 원격 TUI는 복원 시 권한 플래그를 거절하므로 같은 로컬 서버에 적용한다.
+            server.extend(["-c".into(), format!("{key}={}", json!(value))]);
+        } else {
+            let takes_value = matches!(
+                flag,
+                "-c" | "--config"
+                    | "-m"
+                    | "--model"
+                    | "-p"
+                    | "--profile"
+                    | "-C"
+                    | "--cd"
+                    | "--add-dir"
+                    | "--local-provider"
+                    | "--enable"
+                    | "--disable"
+                    | "--remote"
+                    | "--remote-auth-token-env"
+                    | "-i"
+                    | "--image"
+            );
+            client.push(arg.clone());
+            if takes_value && attached.is_none() {
+                if let Some(value) = args.next() {
+                    client.push(value);
+                }
+            }
+        }
+    }
+    Ok((client, server, permissions))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accepted_connections_wait_for_delayed_handshake_bytes() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        let sender = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(60));
+            client.write_all(b"G").unwrap();
+        });
+        prepare_handshake(&stream).unwrap();
+        let mut byte = [0];
+        stream.read_exact(&mut byte).unwrap();
+        assert_eq!(&byte, b"G");
+        sender.join().unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    fn a_live_session_is_exclusive_and_released_with_its_owner() {
+        let home = std::env::temp_dir().to_string_lossy().into_owned();
+        let id = "11111111-2222-4333-8444-555555555555";
+        let lock = SessionLock::acquire(&home, id).unwrap();
+        let other_home = home.clone();
+        assert!(
+            thread::spawn(move || SessionLock::acquire(&other_home, id).is_err())
+                .join()
+                .unwrap()
+        );
+        drop(lock);
+        assert!(
+            thread::spawn(move || SessionLock::acquire(&home, id).is_ok())
+                .join()
+                .unwrap()
+        );
+    }
+    #[test]
+    fn explicit_permissions_reach_the_local_server_without_changing_prompt_arguments() {
+        let args = [
+            "--sandbox=read-only",
+            "-a",
+            "on-request",
+            "-m",
+            "--sandbox",
+            "resume",
+            "id",
+            "--",
+            "-s",
+            "prompt",
+        ];
+        let (client, server, permissions) =
+            permission_args(args.into_iter().map(Into::into).collect()).unwrap();
+        assert_eq!(
+            client,
+            ["-m", "--sandbox", "resume", "id", "--", "-s", "prompt"]
+        );
+        assert_eq!(
+            server,
+            [
+                "-c",
+                "sandbox_mode=\"read-only\"",
+                "-c",
+                "approval_policy=\"on-request\""
+            ]
+        );
+        assert!(permission_args(vec!["--sandbox".into()]).is_err());
+        assert!(permission_args(vec!["-s".into(), "invalid".into()]).is_err());
+        for method in ["thread/start", "thread/resume", "thread/fork"] {
+            let mut request = json!({"id":1,"method":method,"params":{"sandbox":"dangerFullAccess","config":{"model":"kept"}}});
+            apply_permissions(&mut request, &permissions);
+            assert_eq!(request["params"]["sandbox"], "read-only");
+            assert_eq!(request["params"]["approvalPolicy"], "on-request");
+            assert_eq!(request["params"]["config"]["model"], "kept");
+        }
+        let mut request =
+            json!({"method":"turn/start","params":{"sandboxPolicy":{"type":"readOnly"}}});
+        let unchanged = request.clone();
+        apply_permissions(&mut request, &permissions);
+        assert_eq!(request, unchanged);
+    }
     #[test]
     fn local_transport_rejects_missing_wrong_and_browser_credentials() {
         let request = |token: Option<&str>, origin: bool| {
