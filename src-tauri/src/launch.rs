@@ -119,7 +119,7 @@ pub fn run_agent_with_resume(name: &str, args: Vec<String>, resume: Option<crate
         && !args.iter().take_while(|s| *s != "--").any(|s| s == "--remote" || s.starts_with("--remote="));
     let options = crate::codex_session::restore_options(&args);
     let args = append_args(defaults, args);
-    let status = if own_transport { crate::codex_transport::run(program, args, options) }
+    let status = if own_transport { crate::codex_transport::run(program, args, options, resume.as_ref()) }
         else { command.args(args).status().context("에이전트 시작 실패").map(|s| s.code().unwrap_or(1)) };
     if injected {
         let _ = crate::rpc::collab("unregister", json!({"failed":status.as_ref().map_or(true, |code| *code != 0)}));

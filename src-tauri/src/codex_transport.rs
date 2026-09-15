@@ -196,7 +196,92 @@ impl Tracker {
     }
 }
 
-pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result<i32> {
+struct InitialResume {
+    thread_id: String,
+    request_id: Option<Value>,
+}
+impl InitialResume {
+    fn prepare(args: &mut Vec<String>, session: Option<&Session>) -> Result<Option<Self>> {
+        let Some(session) = session else {
+            return Ok(None);
+        };
+        session.validate()?;
+        if !session.resumable
+            || args.len() < 2
+            || args[args.len() - 2] != "resume"
+            || args.last() != Some(&session.id)
+        {
+            bail!("Codex 복원 명령과 대화 ID가 일치하지 않습니다");
+        }
+        // 0.154의 bootstrap resume은 권한 프로필을 거절한다. 프로필 해석은 TUI에 맡기고,
+        // 내부 자동 복원의 첫 start만 동일한 설정을 지원하는 서버 resume으로 보낸다.
+        args.truncate(args.len() - 2);
+        Ok(Some(Self {
+            thread_id: session.id.clone(),
+            request_id: None,
+        }))
+    }
+
+    fn request(&mut self, value: &mut Value) -> Result<()> {
+        match value["method"].as_str() {
+            Some("thread/start") if self.request_id.is_none() => {}
+            Some("thread/start" | "thread/resume" | "thread/fork" | "turn/start") => {
+                bail!("Codex 대화 복원이 확인되기 전에 다른 대화를 시작할 수 없습니다");
+            }
+            _ => return Ok(()),
+        }
+        let request_id = value
+            .get("id")
+            .filter(|id| id.is_string() || id.is_number())
+            .cloned()
+            .context("Codex 복원 요청 ID 누락")?;
+        let params = value["params"]
+            .as_object_mut()
+            .context("Codex 복원 설정 누락")?;
+        if params
+            .get("ephemeral")
+            .is_some_and(|v| !v.is_null() && v != false)
+        {
+            bail!("임시 대화 시작 요청으로 저장된 Codex 대화를 복원할 수 없습니다");
+        }
+        // 새 대화 전용 메타데이터만 제외한다. config·권한·지침은 재해석하거나 병합하지 않는다.
+        for key in [
+            "serviceName",
+            "ephemeral",
+            "sessionStartSource",
+            "threadSource",
+        ] {
+            params.remove(key);
+        }
+        params.insert("threadId".into(), json!(self.thread_id));
+        value["method"] = json!("thread/resume");
+        self.request_id = Some(request_id);
+        Ok(())
+    }
+
+    fn response(&self, value: &Value) -> Result<bool> {
+        if value.get("method").is_some()
+            || self.request_id.is_none()
+            || value.get("id") != self.request_id.as_ref()
+            || value.get("error").is_some()
+        {
+            return Ok(false);
+        }
+        // 복원 실패를 새 대화로 대체하면 원래 칸의 ID와 맥락을 잃는다.
+        if value["result"]["thread"]["id"].as_str() != Some(self.thread_id.as_str()) {
+            bail!("Codex 복원 응답의 대화 ID가 저장된 ID와 다릅니다");
+        }
+        Ok(true)
+    }
+}
+
+pub fn run(
+    program: &Program,
+    mut args: Vec<String>,
+    options: Vec<String>,
+    resume: Option<&Session>,
+) -> Result<i32> {
+    let mut restore = InitialResume::prepare(&mut args, resume)?;
     let (args, server_args, permission_overrides) = permission_args(args)?;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     listener.set_nonblocking(true)?;
@@ -295,6 +380,11 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
             while !stopping.load(Ordering::Relaxed) {
                 for line in rx.try_iter().take(64) {
                     if let Ok(value) = serde_json::from_str(&line) {
+                        if let Some(initial) = &restore {
+                            if initial.response(&value)? {
+                                restore = None;
+                            }
+                        }
                         if let Some(mut session) = tracker.response(&value, &home) {
                             locks.claim(&home, &session.id)?;
                             session.args = options.clone();
@@ -315,6 +405,9 @@ pub fn run(program: &Program, args: Vec<String>, options: Vec<String>) -> Result
                     Ok(Message::Text(text)) => {
                         let mut forwarded = text.to_string();
                         if let Ok(mut value) = serde_json::from_str::<Value>(&text) {
+                            if let Some(initial) = &mut restore {
+                                initial.request(&mut value)?;
+                            }
                             if value["method"] == "thread/resume" {
                                 if let Some(id) = value["params"]["threadId"].as_str() {
                                     if let Err(error) = locks.claim(&home, id) {
@@ -475,6 +568,113 @@ fn permission_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn restore_fixture() -> (Session, Vec<String>) {
+        let root = std::env::temp_dir().to_string_lossy().into_owned();
+        let session = Session {
+            id: "12345678-1234-4234-8234-123456789abc".into(),
+            home: root.clone(),
+            cwd: root,
+            args: vec!["--profile".into(), "read-only".into()],
+            resumable: true,
+        };
+        let mut args = session.args.clone();
+        args.extend(["resume".into(), session.id.clone()]);
+        (session, args)
+    }
+
+    #[test]
+    fn only_a_matching_internal_seed_changes_bootstrap_without_removing_the_profile() {
+        let (session, mut args) = restore_fixture();
+        let original = args.clone();
+        assert!(InitialResume::prepare(&mut args, None).unwrap().is_none());
+        assert_eq!(args, original);
+        InitialResume::prepare(&mut args, Some(&session))
+            .unwrap()
+            .unwrap();
+        assert_eq!(args, session.args);
+        assert!(InitialResume::prepare(&mut args, Some(&session)).is_err());
+        let mut wrong = original.clone();
+        *wrong.last_mut().unwrap() = "11111111-2222-4333-8444-555555555555".into();
+        assert!(InitialResume::prepare(&mut wrong, Some(&session)).is_err());
+        assert!(InitialResume::prepare(
+            &mut original.clone(),
+            Some(&Session {
+                resumable: false,
+                ..session
+            })
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn initial_resume_preserves_resolved_permissions_config_and_instructions() {
+        let (session, mut args) = restore_fixture();
+        let mut initial = InitialResume::prepare(&mut args, Some(&session))
+            .unwrap()
+            .unwrap();
+        let mut unrelated = json!({"id":1,"method":"config/read","params":{"includeLayers":true}});
+        let before = unrelated.clone();
+        initial.request(&mut unrelated).unwrap();
+        assert_eq!(unrelated, before);
+        let mut request = json!({"id":2,"method":"thread/start","params":{
+            "model":"profile-model", "cwd":session.cwd,
+            "sandbox":"read-only", "approvalPolicy":"on-request",
+            "config":{"permissions":{"custom":{"network":{"enabled":false}}},
+                "sandbox_workspace_write":{"writable_roots":["C:/project"]},
+                "hooks":{"SessionStart":[]}},
+            "developerInstructions":"kept", "ephemeral":false, "threadSource":"cli"
+        }});
+        let mut expected = request.clone();
+        expected["method"] = json!("thread/resume");
+        expected["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ephemeral");
+        expected["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("threadSource");
+        expected["params"]["threadId"] = json!(session.id);
+        initial.request(&mut request).unwrap();
+        assert_eq!(request, expected);
+        let response = json!({"id":2,"result":{"thread":{"id":session.id,"turns":[{"items":[{"text":"history"}]}]}}});
+        assert!(initial.response(&response).unwrap());
+    }
+
+    #[test]
+    fn failed_or_mismatched_resume_never_falls_back_to_a_fresh_thread() {
+        let (session, mut args) = restore_fixture();
+        let mut initial = InitialResume::prepare(&mut args, Some(&session))
+            .unwrap()
+            .unwrap();
+        for mut bad in [
+            json!({"method":"thread/start","params":{}}),
+            json!({"id":1,"method":"thread/start"}),
+            json!({"id":1,"method":"thread/start","params":{"ephemeral":true}}),
+        ] {
+            assert!(initial.request(&mut bad).is_err());
+            assert!(initial.request_id.is_none());
+        }
+        initial
+            .request(&mut json!({"id":"restore","method":"thread/start","params":{}}))
+            .unwrap();
+        for response in [
+            json!({"id":"other","result":{"thread":{"id":session.id}}}),
+            json!({"id":"restore","method":"item/commandExecution/requestApproval"}),
+            json!({"id":"restore","error":{"message":"missing or locked"}}),
+        ] {
+            assert!(!initial.response(&response).unwrap());
+        }
+        assert!(initial
+            .response(&json!({"id":"restore","result":{"thread":{"id":"wrong"}}}))
+            .is_err());
+        for method in ["thread/start", "thread/resume", "thread/fork", "turn/start"] {
+            assert!(initial
+                .request(&mut json!({"id":3,"method":method,"params":{}}))
+                .is_err());
+        }
+    }
+
     #[test]
     fn accepted_connections_wait_for_delayed_handshake_bytes() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
