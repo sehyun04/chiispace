@@ -21,10 +21,12 @@ async function until(fn, timeout = 30000) {
   throw new Error(`Codex 복원 조건 대기 시간 초과: ${last ?? "상태 미도달"}`);
 }
 
-test("실제 Codex의 두 칸별 대화 복원·새 대화 전환·다른 창 충돌 보호", { skip: !exe || !codex, timeout: 240000 }, async () => {
+test("실제 Codex의 네이티브 continue·작업 폴더별 복원·권한 유지", { skip: !exe || !codex, timeout: 240000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-codex-resume-"));
   const home = path.join(root, "한글 & state");
   mkdirSync(home);
+  const projects = [path.join(root, "project-a"), path.join(root, "project-b")];
+  projects.forEach(p => mkdirSync(p));
   const protectedFiles = [
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json")),
     path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".claude.json"),
@@ -42,7 +44,9 @@ test("실제 Codex의 두 칸별 대화 복원·새 대화 전환·다른 창 �
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       if (client) {
-        client.latest = JSON.parse(body);
+        const state = JSON.parse(body);
+        client.latest = state.panes;
+        client.seeds = state.seeds;
         res.end(JSON.stringify(client.commands.splice(0)));
         return;
       }
@@ -79,12 +83,16 @@ wire_api = "responses"
 requires_openai_auth = false
 [projects.${JSON.stringify(root)}]
 trust_level = "trusted"
+[projects.${JSON.stringify(projects[0])}]
+trust_level = "trusted"
+[projects.${JSON.stringify(projects[1])}]
+trust_level = "trusted"
 `);
-  writeFileSync(path.join(home, "restore-test.config.toml"), 'model = "profile-model"\n');
+  writeFileSync(path.join(home, "restore-test.config.toml"), 'model = "profile-model"\nsandbox_mode = "workspace-write"\n');
   const shell = process.env.CHIISPACE_TEST_SHELL || path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const initial = { tabs: [{ key: "t0", focus: "%0", layout: { kind: "split", dir: "h", ratio: 0.5,
-    a: { kind: "leaf", id: "%0" }, b: { kind: "leaf", id: "%1" } }, root, shell }],
-    active: 0, nextPane: 2, nextTab: 1, procs: {} };
+  const initial = { tabs: projects.map((project, i) => ({ key: `t${i}`, focus: `%${i}`,
+    layout: { kind: "leaf", id: `%${i}` }, root: i === 1 ? root : project, shell })),
+    active: 0, nextPane: 2, nextTab: 2, procs: {} };
   const state = path.join(root, "session.json");
   writeFileSync(state, JSON.stringify(initial));
   const apps = [];
@@ -118,7 +126,7 @@ trust_level = "trusted"
             const lines = Array.from({ length: b.length }, (_, y) => b.getLine(y)?.translateToString(true) ?? "");
             return [id, { text: lines.slice(b.baseY).join("\\n"), history: lines.join("\\n") }];
           }));
-          const response = await fetch(${JSON.stringify(base + key)}, { method: "POST", body: JSON.stringify(panes) });
+          const response = await fetch(${JSON.stringify(base + key)}, { method: "POST", body: JSON.stringify({panes, seeds: window.__restore?.seeds}) });
           for (const c of await response.json()) window.__terms?.[c.id]?.input(c.input);
         } finally { pending = false; }
       }, 100);
@@ -143,179 +151,91 @@ trust_level = "trusted"
     await delay(850);
     client.commands.push({ id, input: "\r" });
   }
+  const sessionFor = (marker) => {
+    const directory = path.join(home, "sessions");
+    for (const name of readdirSync(directory, { recursive: true }).filter(n => n.endsWith(".jsonl"))) {
+      const text = readFileSync(path.join(directory, name), "utf8");
+      if (!text.includes(marker)) continue;
+      return JSON.parse(text.split("\n")[0]).payload.id;
+    }
+  };
   let active;
   try {
     active = await launch();
-    for (const id of ["%0", "%1"]) {
+    for (const [id, marker] of [["%0", "CHIISPACE_SESSION_A"], ["%1", "CHIISPACE_SESSION_B"]]) {
       clientBlank(active, id);
       await delay(500);
-      await input(active, id, `codex --sandbox read-only --ask-for-approval never${id === "%1" ? " --profile restore-test" : ""}`);
+      await input(active, id, `codex --sandbox read-only --ask-for-approval never${id === "%1" ? " --profile restore-test -C project-b" : ""}`);
       await until(() => active.latest[id]?.text.includes("Ask Codex to do anything"));
-      await until(() => readState().procs[id]?.codex?.id);
-    }
-    let saved = readState();
-    let a = saved.procs["%0"].codex.id;
-    let b = saved.procs["%1"].codex.id;
-    assert.notEqual(a, b, "두 칸에 같은 대화가 연결됨");
-    await close(active);
-    active = await launch();
-    await until(() => {
-      const procs = readState().procs;
-      return procs["%0"]?.codex?.id && procs["%0"].codex.id !== a && procs["%1"]?.codex?.id && procs["%1"].codex.id !== b;
-    });
-    for (const id of ["%0", "%1"]) await until(() => active.latest[id]?.text.includes("Ask Codex to do anything") && readState().procs[id]?.codex?.id);
-    a = readState().procs["%0"].codex.id;
-    b = readState().procs["%1"].codex.id;
-    assert.notEqual(a, b);
-    console.log("미저장 빈 대화는 서로 다른 새 빈 대화로 복원 확인");
-    for (const [id, marker] of [["%0", "CHIISPACE_SESSION_A"], ["%1", "CHIISPACE_SESSION_B"]]) {
       await input(active, id, marker);
       await until(() => active.latest[id]?.history.includes("CHIISPACE_LOCAL_REPLY"));
-      await until(() => readState().procs[id]?.codex?.resumable === true);
+      await until(() => readState().procs[id]?.codexLaunch);
     }
-    await delay(1000);
+    const a = sessionFor("CHIISPACE_SESSION_A");
+    const b = sessionFor("CHIISPACE_SESSION_B");
+    assert.ok(a && b && a !== b);
     await close(active);
-    saved = readState();
-    assert.equal(saved.procs["%0"].codex.id, a);
-    assert.equal(saved.procs["%1"].codex.id, b);
-    assert.deepEqual(saved.procs["%0"].codex.args, ["--sandbox", "read-only", "--ask-for-approval", "never"]);
-    assert.deepEqual(saved.procs["%1"].codex.args, ["--sandbox", "read-only", "--ask-for-approval", "never", "--profile", "restore-test"]);
-    assert.ok(models.includes("profile-model"), "실행별 모델 프로필 미적용");
-    for (const id of [a, b]) assert.equal(turnContexts(id).at(-1)?.sandbox_policy.type, "read-only", "첫 실행의 읽기 전용 권한 미적용");
-    console.log("두 칸의 고유 ID 저장과 읽기 전용 실행 옵션 보존 확인");
-
-    // 복원 시 저장된 과거 권한보다 이번 실행의 명시적인 제한이 우선해야 한다.
-    saved.procs["%1"].codex.args[3] = "on-request";
+    const saved = readState();
+    assert.equal(saved.restoreMode, "native-continue");
+    assert.ok(!JSON.stringify(saved).includes(a) && !JSON.stringify(saved).includes(b), "앱 상태에 대화 ID 저장");
+    assert.deepEqual(saved.procs["%1"].codexLaunch.args, ["--sandbox", "read-only", "--ask-for-approval", "never", "--profile", "restore-test"]);
+    assert.equal(saved.procs["%1"].codexLaunch.cwd, projects[1]);
+    saved.procs["%1"].codexLaunch.args[3] = "on-request";
     writeFileSync(state, JSON.stringify(saved));
     active = await launch();
-    for (const [id, marker, other, sid] of [["%0", "CHIISPACE_SESSION_A", "CHIISPACE_SESSION_B", a], ["%1", "CHIISPACE_SESSION_B", "CHIISPACE_SESSION_A", b]]) {
+    for (const [id, marker, other] of [["%0", "CHIISPACE_SESSION_A", "CHIISPACE_SESSION_B"], ["%1", "CHIISPACE_SESSION_B", "CHIISPACE_SESSION_A"]]) {
       await until(() => active.latest[id]?.history.includes(marker) && active.latest[id]?.text.includes("Ask Codex to do anything"));
-      assert.ok(!active.latest[id].history.includes(other), "다른 칸의 대화가 복원됨");
-      await until(() => readState().procs[id]?.codex?.id === sid);
+      assert.ok(!active.latest[id].history.includes(other), "다른 폴더의 최근 대화로 복원됨");
     }
-    console.log("앱 재시작 후 두 대화의 ID·이전 본문 일치 확인");
     const requestsBefore = modelRequests;
-    await input(active, "%1", "CHIISPACE_PROFILE_RESTORED");
+    await input(active, "%1", "CHIISPACE_NATIVE_CONTINUED");
     await until(() => modelRequests > requestsBefore && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
-    assert.equal(models.at(-1), "profile-model", "복원 뒤 모델 프로필 변경");
     await until(() => turnContexts(b).length >= 2);
-    assert.equal(turnContexts(b).at(-1).sandbox_policy.type, "read-only", "복원 뒤 읽기 전용 권한 변경");
-    assert.equal(turnContexts(b).at(-1).approval_policy, "on-request", "복원 실행의 명시적 승인 정책 미적용");
-    console.log("복원 뒤 실제 turn의 읽기 전용·명시적 승인 정책 적용 확인");
-
-    const secondState = path.join(root, "other-window.json");
-    writeFileSync(secondState, JSON.stringify(readState()));
-    const other = await launch(secondState);
-    await until(() => Object.values(readState(secondState).procs).some((seed) => seed.auto === false), 30000);
-    assert.equal(readState(secondState).procs["%0"].codex.id, a);
-    assert.equal(readState().procs["%0"].codex.id, a);
-    await close(other);
-    console.log("다른 창이 사용 중인 대화는 ID를 유지하고 자동 실행 중단 확인");
+    assert.equal(models.at(-1), "profile-model");
+    assert.equal(turnContexts(b).at(-1).sandbox_policy.type, "read-only");
+    assert.equal(turnContexts(b).at(-1).approval_policy, "on-request");
+    assert.ok(inputs.at(-1).includes("CHIISPACE_SESSION_B"));
+    assert.ok(!inputs.at(-1).includes("CHIISPACE_SESSION_A"));
+    console.log("네이티브 resume --last의 폴더별 이전 대화·실제 권한·프로필 유지 확인");
 
     await input(active, "%0", "/new");
-    await until(() => readState().procs["%0"]?.codex?.id && readState().procs["%0"].codex.id !== a);
-    const fresh = readState().procs["%0"].codex.id;
-    assert.notEqual(fresh, b);
+    await until(() => active.latest["%0"]?.text.includes("Ask Codex to do anything"));
     await input(active, "%0", "CHIISPACE_SESSION_NEW");
-    await until(() => active.latest["%0"]?.history.includes("CHIISPACE_SESSION_NEW") && active.latest["%0"]?.text.includes("Ask Codex to do anything"));
-    await delay(1000);
+    await until(() => active.latest["%0"]?.text.includes("Ask Codex to do anything") && sessionFor("CHIISPACE_SESSION_NEW"));
+    const fresh = sessionFor("CHIISPACE_SESSION_NEW");
+    assert.notEqual(fresh, a);
     await close(active);
-    const tabbed = readState();
-    tabbed.tabs = [
-      { ...tabbed.tabs[0], layout: { kind: "leaf", id: "%0" }, focus: "%0" },
-      { ...tabbed.tabs[0], key: "t1", layout: { kind: "leaf", id: "%1" }, focus: "%1" },
-    ];
-    tabbed.nextTab = 2;
-    writeFileSync(state, JSON.stringify(tabbed));
     active = await launch();
     await until(() => active.latest["%0"]?.history.includes("CHIISPACE_SESSION_NEW"));
-    assert.equal(readState().procs["%0"].codex.id, fresh);
-    assert.equal(readState().procs["%1"].codex.id, b);
-    console.log("/new 이후 새 ID로 갱신·재복원과 옆 칸의 기존 ID 유지 확인");
-    await close(active);
-    const missingState = path.join(root, "missing-session.json");
-    const missing = readState();
-    const missingId = randomUUID();
-    missing.procs["%0"].codex.id = missingId;
-    missing.procs["%0"].codex.resumable = true;
-    writeFileSync(missingState, JSON.stringify(missing));
-    active = await launch(missingState);
-    await until(() => readState(missingState).procs["%0"]?.auto === false);
-    assert.equal(readState(missingState).procs["%0"].codex.id, missingId);
+    assert.ok(!active.latest["%0"].history.includes("CHIISPACE_SESSION_A"));
     await until(() => active.latest["%1"]?.history.includes("CHIISPACE_SESSION_B"));
-    assert.equal(active.app.exitCode, null);
-    console.log("없는 대화 ID는 보존·자동 재시도 중단, 옆 칸과 앱 생존 확인");
     await close(active);
-    const permissionProfileState = path.join(root, "permission-profile.json");
-    writeFileSync(permissionProfileState, JSON.stringify(readState()));
-    writeFileSync(path.join(home, "restore-test.config.toml"), 'model = "profile-model"\nsandbox_mode = "workspace-write"\n');
-    active = await launch(permissionProfileState);
-    await until(() => active.latest["%1"]?.history.includes("CHIISPACE_SESSION_B") && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
-    assert.equal(readState(permissionProfileState).procs["%1"].codex.id, b);
-    assert.notEqual(readState(permissionProfileState).procs["%1"].auto, false);
-    const profileRequestsBefore = modelRequests;
-    await input(active, "%1", "CHIISPACE_PERMISSION_PROFILE_RESTORED");
-    await until(() => modelRequests > profileRequestsBefore && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
-    assert.equal(models.at(-1), "profile-model");
-    await until(() => turnContexts(b).length >= 3);
-    assert.equal(turnContexts(b).at(-1).sandbox_policy.type, "read-only", "프로필보다 명시적 CLI 제한이 우선해야 함");
-    assert.equal(turnContexts(b).at(-1).approval_policy, "on-request");
-    assert.ok(inputs.at(-1).includes("CHIISPACE_SESSION_B"), "복원 뒤 모델 입력의 이전 대화 누락");
-    assert.ok(!inputs.at(-1).includes("CHIISPACE_SESSION_A"), "복원 뒤 모델 입력에 다른 칸의 대화 혼입");
-    assert.equal(active.app.exitCode, null);
-    console.log("권한 포함 프로필의 이전 본문·ID 복원과 명시적 CLI 제한 유지 확인");
+    console.log("/new 이후 최신 대화 이어가기와 숨긴 탭 복원 확인");
+
+    const duplicate = readState();
+    duplicate.tabs[1].root = duplicate.tabs[0].root;
+    duplicate.procs["%1"].codexLaunch.cwd = duplicate.procs["%0"].codexLaunch.cwd;
+    duplicate.procs["%1"].cwd = duplicate.procs["%0"].cwd;
+    const duplicateState = path.join(root, "duplicate.json");
+    writeFileSync(duplicateState, JSON.stringify(duplicate));
+    active = await launch(duplicateState);
+    await until(() => active.seeds?.["%1"]?.cmd.endsWith("--picker"));
+    await until(() => active.latest["%0"]?.history.includes("CHIISPACE_SESSION_NEW"));
+    await until(() => /resume|session|conversation/i.test(active.latest["%1"]?.text ?? ""));
+    assert.ok(!active.latest["%1"].text.includes("Ask Codex to do anything"), "중복 칸이 선택 없이 대화에 연결됨");
     await close(active);
+    console.log("같은 폴더의 중복 칸은 자동 중복 연결 대신 선택 목록 확인");
 
-    const configFile = path.join(home, "config.toml");
-    const profileFile = path.join(home, "restore-test.config.toml");
-    writeFileSync(configFile, `sandbox_mode = "workspace-write"\napproval_policy = "on-request"\n${readFileSync(configFile, "utf8")}`);
-    for (const layer of ["profile", "project", "cli"]) {
-      const projectOverride = layer !== "profile";
-      const cliOverride = layer === "cli";
-      const profileState = path.join(root, `${layer}-priority.json`);
-      const fixture = readState();
-      fixture.procs["%1"].codex.args = ["--profile", "restore-test"];
-      if (cliOverride) fixture.procs["%1"].codex.args.push("--sandbox", "read-only", "--ask-for-approval", "never", "--model", "cli-model");
-      writeFileSync(profileState, JSON.stringify(fixture));
-      writeFileSync(profileFile, `model = "profile-model"\nsandbox_mode = "${projectOverride ? "workspace-write" : "read-only"}"\napproval_policy = "never"\n`);
-      const projectFile = path.join(root, ".codex", "config.toml");
-      if (projectOverride) {
-        mkdirSync(path.dirname(projectFile), { recursive: true });
-        writeFileSync(projectFile, `model = "project-model"\nsandbox_mode = "${cliOverride ? "workspace-write" : "read-only"}"\napproval_policy = "on-request"\n`);
-      }
-      const fixtureFiles = [configFile, profileFile, projectFile];
-      const hashes = fixtureFiles.map(hash);
-      const contextsBefore = turnContexts(b).length;
-      const requestsBefore = modelRequests;
-      active = await launch(profileState);
-      await until(() => active.latest["%1"]?.history.includes("CHIISPACE_SESSION_B") && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
-      assert.equal(readState(profileState).procs["%1"].codex.id, b);
-      assert.deepEqual(readState(profileState).procs["%1"].codex.args, fixture.procs["%1"].codex.args);
-      await input(active, "%1", `CHIISPACE_${layer.toUpperCase()}_PRIORITY`);
-      await until(() => modelRequests > requestsBefore && active.latest["%1"]?.text.includes("Ask Codex to do anything"));
-      await until(() => turnContexts(b).length > contextsBefore);
-      assert.equal(models.at(-1), `${layer}-model`);
-      assert.equal(turnContexts(b).at(-1).sandbox_policy.type, "read-only");
-      assert.equal(turnContexts(b).at(-1).approval_policy, layer === "project" ? "on-request" : "never");
-      assert.ok(inputs.at(-1).includes("CHIISPACE_SESSION_B"));
-      assert.ok(!inputs.at(-1).includes("CHIISPACE_SESSION_A"));
-      await close(active);
-      assert.deepEqual(fixtureFiles.map(hash), hashes, "복원을 위해 설정 파일을 변경함");
-      console.log(cliOverride ? "프로젝트보다 명시적 CLI 설정의 우선순위 유지 확인" : projectOverride ? "프로필보다 프로젝트 설정의 우선순위 유지 확인" : "프로필 자체의 읽기 전용·승인 정책 적용 확인");
-    }
-
-    const invalidProfileState = path.join(root, "invalid-profile.json");
-    const invalidProfile = readState();
-    invalidProfile.procs["%1"].codex.args = ["--profile", "broken"];
+    const invalid = readState();
+    invalid.procs["%1"].codexLaunch.args = ["--profile", "broken"];
     writeFileSync(path.join(home, "broken.config.toml"), 'sandbox_mode = [\n');
-    writeFileSync(invalidProfileState, JSON.stringify(invalidProfile));
-    active = await launch(invalidProfileState);
-    await until(() => readState(invalidProfileState).procs["%1"]?.auto === false);
-    assert.equal(readState(invalidProfileState).procs["%1"].codex.id, b);
-    assert.deepEqual(readState(invalidProfileState).procs["%1"].codex.args, ["--profile", "broken"]);
+    const invalidState = path.join(root, "invalid.json");
+    writeFileSync(invalidState, JSON.stringify(invalid));
+    active = await launch(invalidState);
+    await until(() => readState(invalidState).procs["%1"]?.auto === false);
+    assert.deepEqual(readState(invalidState).procs["%1"].codexLaunch.args, ["--profile", "broken"]);
     assert.equal(active.app.exitCode, null);
-    console.log("문법 오류 프로필의 ID·명령 보존과 자동 재시도 중단 확인");
-    assert.ok(modelRequests >= 3);
+    console.log("설정 오류는 자동 재시도 중단, 옆 칸·앱 생존 확인");
   } catch (error) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ state: readState(), panes: active?.latest }));
     console.error("복원 검증 실패 기록", path.join(root, "failure.json"));

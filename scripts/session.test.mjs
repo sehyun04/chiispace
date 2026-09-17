@@ -1,103 +1,75 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { freshSession, liveAttach, splitContinue, seedSession, codexSeed, restoreCmd, asSeed } from "../ui/session.ts";
+import { asSeed, codexContinue, continuePlan, nativeSeed, restoreCmd } from "../ui/session.ts";
 
-const worker = "abcdef12-1111-4111-8111-111111111111";
-const human = "12345678-2222-4222-8222-222222222222";
-const older = "87654321-3333-4333-8333-333333333333";
-const sessions = [worker, human, older].map((id) => ({ id, title: id }));
+const sid = "12345678-2222-4222-8222-222222222222";
+const launch = { home: "C:\\한글 & state", cwd: "C:\\project space", args: ["--profile", "review", "--sandbox", "read-only"] };
 
-test("Codex 칸은 Claude ID와 섞지 않고 자신의 ID·상태 폴더·작업 폴더를 복원", () => {
-  const session = { id: human, home: "C:\\한글 & ' ; $\\codex", cwd: "C:\\project space" };
-  const seed = restoreCmd({ agent: "codex", codex: { run: "run-a", session, failed: false } }, worker);
-  assert.deepEqual(seed.codex, session);
+test("Codex 이어가기는 ID 없이 폴더와 명시 옵션만 전달", () => {
+  const seed = codexContinue({ ...launch, id: sid });
+  const decoded = JSON.parse(Buffer.from(seed.cmd.split(" ")[2], "base64url").toString());
+  assert.deepEqual(decoded, launch);
+  assert.equal("id" in decoded, false);
   assert.equal(seed.auto, true);
-  assert.match(seed.cmd, /^chiispace-cli\.exe codex-resume [A-Za-z0-9_-]+$/);
-  assert.deepEqual(JSON.parse(Buffer.from(seed.cmd.split(" ")[2], "base64url").toString()), session);
-  assert.equal(seedSession(seed.cmd), null);
-  assert.equal(restoreCmd({ agent: "claude" }, worker).cmd, `claude --resume ${worker}`);
+  assert.match(codexContinue(launch, true, true).cmd, / --picker$/);
 });
 
-test("새 Codex 실행은 이전 칸의 ID를 추측하지 않고 복원 실패는 명령만 보관", () => {
-  assert.deepEqual(restoreCmd({ agent: "codex", codex: { run: "run-b", session: null, failed: false } }, human),
-    { cmd: "codex", auto: true });
-  const session = { id: older, home: "C:\\codex", cwd: "C:\\project" };
-  assert.equal(restoreCmd({ agent: null, proc: "powershell", codex: { run: "run-a", session, failed: true } }).auto, false);
-  assert.throws(() => codexSeed({ ...session, id: "invalid; exit" }));
-  assert.throws(() => codexSeed({ ...session, cwd: "relative" }));
-  assert.equal(restoreCmd({ agent: "claude", codex: { run: "old", session, failed: true } }, human).cmd, `claude --resume ${human}`);
+test("Claude와 Codex 모두 자체 최근 대화 이어가기를 저장", () => {
+  assert.equal(restoreCmd({ agent: "claude" }).cmd, "claude --continue");
+  assert.equal(restoreCmd({ agent: "codex" }).cmd, "codex resume --last");
+  assert.equal(restoreCmd({ agent: null, proc: "claude.exe" }).cmd, "claude --continue");
+  assert.equal(restoreCmd({ agent: null, proc: "codex.exe" }).cmd, "codex resume --last");
+  assert.equal(restoreCmd({ agent: null, proc: "powershell" }), null);
+  assert.deepEqual(restoreCmd({ agent: null, proc: "npm" }), { cmd: "npm" });
 });
 
-test("깨진 복원 항목 하나를 유효한 명령으로 취급하지 않음", () => {
-  for (const bad of [null, 123, {}, { auto: true }, { cmd: false }]) assert.equal(asSeed(bad), null);
-  assert.deepEqual(asSeed("codex"), { cmd: "codex" });
+test("현재 Codex 실행 옵션과 실패 상태 유지, 외부 원격 실행 자동 복원 금지", () => {
+  const binding = { run: "a", launch, failed: false };
+  assert.deepEqual(restoreCmd({ agent: "codex", codex: binding }).codexLaunch, launch);
+  assert.equal(restoreCmd({ agent: null, codex: { ...binding, failed: true } }).auto, false);
+  assert.equal(restoreCmd({ agent: "claude", codex: binding }).cmd, "claude --continue");
+  assert.equal(restoreCmd({ agent: "codex", codex: { run: "b", failed: false } }).auto, false);
 });
 
-test("최신 백그라운드 대화를 제외하고 사용자 대화 하나만 복원", () => {
-  const result = splitContinue(["%1", "%2"], sessions, new Set(), ["ABCDEF12"]);
-  assert.equal(result["%1"].seed.cmd, `claude --resume ${human}`);
-  assert.match(result["%2"].seed.cmd, /^claude --session-id /);
-  assert.notEqual(result["%2"].sid, human);
-});
-
-test("사용자 대화가 이미 다른 칸에 있으면 더 오래된 대화를 추측하지 않음", () => {
-  const result = splitContinue(["%1"], sessions, new Set([human]), [worker]);
-  assert.match(result["%1"].seed.cmd, /^claude --session-id /);
-  assert.notEqual(result["%1"].sid, older);
-});
-
-test("후보가 없거나 백그라운드 대화뿐이면 칸마다 고유한 새 대화", () => {
-  for (const list of [[], [{ id: worker }]]) {
-    const result = splitContinue(["%1", "%2"], list, new Set(), [worker]);
-    const ids = Object.values(result).map(({ seed, sid }) => {
-      assert.match(seed.cmd, /^claude --session-id /);
-      assert.equal(seed.auto, true);
-      assert.equal(seedSession(seed.cmd), sid);
-      return sid;
-    });
-    assert.equal(new Set(ids).size, 2);
+test("구형 ID 복원을 continue로 일회성 전환하고 임의 명령은 보존", () => {
+  for (const cmd of ["claude", "claude --continue", `claude --resume ${sid}`, `claude --session-id ${sid}`])
+    assert.equal(nativeSeed({ cmd, auto: false }, true).cmd, "claude --continue");
+  assert.equal(nativeSeed({ cmd: "claude --continue", auto: false }, true).auto, true);
+  assert.equal(nativeSeed({ cmd: "claude --continue", auto: false }).auto, false);
+  const seed = nativeSeed({ cmd: "old", auto: false, codex: { ...launch, id: sid, resumable: false } }, true);
+  assert.deepEqual(seed.codexLaunch, launch);
+  assert.equal(seed.auto, true);
+  assert.equal(nativeSeed({ cmd: "codex" }, true).cmd, "codex resume --last");
+  for (const cmd of ["claude attach abcd1234", "claude --model special", "npm run deploy"]) {
+    const original = { cmd, auto: false };
+    assert.deepEqual(nativeSeed(original, true), original);
   }
 });
 
-test("새 대화 탐색에서 워커와 기존 대화와 다른 칸의 대화를 제외", () => {
-  assert.equal(freshSession(sessions, ["ABCDEF12"], new Set([older]), new Set())?.id, human);
-  assert.equal(freshSession(sessions, [worker], new Set([older]), new Set([human])), undefined);
-  assert.equal(freshSession([{ id: worker }], [worker], new Set(), new Set()), undefined);
+test("같은 폴더의 중복 이어가기는 새 대화 대신 선택 목록", () => {
+  const result = continuePlan({ a: "claude --continue", b: "claude --continue", c: "codex", d: "codex" },
+    { a: "C:/Repo", b: "c:\\repo\\", c: "C:/Repo", d: "c:/repo" }, true);
+  assert.equal(result.a.cmd, "claude --continue");
+  assert.equal(result.b.cmd, "claude --resume");
+  assert.equal(result.c.cmd, "codex resume --last");
+  assert.equal(result.d.cmd, "codex resume");
+  assert.match(result.b.notice, /선택/);
+  assert.ok(Object.values(result).every(s => s.auto === true && !s.cmd.includes("--session-id")));
 });
 
-test("명시적으로 지정된 백그라운드 대화는 attach 복원을 유지", () => {
-  assert.deepEqual(liveAttach({ cmd: `claude --resume ${worker}`, auto: true }, ["ABCDEF12"]), {
-    cmd: "claude attach abcdef12", auto: true,
-  });
-  const seed = { cmd: `claude --resume ${human}`, auto: true };
-  assert.deepEqual(liveAttach(seed, [worker]), seed);
+test("다른 작업 폴더는 각각 continue, 옵션 있는 중복 칸도 picker", () => {
+  const result = continuePlan({ a: codexContinue(launch), b: codexContinue(launch), c: "codex" },
+    { a: null, b: null, c: "C:/other" });
+  assert.ok(!result.a.cmd.endsWith("--picker"));
+  assert.match(result.b.cmd, /--picker$/);
+  assert.equal(result.c.cmd, "codex resume --last");
+  assert.deepEqual(result.b.codexLaunch.args, launch.args);
 });
 
-test("탐색 중 워커가 종료돼도 그 파일을 사용자 대화로 재분류하지 않음", () => {
-  const seen = new Set();
-  assert.equal(freshSession([{ id: worker }], [worker], seen, new Set()), undefined);
-  assert.equal(freshSession([{ id: worker }], [], seen, new Set()), undefined);
-  assert.equal(freshSession(sessions, [], seen, new Set())?.id, human);
-});
-
-test("다른 창이 열어 둔 대화는 --continue 대체 후보에서 뺀다", () => {
-  // 사용자가 이 폴더에서 claude 를 켜 두고 일을 시키면 그 대화가 늘 가장 최근이라,
-  // 안 빼면 켤 때마다 그 대화를 뺏으려 들다 거절당해 그 칸이 죽는다.
-  const result = splitContinue(["%1"], sessions, new Set(), [worker], [human]);
-  assert.match(result["%1"].seed.cmd, /^claude --session-id /);
-  assert.notEqual(result["%1"].sid, human);
-  assert.notEqual(result["%1"].sid, older);
-});
-
-test("다른 창이 붙들고 있는 대화는 정체를 지키되 실행하지 않는다", () => {
-  // `attach` 는 데몬에 맡긴 대화에만 통한다. 명령을 바꾸면 이 칸이 무엇이었는지를
-  // 잃으므로 명령은 그대로 두고 실행만 미룬다 — 저쪽 창을 닫고 Enter 하면 열린다.
-  const seed = { cmd: `claude --resume ${human}`, auto: true };
-  assert.deepEqual(liveAttach(seed, [], [human]), { cmd: seed.cmd, auto: false });
-  // 살아 있는 것이 백그라운드면 여전히 데려온다.
-  assert.deepEqual(liveAttach({ cmd: `claude --resume ${worker}`, auto: true }, [worker], [worker]), {
-    cmd: "claude attach abcdef12", auto: true,
-  });
-  // 아무 데서도 안 열려 있으면 그대로 이어 연다.
-  assert.deepEqual(liveAttach(seed, [], [worker]), seed);
+test("깨진 폴더·인자와 구형 불완전 메타데이터는 자동 실행하지 않음", () => {
+  assert.throws(() => codexContinue({ ...launch, cwd: "relative" }));
+  assert.throws(() => codexContinue({ ...launch, args: ["line\nbreak"] }));
+  assert.equal(nativeSeed({ cmd: "old", codex: { ...launch, home: "bad" } }, true).auto, false);
+  assert.equal(nativeSeed({ cmd: "chiispace-cli.exe codex-resume invalid" }, true).auto, false);
+  for (const value of [null, 1, {}, { cmd: false }]) assert.equal(asSeed(value), null);
 });

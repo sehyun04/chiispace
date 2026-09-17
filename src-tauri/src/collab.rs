@@ -60,6 +60,7 @@ pub struct Queue {
 pub struct CodexBinding {
     pub run: String,
     pub session: Option<crate::codex_session::Session>,
+    pub launch: Option<crate::codex_session::Launch>,
     pub failed: bool,
 }
 
@@ -269,6 +270,9 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
         } else { None };
         let mut q = collab.0.lock().unwrap();
         // 같은 pane ID라도 다시 실행된 에이전트에 과거 작업을 넘기지 않는다.
+        let launch = params.get("launch").filter(|v| !v.is_null())
+            .map(|v| serde_json::from_value::<crate::codex_session::Launch>(v.clone())).transpose()?;
+        if let Some(l) = &launch { l.validate()?; }
         q.closed(pane);
         let token = q.next("agent");
         q.agents.insert(
@@ -280,7 +284,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             },
         );
         if harness == "codex" {
-            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, failed: false });
+            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, launch, failed: false });
         }
         return Ok(json!({"token": token}));
     }
@@ -300,7 +304,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             let mut binding = q.codex.get(pane).cloned();
             if let Some(b) = &mut binding { b.failed = params["failed"].as_bool().unwrap_or(false); }
             q.closed(pane);
-            if let Some(b) = binding.filter(|b| b.failed && b.session.is_some()) { q.codex.insert(pane.into(), b); }
+            if let Some(b) = binding.filter(|b| b.failed && (b.session.is_some() || b.launch.is_some())) { q.codex.insert(pane.into(), b); }
             Ok(json!({}))
         }
         "chiispace.codex_session" => {
@@ -308,7 +312,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             let session: crate::codex_session::Session = serde_json::from_value(params["session"].clone())?;
             session.validate()?;
             q.codex.insert(pane.into(), CodexBinding {
-                run: token.into(), session: Some(session), failed: false,
+                run: token.into(), session: Some(session), launch: None, failed: false,
             });
             Ok(json!({}))
         }

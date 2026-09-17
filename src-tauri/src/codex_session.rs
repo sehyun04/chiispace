@@ -12,6 +12,57 @@ pub struct Session {
     pub resumable: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launch {
+    pub home: String,
+    pub cwd: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl Launch {
+    pub fn capture(args: &[String]) -> Result<Self> {
+        let home = std::env::var_os("CODEX_HOME").map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("USERPROFILE").map(|p| std::path::PathBuf::from(p).join(".codex")))
+            .ok_or_else(|| anyhow::anyhow!("Codex 상태 폴더를 찾지 못했습니다"))?;
+        let base = std::env::current_dir()?;
+        let mut cwd = base.clone();
+        let mut options = restore_options(args);
+        let mut i = 0;
+        while i + 1 < options.len() {
+            if matches!(options[i].as_str(), "--cd" | "-C") {
+                // 상대 -C를 재시작 때 다시 더하지 않고 중복 이어가기 판정에도 실제 폴더를 쓴다.
+                cwd = std::path::absolute(base.join(&options[i + 1]))?;
+                options.drain(i..i + 2);
+            } else {
+                i += 1;
+            }
+        }
+        let launch = Self {
+            home: std::path::absolute(home)?.to_string_lossy().into_owned(),
+            cwd: cwd.to_string_lossy().into_owned(),
+            args: options,
+        };
+        launch.validate()?;
+        Ok(launch)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        validate_options(&self.home, &self.cwd, &self.args)
+    }
+
+    pub fn args(&self, picker: bool) -> Vec<String> {
+        let mut args = self.args.clone();
+        args.push("resume".into());
+        if !picker { args.push("--last".into()); }
+        args
+    }
+}
+
+impl From<Session> for Launch {
+    fn from(s: Session) -> Self { Self { home: s.home, cwd: s.cwd, args: s.args } }
+}
+
 fn saved_by_default() -> bool {
     true
 }
@@ -29,21 +80,21 @@ pub fn valid_id(id: &str) -> bool {
 
 impl Session {
     pub fn validate(&self) -> Result<()> {
-        if !valid_id(&self.id)
-            || self.home.len() > 32768
-            || self.cwd.len() > 32768
-            || !std::path::Path::new(&self.home).is_absolute()
-            || !std::path::Path::new(&self.cwd).is_absolute()
-            || self.home.contains(['\0', '\r', '\n'])
-            || self.cwd.contains(['\0', '\r', '\n'])
-        {
+        if !valid_id(&self.id) {
             bail!("Codex 복원 정보가 올바르지 않습니다");
         }
-        if self.args.len() > 128 || restore_options(&self.args) != self.args {
-            bail!("Codex 복원 옵션이 올바르지 않습니다");
-        }
-        Ok(())
+        validate_options(&self.home, &self.cwd, &self.args)
     }
+}
+
+fn validate_options(home: &str, cwd: &str, args: &[String]) -> Result<()> {
+    if [home, cwd].iter().any(|p| p.len() > 32768 || !std::path::Path::new(p).is_absolute() || p.contains(['\0', '\r', '\n'])) {
+        bail!("Codex 실행 폴더가 올바르지 않습니다");
+    }
+    if args.len() > 128 || restore_options(args) != args {
+        bail!("Codex 복원 옵션이 올바르지 않습니다");
+    }
+    Ok(())
 }
 
 pub fn restore_options(args: &[String]) -> Vec<String> {
@@ -69,6 +120,8 @@ pub fn restore_options(args: &[String]) -> Vec<String> {
                 | "-a"
                 | "--add-dir"
                 | "--local-provider"
+                | "--cd"
+                | "-C"
         ) {
             let value = attached.or_else(|| args.get(i + 1).map(String::as_str));
             if let Some(value) =
@@ -99,7 +152,7 @@ pub fn restore_options(args: &[String]) -> Vec<String> {
             if attached.is_none() {
                 i += 1;
             }
-        } else if matches!(flag, "--cd" | "-C" | "--image" | "-i") && attached.is_none() {
+        } else if matches!(flag, "--image" | "-i") && attached.is_none() {
             // 원문 프롬프트·첨부·인증이 들어갈 수 있는 config 값을 세션 파일에 복제하지 않는다.
             i += 1;
         }
@@ -131,6 +184,19 @@ fn safe_config(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_continuation_preserves_flags_without_selecting_an_id() {
+        let launch = Launch::capture(&[
+            "--profile".into(), "review".into(), "--sandbox".into(), "read-only".into(),
+            "-C".into(), "../project".into(), "private prompt".into(),
+            "-c".into(), "mcp_servers.secret.env.API_KEY='private'".into(),
+        ]).unwrap();
+        assert_eq!(launch.args(false), ["--profile", "review", "--sandbox", "read-only", "resume", "--last"]);
+        assert_eq!(std::path::Path::new(&launch.cwd), std::path::absolute(std::env::current_dir().unwrap().join("../project")).unwrap());
+        assert_eq!(launch.args(true).last().unwrap(), "resume");
+        assert!(!serde_json::to_string(&launch).unwrap().contains("private"));
+    }
 
     #[test]
     fn ids_and_shell_sensitive_paths_are_validated_and_encoded() {

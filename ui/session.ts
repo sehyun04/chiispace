@@ -1,206 +1,94 @@
-/** 칸 하나가 무엇을 돌고 있고, 그것을 어떻게 되살리는가.
- *
- *  세션 파일에 남길 값과 그 판정이 여기 모여 있다. 무엇을 저장할지 바꾸려면 이
- *  파일만 보면 된다 — 화면이 그것을 어떻게 그리는지와는 상관이 없다. */
-
-/** 이 컴퓨터에서 띄울 수 있는 셸 하나. Rust 의 `shells` 가 찾아 준다.
- *
- *  세션에 남기는 것은 `path` 다. `id` 는 화면에서 고를 때만 쓴다 — 같은 이름이
- *  가리키는 실행 파일이 컴퓨터마다 다르고, 나중에 이름을 고치면 저장된 탭이
- *  전부 짝을 잃는다. */
 export type ShellKind = { id: string; name: string; path: string };
-
+export type CodexLaunch = { home: string; cwd: string; args?: string[] };
+export type CodexSession = CodexLaunch & { id: string; resumable?: boolean };
 export type PaneStat = {
-  id: string;
-  proc: string | null;
-  agent: string | null;
-  busy: boolean;
-  working?: boolean;
-  cwd: string | null;
-  codex?: { run: string; session: CodexSession | null; failed: boolean } | null;
+  id: string; proc: string | null; agent: string | null; busy: boolean; working?: boolean; cwd: string | null;
+  codex?: { run: string; session?: CodexSession | null; launch?: CodexLaunch | null; failed: boolean } | null;
 };
+export type Seed = { cmd: string; auto?: boolean; cwd?: string; notice?: string; codex?: CodexSession; codexLaunch?: CodexLaunch };
 
-// 프로세스가 열려 있는 상태와 출력이 흐르는 작업 상태를 분리해야 대기 중에는 멈춘다.
 export function isAgentWorking(p?: PaneStat): boolean {
-  if (p?.agent !== "claude" && p?.agent !== "codex") return false;
-  return !!p.working;
+  return (p?.agent === "claude" || p?.agent === "codex") && !!p.working;
 }
 
-/** 이 pane 을 되살리려면 무엇을 쳐야 하는가.
- *
- *  `proc` 만 보면 안 된다. 엔진은 전경 프로세스 이름과 에이전트를 따로 판정하는데,
- *  claude 처럼 자기 프로세스 트리를 여러 겹 두는 것은 이름 쪽이 비고 에이전트 쪽만
- *  잡히는 때가 있다. 그때 `proc` 만 보면 claude 를 켜 둔 채로 껐는데도 아무것도
- *  기억하지 못한다.
- *
- *  claude 는 이전 대화를 이어 여는 방법이 따로 있다. 세션을 되돌리려는 참이니
- *  그쪽을 얹는다 — 실행하지는 않으므로 원치 않으면 지우면 된다. */
-export type CodexSession = { id: string; home: string; cwd: string; args?: string[]; resumable?: boolean };
-export type Seed = { cmd: string; auto?: boolean; codex?: CodexSession };
+const absolute = (v: unknown): v is string => typeof v === "string" && v.length <= 32768
+  && !/[\0\r\n]/.test(v) && /^(?:[A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(v);
 
-export function codexSeed(session: CodexSession, auto = true): Seed {
-  const absolute = (value: unknown) => typeof value === "string" && value.length <= 32768
-    && !/[\0\r\n]/.test(value) && /^(?:[A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(value);
-  if (!session || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(session.id)
-    || !absolute(session.home) || !absolute(session.cwd)
-    || (session.args !== undefined && (!Array.isArray(session.args) || session.args.length > 128
-      || session.args.some((s) => typeof s !== "string" || s.length > 32768 || /[\0\r\n]/.test(s)))))
-    throw new Error("잘못된 Codex 복원 정보");
-  const bytes = new TextEncoder().encode(JSON.stringify(session));
+export function codexContinue(launch: CodexLaunch, auto = true, picker = false): Seed {
+  if (!launch || !absolute(launch.home) || !absolute(launch.cwd)
+    || (launch.args !== undefined && (!Array.isArray(launch.args) || launch.args.length > 128
+      || launch.args.some(s => typeof s !== "string" || s.length > 32768 || /[\0\r\n]/.test(s)))))
+    throw new Error("잘못된 Codex 실행 정보");
+  // 대화 ID·원문을 넘기지 않는다. 셸 종류와 무관하게 옵션·폴더만 안전하게 전달한다.
+  const data: CodexLaunch = { home: launch.home, cwd: launch.cwd, args: launch.args ?? [] };
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
   let raw = "";
   for (const byte of bytes) raw += String.fromCharCode(byte);
   const encoded = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return { cmd: `chiispace-cli.exe codex-resume ${encoded}`, auto, codex: session };
+  return { cmd: `chiispace-cli.exe codex-continue ${encoded}${picker ? " --picker" : ""}`, auto, cwd: data.cwd, codexLaunch: data };
 }
 
-export function restoreCmd(p: PaneStat, sid?: string): Seed | null {
-  const otherAgent = p.agent && p.agent !== "codex";
-  if (p.codex?.session && !otherAgent) return codexSeed(p.codex.session, !p.codex.failed);
-  if (p.codex && !p.codex.failed && !otherAgent) return { cmd: "codex", auto: true };
-  // 에이전트는 이어 열어 준다. 이건 대화를 불러오는 것뿐이라 부작용이 없고,
-  // 명령만 쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다.
-  //
-  // 세션 ID 를 알면 그것을 짚는다. --continue 는 "그 폴더의 가장 최근" 이라
-  // pane 이 여럿이면 전부 같은 대화로 몰리고, 다른 창에서 claude 를 돌리면
-  // 엉뚱한 것이 열린다. 못 찾았을 때만 --continue 로 물러선다.
-  if (p.agent === "claude")
-    return { cmd: sid ? `claude --resume ${sid}` : "claude --continue", auto: true };
-  if (p.agent) return { cmd: p.agent, auto: true };
-  // 그 밖의 명령은 쳐 놓기만 한다. 빌드나 배포가 저 혼자 다시 도는 건 곤란하다.
+export function restoreCmd(p: PaneStat): Seed | null {
+  if (p.codex && (!p.agent || p.agent === "codex")) {
+    const launch = p.codex.launch;
+    if (launch) return codexContinue(launch, !p.codex.failed);
+    // 외부 remote와 구형 래퍼의 ID를 로컬 최근 대화로 오인하지 않는다.
+    return { cmd: "codex resume", auto: false };
+  }
+  const agent = p.agent ?? p.proc?.replace(/\.exe$/i, "").toLowerCase();
+  const cwd = absolute(p.cwd) ? p.cwd : undefined;
+  if (agent === "claude") return { cmd: "claude --continue", auto: true, cwd };
+  if (agent === "codex") return { cmd: "codex resume --last", auto: true, cwd };
+  if (p.agent) return { cmd: p.agent, auto: true, cwd };
   if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return { cmd: p.proc };
   return null;
 }
 
-/** 저장된 복원 명령에서 claude 세션 ID 를 꺼낸다. */
-export const seedSession = (cmd: string): string | null =>
-  /--(?:resume|session-id)\s+([0-9a-f-]{36})/i.exec(cmd)?.[1] ?? null;
+export const asSeed = (v: unknown): Seed | null =>
+  typeof v === "string" ? { cmd: v }
+    : v && typeof v === "object" && "cmd" in v && typeof v.cmd === "string" ? v as Seed : null;
 
-/** v4 UUID. `crypto.randomUUID` 는 보안 컨텍스트에서만 있어서 웹뷰가 앱을 어떤
- *  주소로 띄우느냐에 따라 없을 수 있다. 있으면 그걸 쓰고 없으면 직접 만든다 —
- *  여기서 던지면 그 칸이 아예 안 열린다. */
-function uuid(): string {
-  const c = globalThis.crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
-  const b = new Uint8Array(16);
-  c.getRandomValues(b);
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
-/** 살아 있는 백그라운드 대화는 `--resume` 이 아니라 `attach` 로 붙는다.
- *
- *  claude 는 대화를 데몬에 맡겨 백그라운드로 계속 돌릴 수 있다. 그렇게 살아
- *  있는 대화에 `--resume` 을 걸면 열어 주지 않고 거절 문구만 남긴다 — 한 대화에
- *  두 프로세스가 붙어 같은 기록에 쓰게 되기 때문이다. 그러면 그 칸은 셸 프롬프트
- *  앞에 멈춰 서고, 사용자 눈에는 "복원이 안 됐다"로 보인다. 실제로 그랬다.
- *
- *  `attach` 는 그 살아 있는 대화를 이 칸으로 데려온다. 원래 하려던 일이 그것이다.
- *
- *  판정을 저장할 때가 아니라 **열 때** 한다. 껐다 켜는 사이에 그 대화가 백그라운드로
- *  갔을 수도, 멈췄을 수도 있다 — 저장 시점의 판단은 켤 때쯤이면 이미 낡았다. */
-export function liveAttach(seed: Seed, bg: string[], live: readonly string[] = []): Seed {
-  const sid = seedSession(seed.cmd);
-  if (!sid) return seed;
-  if (isBackgroundSession(sid, bg))
-    return { ...seed, cmd: `claude attach ${sid.slice(0, 8).toLowerCase()}` };
-  // 다른 창이 전경으로 붙들고 있으면 데려올 길이 없다. `attach` 는 데몬에 맡긴
-  // 대화에만 통하고, `--resume` 은 거절당하며 그 칸을 죽인다. 그렇다고 다른
-  // 대화로 바꿔 열면 이 칸이 무엇이었는지를 잃는다 — 정체는 그대로 두고
-  // **실행만 안 한다.** 사용자가 저쪽 창을 닫고 Enter 한 번이면 그대로 열린다.
-  if (isLiveSession(sid, live)) return { ...seed, auto: false };
+export function nativeSeed(v: unknown, migrate = false): Seed | null {
+  const seed = asSeed(v);
+  if (!seed) return null;
+  if (seed.codexLaunch || seed.codex) {
+    try { return codexContinue(seed.codexLaunch ?? seed.codex!, migrate || seed.auto !== false); }
+    catch { return { cmd: "codex resume", auto: false, notice: "저장된 실행 정보가 잘못되어 대화를 직접 선택해야 합니다." }; }
+  }
+  const cwd = absolute(seed.cwd) ? seed.cwd : undefined;
+  if (/^claude(?:\s+(?:--continue|-c|--resume(?:\s+[0-9a-f-]{36})?|--session-id\s+[0-9a-f-]{36}))?$/i.test(seed.cmd))
+    return { cmd: "claude --continue", auto: migrate || seed.auto !== false, cwd };
+  if (/^codex(?:\s+resume(?:\s+(?:--last|[0-9a-f-]{36}))?)?$/i.test(seed.cmd))
+    return { cmd: "codex resume --last", auto: migrate || seed.auto !== false, cwd };
+  if (/^chiispace-cli\.exe\s+codex-resume\b/.test(seed.cmd))
+    return { cmd: "codex resume", auto: false, cwd };
   return seed;
 }
 
-/** 짧은 id(앞 8자)로 비교한다. 백그라운드 명부의 키가 그 길이라서다. */
-const same = (list: readonly string[], sid: string) =>
-  list.some((id) => id.slice(0, 8).toLowerCase() === sid.slice(0, 8).toLowerCase());
-
-export function isBackgroundSession(sid: string, bg: readonly string[]): boolean {
-  return same(bg, sid);
-}
-
-/** 다른 창(터미널)이 지금 열어 두고 있는 대화인가.
- *
- *  백그라운드 대화와 달리 데려올 방법이 없어서 **후보에서 빼는 것**이 유일한 대처다.
- *  이걸 안 걸러서 사용자가 매번 겪은 고리가 있다: 이 레포에서 claude 를 켜 두고
- *  일을 시키면 그 대화 파일이 계속 갱신되니 "그 폴더의 가장 최근"이 늘 그것이고,
- *  `--continue` 를 대신할 대화를 고를 때마다 **사용자가 지금 쓰고 있는 대화**가
- *  뽑힌다. 그 칸은 뜨자마자 거절당해 죽고, 앱을 켤 때마다 그대로 되풀이된다. */
-export function isLiveSession(sid: string, live: readonly string[]): boolean {
-  return same(live, sid);
-}
-
-// 데몬이 만든 파일도 새 대화로 보이므로, 사용자 칸에 붙이기 전에 걸러야 한다.
-//
-// **여기에는 `isLiveSession` 을 걸면 안 된다.** 이 탐색이 찾는 것은 방금 이 칸에서
-// 뜬 claude 의 대화이고, 그 대화는 당연히 지금 살아 있다 — 살아 있다고 빼 버리면
-// 손으로 친 claude 는 영영 id 가 안 붙고 저장이 `--continue` 로 떨어진다.
-// 남의 대화는 다른 방법으로 막는다: 탐색을 시작할 때 이미 있던 것을 `seen` 에
-// 담아 두고 그 뒤에 **새로 생긴 것만** 본다.
-export function freshSession<T extends { id: string }>(
-  sessions: readonly T[],
-  bg: readonly string[],
-  seen: Set<string>,
-  taken: ReadonlySet<string>,
-): T | undefined {
-  // 탐색 중 워커가 끝나 명부에서 빠져도 그 파일이 사용자 대화로 바뀌지는 않는다.
-  for (const s of sessions) if (isBackgroundSession(s.id, bg)) seen.add(s.id);
-  return sessions.find((s) => !seen.has(s.id) && !taken.has(s.id));
-}
-
-/** 세션 ID 를 모르는 claude 칸들을 서로 다른 대화로 갈라 준다.
- *
- *  저장된 `claude --continue` 를 그대로 쳐서는 안 된다. `--continue` 는 "그 폴더의
- *  가장 최근"이라 그런 칸이 둘이면 **둘 다 같은 대화로 열린다** — 사용자 눈에는
- *  복원이 고장 난 것이고, 게다가 한 대화에 두 프로세스가 붙는다. 실제로 그렇게 열렸다.
- *
- *  백그라운드 작업이 최신 파일을 계속 갱신하므로 그 대화는 후보에서 뺀다.
- *  남은 것 중 가장 최근 하나만 이어 열고 id 를 붙여 다음 저장부터 명확히 짚는다.
- *  그 대화를 다른 칸이 쓰거나 **다른 창이 열어 두고 있으면** 더 오래된 것을 추측하지
- *  않고 새 대화로 연다. 사용자가 이 폴더에서 claude 를 켜 두고 일을 시키면 그 대화가
- *  늘 가장 최근이라, 이걸 안 보면 켤 때마다 사용자가 쓰는 대화를 뺏으려 들다 거절당해
- *  그 칸이 죽는다 — 앱을 켤 때마다 재현되던 것이 이것이다.
- *
- *  나머지 칸은 새 대화로 연다. 남은 대화 중에서 골라 주고 싶지만 어느 칸이 어느
- *  것이었는지는 알 길이 없고, 잘못 짚으면 다른 창이 쓰고 있는 대화를 열려다 칸이
- *  뜨자마자 죽는다. 모르면 새로 여는 편이 낫다 — 남의 것을 뺏지 않는다.
- *
- *  그때 **id 를 우리가 정해 준다**(`--session-id`). 그러지 않으면 그 칸이 무슨
- *  대화인지 알아내려고 "방금 새로 생긴 대화 파일"을 뒤져야 하는데, 그 사이 다른
- *  창에서 claude 를 띄우면 그쪽 대화를 이 칸의 것으로 착각한다 — 실제로 한 칸이
- *  남의 대화를 물어 엉뚱한 이름이 떴다. 우리가 낸 id 는 틀릴 수가 없다. */
-export function splitContinue(
-  panes: string[],
-  sessions: readonly { id: string }[],
-  taken: Set<string>,
-  bg: readonly string[],
-  live: readonly string[] = [],
-): Record<string, { seed: Seed; sid?: string }> {
-  const out: Record<string, { seed: Seed; sid?: string }> = {};
-  const newest = sessions.find((s) => !isBackgroundSession(s.id, bg))?.id;
-  // 그 대화가 다른 창에 열려 있으면 **더 오래된 것으로 물러서지 않는다.** 워커
-  // 파일과 달리 그건 남의 것이 아니라 "지금 못 쓰는 것"이라, 건너뛰고 고른 다음
-  // 것이 이 칸의 대화라는 근거가 없다. 이미 다른 칸이 가져간 때와 같이 다룬다.
-  const free = !!newest && !taken.has(newest) && !isLiveSession(newest, live);
-  let first = free ? newest : undefined;
-  for (const id of panes) {
-    if (first) {
-      out[id] = { seed: { cmd: `claude --resume ${first}`, auto: true }, sid: first };
-      first = undefined;
-      continue;
+export function continuePlan(seeds: Record<string, unknown>, roots: Record<string, string | null>, migrate = false): Record<string, Seed> {
+  const out: Record<string, Seed> = {};
+  const used = new Set<string>();
+  for (const [id, value] of Object.entries(seeds)) {
+    const seed = nativeSeed(value, migrate);
+    if (!seed) continue;
+    const agent = seed.codexLaunch || seed.cmd === "codex resume --last" ? "codex"
+      : seed.cmd === "claude --continue" ? "claude" : null;
+    const root = seed.cwd ?? roots[id] ?? "";
+    const key = [agent, root].join("|").replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+    if (agent && seed.auto !== false) {
+      // continue는 칸이 아닌 폴더 기준이다. 나머지 칸에 같은 대화를 자동으로 중복 연결하지 않는다.
+      if (used.has(key)) {
+        const picker = seed.codexLaunch ? codexContinue(seed.codexLaunch, true, true)
+          : { ...seed, cmd: agent === "claude" ? "claude --resume" : "codex resume" };
+        out[id] = { ...picker, notice: "같은 폴더의 다른 칸이 최근 대화를 이어갑니다. 이 칸에서는 대화를 선택하세요." };
+        continue;
+      }
+      used.add(key);
     }
-    const fresh = uuid();
-    out[id] = { seed: { cmd: `claude --session-id ${fresh}`, auto: true }, sid: fresh };
+    out[id] = seed;
   }
   return out;
 }
-
-/** 예전 세션은 명령을 문자열로만 적어 두었다. */
-export const asSeed = (v: unknown): Seed | null =>
-  typeof v === "string" ? { cmd: v }
-    : v && typeof v === "object" && "cmd" in v && typeof v.cmd === "string" ? (v as Seed) : null;
 
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 export const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);

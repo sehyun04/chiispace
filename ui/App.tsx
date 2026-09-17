@@ -14,15 +14,10 @@ import {
   faceUrl,
 } from "./roster";
 import {
-  asSeed,
-  freshSession,
   isAgentWorking,
   label,
-  liveAttach,
   restoreCmd,
-  codexSeed,
-  seedSession,
-  splitContinue,
+  continuePlan,
   type PaneStat,
   type ShellKind,
   type Seed,
@@ -81,30 +76,18 @@ export default function App() {
   // 프로세스 자체는 앱과 함께 죽었고, 죽은 셸을 흉내 낸 화면을 복원하면
   // 사용자가 그게 살아 있다고 믿는다.
   const [seeds, setSeeds] = useState<Record<string, Seed>>({});
-  // 복원한 칸에 먼저 찍어 줄 지난 대화. claude 는 `--resume` 할 때 대화를 처음부터
-  // 다시 찍지 않아서, 그 칸은 위로 올려다봐도 스크롤백이 비어 있다. 세션에 남기지
-  // 않고 켤 때마다 다시 읽는다 — 대화는 그 사이에도 자라고, 저장 파일에 넣기엔 크다.
-  const [seedHead, setSeedHead] = useState<Record<string, string>>({});
   // pane 이 무엇을 돌리고 있었는지를 누적해 둔다. 순간 스냅샷(stat)으로만
   // 계산하면 안 된다 — 앱을 끌 때 PTY 가 먼저 사라지면 pane_status 가 빈
   // 목록을 주고, 그 순간 저장이 돌면서 되살릴 정보가 통째로 지워진다.
   // 배치(tabs)는 그대로라 배치만 남고 명령만 날아간다.
   const procs = useRef<Record<string, Seed>>({});
-  // pane 이 어느 claude 대화를 붙들고 있는지. 한 번 정해지면 그대로 둔다 —
-  // 그 pane 의 claude 가 계속 같은 파일에 쓰고 있으므로 다시 고를 이유가 없다.
-  const sessionOf = useRef<Record<string, string>>({});
-  // 그 칸에서 에이전트를 실제로 본 적이 있는가. "아직 안 떴다"와 "떴다가 내려갔다"를
-  // 가르는 데 쓴다 — 스냅샷만으로는 둘이 똑같아 보인다.
-  const sawAgent = useRef<Record<string, boolean>>({});
   // 그 칸에서 무엇이든 돌고 있는 것을 본 적이 있는가. 복원 명령을 언제 놓아도
   // 되는지가 여기 달려 있다 — 켠 직후의 빈 셸은 "아직 안 떴다"이지 "끝났다"가 아니다.
   const sawRun = useRef<Record<string, boolean>>({});
   // 연달아 몇 번이나 비어 있었나. 끌 때는 에이전트가 PTY 보다 먼저 죽어서
   // 한 번의 스냅샷으로는 종료 중인지 명령이 끝난 것인지 가릴 수 없다.
   const idleRuns = useRef<Record<string, number>>({});
-  // 그 대화에서 마지막으로 시킨 일. 여러 pane 에 claude 를 띄워 두면 헤더가
-  // 전부 "claude" 라 어느 쪽이 무슨 작업이었는지 알 수 없다.
-  const [sessionTitle, setSessionTitle] = useState<Record<string, string>>({});
+  const sessionTitle: Record<string, string> = {};
   // 사용자가 직접 붙인 pane 이름. 자동으로 알아낸 것(돌고 있는 명령, claude 대화의
   // 마지막 프롬프트)은 어디까지나 추측이라, 직접 붙인 이름이 있으면 그것이 이긴다.
   const [names, setNames] = useState<Record<string, string>>({});
@@ -290,6 +273,7 @@ export default function App() {
             nextTab?: number;
             fontSize?: number;
             procs?: Record<string, unknown>;
+            restoreMode?: string;
             names?: Record<string, string>;
             casting?: Record<string, string>;
             sideOpen?: boolean;
@@ -299,119 +283,14 @@ export default function App() {
           if (s.casting) setCasting(s.casting);
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
-            // 지금 백그라운드로 살아 있는 대화들. 이걸 알아야 `--resume` 이
-            // 거절당해 칸이 빈 채로 멈추는 것을 피할 수 있다(session.ts 참고).
-            const bg = await invoke<string[]>("claude_bg_sessions").catch(() => null);
-            // 다른 창이 지금 열어 두고 있는 대화. 이걸 모르면 사용자가 쓰고 있는
-            // 대화를 칸이 뺏으려 들고, 거절당해 그 칸이 죽는다(session.ts 참고).
-            const live = await invoke<string[]>("claude_live_sessions").catch(() => null);
-            const m: Record<string, Seed> = {};
-            for (const [id, v] of Object.entries(s.procs)) {
-              const seed = asSeed(v);
-              if (seed) {
-                if (seed.codex) {
-                  try { m[id] = codexSeed(seed.codex, seed.auto !== false); }
-                  catch { m[id] = { cmd: "codex resume", auto: false }; }
-                  continue;
-                }
-                if (seed.cmd === "codex") {
-                  // 이전 버전에는 칸별 ID가 없었다. 새 대화나 최근 대화를 임의로 열지 않는다.
-                  m[id] = { cmd: "codex resume", auto: seed.auto !== false };
-                  continue;
-                }
-                // 복원으로 여는 pane 은 어느 대화인지 이미 안다. 미리 붙여 두어야
-                // 아래의 "새로 생긴 것 찾기"가 이 pane 을 건드리지 않는다.
-                // 명령이 `attach` 로 바뀌어도 대화는 같으므로 바꾸기 전에 읽는다.
-                const sid = seedSession(seed.cmd);
-                if (sid) sessionOf.current[id] = sid;
-                m[id] = liveAttach(seed, bg ?? [], live ?? []);
-              }
+            const roots: Record<string, string | null> = {};
+            for (const tab of s.tabs ?? []) {
+              for (const id of tab.layout ? L.leaves(tab.layout) : []) roots[id] = tab.root;
             }
-            // 저장된 `claude --continue` 를 그대로 치면 안 된다. 그런 칸이 둘이면
-            // 둘 다 같은 대화로 열리거나 백그라운드 작업을 집는다. 사용자 대화 하나만
-            // id 로 짚고, 나머지는 새로 연다. 자세한 것은 session.ts.
-            const rootOf: Record<string, string | null> = {};
-            for (const t of s.tabs ?? []) {
-              for (const id of t.layout ? L.leaves(t.layout) : []) rootOf[id] = t.root;
-            }
-            const byRoot = new Map<string, string[]>();
-            for (const [id, seed] of Object.entries(m)) {
-              if (seed.cmd !== "claude --continue") continue;
-              const r = rootOf[id] ?? "";
-              byRoot.set(r, [...(byRoot.get(r) ?? []), id]);
-            }
-            for (const [root, ids] of byRoot) {
-              // 폴더나 백그라운드 목록을 모르면 기존 대화의 소유자를 추측할 수 없다.
-              // 무엇이 살아 있는지 모르면 추측하지 않는다 — 둘 중 하나라도 못
-              // 읽었으면 후보를 고를 근거가 없고, 잘못 고르면 남의 대화를 뺏는다.
-              const list = root && bg !== null && live !== null
-                ? await invoke<{ id: string }[]>("claude_sessions", { root }).catch(() => [])
-                : [];
-              const picked = splitContinue(
-                ids,
-                list,
-                new Set(Object.values(sessionOf.current)),
-                bg ?? [],
-                live ?? [],
-              );
-              for (const [id, v] of Object.entries(picked)) {
-                if (v.sid) sessionOf.current[id] = v.sid;
-                m[id] = v.seed;
-              }
-            }
-
-            // 아직 만들어지지 않은 대화는 `--resume` 이 아니라 `--session-id` 로 연다.
-            //
-            // 우리가 id 를 내서 연 칸에 사용자가 아무 말도 안 하면 claude 는 그
-            // 대화 파일을 만들지 않는다(첫 프롬프트 때 만든다). 그런 칸을 다음에
-            // `--resume` 으로 열면 "No conversation found with session ID" 로 죽고
-            // 칸은 셸 프롬프트 앞에 멈춘다 — 사용자 눈에는 또 복원이 안 된 것이다.
-            // 같은 id 를 그대로 들고 `--session-id` 로 열면 그 칸의 정체는 유지된다.
-            for (const [id, seed] of Object.entries(m)) {
-              const sid = seedSession(seed.cmd);
-              if (!sid || !seed.cmd.includes("--resume")) continue;
-              const root = rootOf[id];
-              if (!root) continue;
-              const list = await invoke<{ id: string }[]>("claude_sessions", { root }).catch(
-                () => [] as { id: string }[],
-              );
-              if (list.some((c) => c.id === sid)) continue;
-              m[id] = { cmd: `claude --session-id ${sid}`, auto: true };
-            }
+            const m = continuePlan(s.procs, roots, s.restoreMode !== "native-continue");
             setSeeds(m);
-            // 그 칸이 어느 대화였는지는 방금 정해졌다. 셸이 뜨기 전에 지난 대화를
-            // 받아 두어야 Term 이 첫 화면에 그것부터 찍을 수 있다. 하나라도 늦으면
-            // 그 칸만 비므로 병렬로 받고, 실패한 것은 그냥 없는 것으로 둔다.
-            // 여기서 기다린다. 아래 `setTabs` 가 칸을 세우고 그때 Term 이 마운트되며
-            // 첫 화면을 그리는데, 지난 대화가 그 뒤에 도착하면 이미 늦다 — Term 은
-            // 마운트 때의 값만 쓴다(셸이 이미 뜬 터미널에 나중에 끼워 넣으면 셸이
-            // 쓴 것과 순서가 뒤엉킨다). 꼬리만 읽으므로 칸당 수십 ms 다.
-            const got = await Promise.all(
-              Object.entries(m).map(async ([id, seed]) => {
-                // 명령이 아니라 붙여 둔 대화에서 읽는다. 살아 있는 대화는 명령이
-                // `claude attach <앞 8자>` 로 바뀌어 있어서 명령만 보면 못 찾는다.
-                const sid = sessionOf.current[id] ?? seedSession(seed.cmd);
-                const root = rootOf[id];
-                if (!sid || !root) return null;
-                const text = await invoke<string>("claude_transcript", {
-                  root,
-                  id: sid,
-                  turns: 40,
-                }).catch(() => "");
-                return text ? ([id, text] as const) : null;
-              }),
-            );
-            const heads = Object.fromEntries(got.filter((x) => !!x) as [string, string][]);
-            if (Object.keys(heads).length) setSeedHead(heads);
-            // 되살릴 명령을 지금 바로 들고 있는다. procs 는 "이 칸이 무엇을
-            // 돌리는가"인데, 저장은 그것만 보고 쓴다. 켠 직후 몇 초 동안은 셸이
-            // 아직 이 명령을 띄우는 중이라 pane_status 로는 아무것도 안 보이고,
-            // 그 사이에 앱을 끄면 복원 정보가 통째로 빈 채로 저장된다.
             procs.current = { ...m };
-            // 헤드리스 검증용 창구. "어느 대화가 살아 있다고 보았고, 그래서 무엇을
-            // 치기로 했나"는 화면에 남지 않아 스크린샷으로도 확인할 수 없다.
-            // 릴리스 웹뷰에는 콘솔이 없으니 CHIISPACE_PROBE 로 들여다볼 자리가 필요하다.
-            (window as unknown as { __restore?: unknown }).__restore = { bg, live, seeds: m };
+            (window as unknown as { __restore?: unknown }).__restore = { seeds: m };
           }
           // 복원한 pane 이름과 새로 만들 이름이 겹치면 두 pane 이 같은 PTY 를 본다.
           if (typeof s.nextPane === "number") nextPane.current = s.nextPane;
@@ -428,10 +307,6 @@ export default function App() {
         setTabs((ts) => ts.map((t, i) => (i === 0 ? { ...t, root: cli } : t)));
         setActive(0);
       }
-      // 어느 칸이 어느 대화를 쥐고 있는지 들여다볼 창구. ref 객체를 그대로
-      // 걸어 두므로 값이 바뀌면 여기서도 바로 보인다 — 이 배선은 화면에 안
-      // 남아서 스크린샷으로는 확인할 수 없고, 릴리스 웹뷰에는 콘솔도 없다.
-      (window as unknown as { __bind?: unknown }).__bind = sessionOf.current;
       setBooted(true);
     })();
   }, []);
@@ -458,6 +333,7 @@ export default function App() {
         nextTab: nextTab.current,
         fontSize,
         procs: saved,
+        restoreMode: "native-continue",
         names,
         casting,
         sideOpen,
@@ -513,120 +389,6 @@ export default function App() {
     };
   }, []);
 
-  // claude 가 도는 pane 의 목록. 문자열로 좁혀 두는 이유는 바로 아래 있다.
-  const claudePanes = Object.entries(stat)
-    .filter(([, p]) => p.agent === "claude")
-    .map(([id]) => id)
-    .sort()
-    .join(",");
-
-  // claude 가 도는 pane 에 그 대화를 붙여 둔다. claude 는 대화를 프로젝트 폴더
-  // 아래 <세션 UUID>.jsonl 로 쌓으므로, 방금 뜬 claude 의 것은 가장 최근에 쓰인
-  // 파일이다. 이미 다른 pane 이 가져간 것은 건너뛴다 — 두 pane 이 같은 대화를
-  // 가리키면 복원할 때 둘 다 같은 자리로 열린다.
-  //
-  // deps 에 stat 을 그대로 두면 안 된다. stat 은 800ms 마다 새 객체로 오므로
-  // 그보다 긴 타이머는 매번 취소되고 다시 걸려 영영 터지지 않는다. 값이 같으면
-  // 참조도 같은 문자열로 좁혀서 목록이 실제로 바뀔 때만 다시 돈다.
-  useEffect(() => {
-    if (!curRoot || !claudePanes) return;
-    const want = claudePanes.split(",").filter((id) => !sessionOf.current[id]);
-    if (!want.length) return;
-    let alive = true;
-    let before: Set<string> | null = null;
-    // 먼저 지금 있는 대화를 찍어 둔다. 그 뒤에 새로 생긴 것만 이 pane 의 것으로
-    // 본다 — 그냥 "가장 최근"을 집으면 다른 창에서 돌고 있는 남의 대화를 집고,
-    // 나중에 그것을 --resume 으로 열려다 충돌해서 pane 이 뜨자마자 죽는다.
-    invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot })
-      .then((list) => {
-        if (alive) before = new Set(list.map((c) => c.id));
-      })
-      .catch(() => {});
-    // 한 번만 보고 끝내면 안 된다. claude 는 뜨자마자 첫 줄을 쓰지 않고 **사용자가
-    // 처음 말을 걸 때** 대화 파일을 만든다. 그게 몇 분 뒤일 수도 있는데, 그때는 이
-    // effect 가 다시 돌 일이 없어(칸 목록이 그대로다) 그 칸은 영영 안 붙는다.
-    // 안 붙으면 저장이 `--continue` 로 떨어지고, 그런 칸이 둘이면 다음에 켤 때
-    // 두 칸이 같은 대화로 열린다 — 사용자가 겪은 게 그것이다.
-    //
-    // 그래서 붙을 때까지 계속 본다. 다만 무한정은 아니다. 여기서 "새로 생긴 대화"는
-    // 다른 창에서 띄운 claude 의 것일 수도 있어서, 오래 열어 둘수록 남의 대화를
-    // 집을 확률만 올라간다. 몇 분이면 사용자가 말을 걸고도 남는다.
-    let left = 60; // 3초 * 60 = 3분
-    const look = () => {
-      if (!before || !alive) return;
-      const seen = before;
-      const need = claudePanes.split(",").filter((id) => !sessionOf.current[id]);
-      if (!need.length || left-- <= 0) {
-        clearInterval(h);
-        return;
-      }
-      // 탐색 중에도 워커가 생기거나 끝나므로 매번 현재 명부와 함께 조회한다.
-      Promise.all([
-        invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot }),
-        invoke<string[]>("claude_bg_sessions"),
-      ])
-        .then(([list, bg]) => {
-          if (!alive) return;
-          const taken = new Set(Object.values(sessionOf.current));
-          const titles: Record<string, string> = {};
-          for (const paneId of need) {
-            if (sessionOf.current[paneId]) continue;
-            const fresh = freshSession(list, bg, seen, taken);
-            // 새로 생긴 대화가 없으면 아무것도 붙이지 않는다. 남의 대화를 집는
-            // 것보다 다음 차례를 기다리는 편이 낫다.
-            if (!fresh) break;
-            sessionOf.current[paneId] = fresh.id;
-            taken.add(fresh.id);
-            if (fresh.title) titles[paneId] = fresh.title;
-          }
-          if (Object.keys(titles).length) setSessionTitle((t) => ({ ...t, ...titles }));
-          // 제목은 아래 effect 가 이어서 계속 맞춘다.
-        })
-        .catch(() => {});
-    };
-    // 첫 조회는 파일이 만들어질 틈을 주고 나서. 그 뒤로는 3초마다 다시 본다.
-    const h = setInterval(look, 3000);
-    return () => {
-      alive = false;
-      clearInterval(h);
-    };
-  }, [claudePanes, curRoot]);
-
-  // 붙여 둔 대화의 제목을 헤더에 맞춰 둔다.
-  //
-  // 세션을 처음 붙일 때 한 번만 가져오면, 복원으로 연 pane 은 이미 어느
-  // 대화인지 알아서 그 경로를 타지 않아 제목이 영영 비고 헤더가 "claude" 로
-  // 떨어진다. 그리고 대화가 진행되면 마지막으로 시킨 일도 바뀌므로, 한 번
-  // 가져온 값을 붙들고 있으면 곧 옛날 것이 된다. 주기적으로 다시 맞춘다.
-  useEffect(() => {
-    if (!curRoot || !claudePanes) return;
-    let alive = true;
-    const tick = () => {
-      invoke<{ id: string; mtime: number; title: string }[]>("claude_sessions", { root: curRoot })
-        .then((list) => {
-          if (!alive) return;
-          const byId = new Map(list.map((c) => [c.id, c.title]));
-          const next: Record<string, string> = {};
-          for (const paneId of claudePanes.split(",")) {
-            const sid = sessionOf.current[paneId];
-            const title = sid ? byId.get(sid) : undefined;
-            if (title) next[paneId] = title;
-          }
-          setSessionTitle((prev) => {
-            const changed = Object.keys(next).some((k) => prev[k] !== next[k]);
-            return changed ? { ...prev, ...next } : prev;
-          });
-        })
-        .catch(() => {});
-    };
-    tick();
-    const h = setInterval(tick, 8000);
-    return () => {
-      alive = false;
-      clearInterval(h);
-    };
-  }, [claudePanes, curRoot]);
-
   // 새로 생긴 칸에 사람을 붙인다. 이미 나간 사람은 피하고, 스무 명을 다 쓰면
   // 처음부터 다시 돈다. 칸이 사라져도 배정은 지우지 않는다 — 같은 칸이 되살아날
   // 때 얼굴이 바뀌면 그게 더 낯설다.
@@ -652,8 +414,7 @@ export default function App() {
   // 이미 죽었다"일 수 있고, 그 둘을 스냅샷만으로는 구별할 수 없다.
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
-      if (p.agent) sawAgent.current[id] = true;
-      const name = restoreCmd(p, sessionOf.current[id]);
+      const name = restoreCmd(p);
       if (name) {
         procs.current[id] = name;
         sawRun.current[id] = true;
@@ -678,20 +439,6 @@ export default function App() {
         delete procs.current[id];
         delete sawRun.current[id];
         delete idleRuns.current[id];
-        // claude 가 내려갔으면 붙여 둔 대화도 놓는다. 그 pane 에서 다음에
-        // 띄우는 것은 다른 대화일 수 있다.
-        //
-        // 다만 **아직 안 뜬 것**과 헷갈리면 안 된다. 복원한 칸은 셸을 띄우고
-        // 명령을 쳐 넣기까지 몇 초가 걸리고 그동안 전경은 그냥 셸인데, 그때
-        // 놓아 버리면 방금 붙여 둔 대화를 잃는다. 그러면 그 칸은 다시 붙을
-        // 길이 없어(이어 연 대화는 "새로 생긴 파일"이 아니다) 저장이
-        // `--continue` 로 떨어지고, 그런 칸이 둘이면 다음에 켤 때 같은 대화가
-        // 두 칸에 열린다. 폴링 주기와 셸이 뜨는 속도가 엇갈리는 경합이라
-        // 어떤 날은 멀쩡하고 어떤 날은 깨졌다.
-        if (!sawAgent.current[id]) continue;
-        delete sawAgent.current[id];
-        delete sessionOf.current[id];
-        setSessionTitle((t) => (id in t ? { ...t, [id]: "" } : t));
       }
     }
   }, [stat]);
@@ -1094,11 +841,10 @@ export default function App() {
                           id={s.id}
                           focused={ti === active && t.focus === s.id}
                           onTitle={onTitle}
-                          cwd={t.root ?? undefined}
+                          cwd={seeds[s.id]?.cwd ?? t.root ?? undefined}
                           shell={t.shell ?? shellList[0]?.path}
                           fontSize={fontSize}
                           seed={seeds[s.id]}
-                          head={seedHead[s.id]}
                         />
                       </section>
                     </div>

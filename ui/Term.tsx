@@ -164,7 +164,7 @@ export function Term({
    *  `auto` 면 실행까지 한다. 에이전트를 이어 여는 것은 부작용이 없고, 명령만
    *  쳐 놓아서는 사용자가 말하는 "세션 복원"이 되지 않는다. 그 밖의 명령은
    *  쳐 놓기만 한다 — 빌드나 배포가 저 혼자 다시 도는 건 곤란하다. */
-  seed?: { cmd: string; auto?: boolean };
+  seed?: { cmd: string; auto?: boolean; notice?: string };
   /** 복원한 칸에 셸보다 먼저 찍어 줄 지난 대화.
    *
    *  claude 는 `--resume` 할 때 대화를 처음부터 다시 찍지 않는다 — 배너와 마지막
@@ -282,6 +282,7 @@ export function Term({
       seeded = true;
       clearTimeout(quiet);
       const { cmd, auto } = seedOnce.current;
+      if (seedOnce.current.notice) t.writeln(seedOnce.current.notice);
       if (!auto) {
         // paste 는 bracketed paste 로 감싸서 셸이 그것을 명령으로 실행하지
         // 않고 입력으로만 받는다. 쳐 놓기만 할 것은 이쪽이다.
@@ -326,9 +327,24 @@ export function Term({
     // 시작돼 있다"는 한글 특유의 순서 문제도 사라진다 — 받침이 다음 글자의
     // 초성으로 넘어가며 앞 글자가 확정되는 그 경로다.
     let composing = false;
+    let finalizingKey = false;
     let commit = "";
     let commitAt = 0;
     const send = (data: string) => void invoke("pty_write", { id, data }).catch(() => {});
+
+    // textarea 리스너는 xterm보다 늦게 등록돼 첫 삭제 키가 이미 버려진 뒤에 상태를 푼다.
+    // xterm의 조합 처리보다 먼저 판정하고 조합 중 삭제는 브라우저 IME에 맡긴다.
+    t.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      composing = e.isComposing;
+      if (composing) return false;
+      // blur·누락된 compositionend 뒤 xterm이 지난 조합을 다시 내보내는 것도 막는다.
+      // 실제 키는 onKey 뒤에 onData로 오므로 그 지점부터만 다시 받는다.
+      finalizingKey = true;
+      queueMicrotask(() => { finalizingKey = false; });
+      return true;
+    });
+    t.onKey(() => { finalizingKey = false; });
 
     const ta = t.textarea;
     if (ta) {
@@ -352,25 +368,10 @@ export function Term({
       ta.addEventListener("blur", () => {
         composing = false;
       });
-      // 브라우저가 키 이벤트에 실어 주는 조합 상태가 진실이다. 무슨 이유로
-      // compositionend 를 놓쳤든 다음 키 한 번에 풀린다. keyCode 229 는
-      // IME 가 그 키를 삼키는 중이라는 표시라 조합으로 친다.
-      ta.addEventListener(
-        "keydown",
-        (e) => {
-          // keyCode 229 를 예외로 두면 안 된다. 한글 IME 는 조합을 여는 첫 키도
-          // 229 로 주는데 그 시점의 isComposing 은 아직 false 다. 예외를 두면
-          // 플래그가 잘못 켜져 있을 때 한글로는 영영 못 푼다 — 치면 칠수록
-          // 229 만 오니 계속 먹통이다. isComposing 하나만 본다. 조합이 진짜로
-          // 열리는 것은 이 keydown 바로 뒤의 compositionstart 다.
-          if (!e.isComposing) composing = false;
-        },
-        true,
-      );
     }
 
     t.onData((data) => {
-      if (composing) return;
+      if (composing || finalizingKey) return;
       // 우리가 방금 보낸 확정분을 xterm 이 한 틱 늦게 또 보낸다. 그 창 안에서
       // 같은 값이면 그것이다. 한글은 조합을 거치므로 사용자가 이 창 안에
       // 같은 값을 직접 쳐 넣을 길은 없다.

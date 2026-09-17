@@ -85,10 +85,6 @@ fn append_args(mut defaults: Vec<String>, args: Vec<String>) -> Vec<String> {
 }
 
 pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
-    run_agent_with_resume(name, args, None)
-}
-
-pub fn run_agent_with_resume(name: &str, args: Vec<String>, resume: Option<crate::codex_session::Session>) -> Result<i32> {
     let own = std::env::current_exe()?;
     let config: Config =
         serde_json::from_slice(&std::fs::read(own.with_file_name("launch.json"))?)?;
@@ -103,7 +99,11 @@ pub fn run_agent_with_resume(name: &str, args: Vec<String>, resume: Option<crate
     let injected = interactive(&args) && !nested;
     let mut defaults = Vec::new();
     if injected {
-        let registration = crate::rpc::collab("register", json!({"harness":name,"resume":resume}))?;
+        let launch = if name == "codex" && codex_interactive(&args)
+            && !args.iter().take_while(|s| *s != "--").any(|s| s == "--remote" || s.starts_with("--remote=")) {
+            Some(crate::codex_session::Launch::capture(&args)?)
+        } else { None };
+        let registration = crate::rpc::collab("register", json!({"harness":name,"launch":launch}))?;
         let token = registration["token"].as_str().context("연결 토큰 누락")?;
         std::env::set_var("CHIISPACE_AGENT_TOKEN", token);
         command.env("CHIISPACE_AGENT_TOKEN", token);
@@ -115,12 +115,9 @@ pub fn run_agent_with_resume(name: &str, args: Vec<String>, resume: Option<crate
             token,
         );
     }
-    let own_transport = name == "codex" && injected && codex_interactive(&args)
-        && !args.iter().take_while(|s| *s != "--").any(|s| s == "--remote" || s.starts_with("--remote="));
-    let options = crate::codex_session::restore_options(&args);
     let args = append_args(defaults, args);
-    let status = if own_transport { crate::codex_transport::run(program, args, options, resume.as_ref()) }
-        else { command.args(args).status().context("에이전트 시작 실패").map(|s| s.code().unwrap_or(1)) };
+    // 대화 선택과 권한 적용은 설치된 CLI에 맡긴다. 로컬 실행을 원격 TUI로 바꾸지 않는다.
+    let status = command.args(args).status().context("에이전트 시작 실패").map(|s| s.code().unwrap_or(1));
     if injected {
         let _ = crate::rpc::collab("unregister", json!({"failed":status.as_ref().map_or(true, |code| *code != 0)}));
     }
@@ -154,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_interactive_codex_commands_use_the_session_transport() {
+    fn only_interactive_codex_commands_capture_continuation_options() {
         for args in [vec![], vec!["resume", "id"], vec!["-m", "review"], vec!["--", "exec"]] {
             assert!(codex_interactive(&args.into_iter().map(Into::into).collect::<Vec<_>>()));
         }

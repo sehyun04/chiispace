@@ -33,7 +33,6 @@ anyhow = "1"
 # PTY 바이트를 웹뷰로 보낼 때 JSON 문자열에 안전하게 싣기 위해. 부분 UTF-8
 # 시퀀스가 청크 경계에 걸리면 문자열로는 깨지지만 base64 는 바이트를 그대로 나른다.
 base64 = "0.22"
-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 
 # 터미널 엔진. 여기 소스는 우리가 갖지 않는다 — upstream(2rami/kasaterm)의
 # 크레이트를 그대로 당겨 쓴다. rev 를 박아 두는 이유: upstream main 은 활발히
