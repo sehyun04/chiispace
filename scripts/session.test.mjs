@@ -1,9 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asSeed, codexContinue, continuePlan, nativeSeed, restoreCmd } from "../ui/session.ts";
+import { asSeed, codexContinue, continuePlan, nativeSeed, restoreCmd, paneTitle, savedPaneTitles, label } from "../ui/session.ts";
 
 const sid = "12345678-2222-4222-8222-222222222222";
 const launch = { home: "C:\\한글 & state", cwd: "C:\\project space", args: ["--profile", "review", "--sandbox", "read-only"] };
+
+test("자동 pane 이름은 상태 표시만 제거하고 제목의 경로 구분자를 보존", () => {
+  assert.equal(paneTitle("  \u2731 결제 / API 검토  "), "결제 / API 검토");
+  assert.equal(paneTitle("\u280b 한글 이름"), "한글 이름");
+  assert.equal(paneTitle("한글\n이름\u0007"), "한글 이름");
+  assert.equal(paneTitle("가".repeat(200)).length, 160);
+  assert.equal(label("%0", { "%0": { agent: "claude" } }, { "%0": "서버 / 인증" }), "서버 / 인증");
+});
+
+test("셸·CLI 기본 제목과 실행 명령은 복원할 pane 이름으로 저장하지 않음", () => {
+  for (const value of [null, 1, {}, "", "  ", "---", "shell", "Claude Code", "Codex", "codex.cmd", "claude.exe",
+    "Windows PowerShell", "powershell.exe", "pwsh -NoExit", "cmd /c work", "node agent.js",
+    "C:\\Windows\\System32\\cmd.exe - claude --continue", '"C:/Program Files/PowerShell/7/pwsh.exe"',
+    "/usr/bin/bash", "\\\\server\\folder", "claude --continue", "codex resume --last", "작업 이름 - title  Codex",
+    "작업 이름 - cmd /c build", "작업 이름 - chiispace-cli.exe agent claude", "작업 이름 - claude --continue"]) assert.equal(paneTitle(value), null, String(value));
+  assert.equal(label("%0", { "%0": { agent: "codex", proc: "node" } }, { "%0": "C:/Windows/System32/cmd.exe" }), "codex");
+});
+
+test("저장 이름은 살아 있는 칸만 복원하고 구형·깨진 이름 필드는 안전하게 무시", () => {
+  const value = { "%0": "\u2731 이어갈 작업", "%1": "codex", "%2": 3, "%3": "닫힌 칸" };
+  assert.deepEqual(savedPaneTitles(value, ["%0", "%1", "%2"]), { "%0": "이어갈 작업" });
+  for (const old of [undefined, null, [], "old", 3]) assert.deepEqual(savedPaneTitles(old, ["%0"]), {});
+  const original = { "%0": "서버 / 인증" };
+  assert.deepEqual(savedPaneTitles(JSON.parse(JSON.stringify(original)), ["%0"]), original);
+  assert.deepEqual(value, { "%0": "\u2731 이어갈 작업", "%1": "codex", "%2": 3, "%3": "닫힌 칸" });
+});
 
 test("Codex 이어가기는 ID 없이 폴더와 명시 옵션만 전달", () => {
   const seed = codexContinue({ ...launch, id: sid });

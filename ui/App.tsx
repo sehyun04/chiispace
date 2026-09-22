@@ -18,6 +18,8 @@ import {
   label,
   restoreCmd,
   continuePlan,
+  paneTitle,
+  savedPaneTitles,
   type PaneStat,
   type ShellKind,
   type Seed,
@@ -87,7 +89,8 @@ export default function App() {
   // 연달아 몇 번이나 비어 있었나. 끌 때는 에이전트가 PTY 보다 먼저 죽어서
   // 한 번의 스냅샷으로는 종료 중인지 명령이 끝난 것인지 가릴 수 없다.
   const idleRuns = useRef<Record<string, number>>({});
-  const sessionTitle: Record<string, string> = {};
+  // CLI가 제목을 다시 보내기 전에도 칸을 구별할 수 있게 마지막 표시 이름을 별도로 보존한다.
+  const [paneTitles, setPaneTitles] = useState<Record<string, string>>({});
   // 사용자가 직접 붙인 pane 이름. 자동으로 알아낸 것(돌고 있는 명령, claude 대화의
   // 마지막 프롬프트)은 어디까지나 추측이라, 직접 붙인 이름이 있으면 그것이 이긴다.
   const [names, setNames] = useState<Record<string, string>>({});
@@ -128,6 +131,8 @@ export default function App() {
 
   const onTitle = useCallback((id: string, title: string) => {
     setTitles((t) => (t[id] === title ? t : { ...t, [id]: title }));
+    const name = paneTitle(title);
+    if (name) setPaneTitles((t) => (t[id] === name ? t : { ...t, [id]: name }));
   }, []);
 
   const split = useCallback(
@@ -215,7 +220,7 @@ export default function App() {
     workspaces: tabs.map((t) => ({ id: t.key, name: t.root?.split(/[\\/]/).pop() || "셸" })),
     surfaces: tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []).map((id) => ({
       id, workspace_id: t.key, cwd: stat[id]?.cwd ?? t.root,
-      title: names[id] || sessionTitle[id] || label(id, stat, titles),
+      title: names[id] || paneTitles[id] || label(id, stat, titles),
       character: bySlug.get(casting[id])?.name ?? null,
     }))),
     current: cur?.key ?? null,
@@ -275,11 +280,13 @@ export default function App() {
             procs?: Record<string, unknown>;
             restoreMode?: string;
             names?: Record<string, string>;
+            paneTitles?: unknown;
             casting?: Record<string, string>;
             sideOpen?: boolean;
           };
           if (s.fontSize) setFontSize(s.fontSize);
           if (s.names) setNames(s.names);
+          setPaneTitles(savedPaneTitles(s.paneTitles, (s.tabs ?? []).flatMap(t => t.layout ? L.leaves(t.layout) : [])));
           if (s.casting) setCasting(s.casting);
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
@@ -335,6 +342,7 @@ export default function App() {
         procs: saved,
         restoreMode: "native-continue",
         names,
+        paneTitles: savedPaneTitles(paneTitles, live),
         casting,
         sideOpen,
       });
@@ -343,7 +351,7 @@ export default function App() {
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat, names, casting, sideOpen]);
+  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -684,7 +692,7 @@ export default function App() {
         stat={stat}
         titles={titles}
         names={names}
-        sessionTitle={sessionTitle}
+        paneTitles={paneTitles}
         casting={casting}
         picking={picking}
         renaming={renaming}
@@ -795,11 +803,11 @@ export default function App() {
                               title={
                                 names[s.id]
                                   ? `${names[s.id]} — 두 번 눌러 이름 고치기`
-                                  : (sessionTitle[s.id] ?? "") || "두 번 눌러 이름 붙이기"
+                                  : (paneTitles[s.id] ?? "") || "두 번 눌러 이름 붙이기"
                               }
                               onDoubleClick={() => setRenaming(s.id)}
                             >
-                              {names[s.id] || sessionTitle[s.id] || label(s.id, stat, titles)}
+                              {names[s.id] || paneTitles[s.id] || label(s.id, stat, titles)}
                             </span>
                           )}
                           {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}

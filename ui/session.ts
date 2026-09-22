@@ -93,6 +93,28 @@ export function continuePlan(seeds: Record<string, unknown>, roots: Record<strin
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 export const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
 
+export function paneTitle(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
+  // 시작·종료 때 셸이 보낸 실행 경로가 마지막 작업 이름을 덮어쓰면 칸을 구별할 수 없다.
+  if (/^["']?(?:[a-z]:[\\/]|[\\/]|~[\\/])/i.test(raw)) return null;
+  const name = raw.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  if (!name || /^(?:shell|claude(?: code)?|codex(?: cli)?|windows powershell)(?:\.exe)?$/i.test(name)
+    // cmd는 사용자 제목 뒤에 실행 명령을 잠깐 덧붙인다. 그 문자열도 작업 이름이 아니다.
+    || /(?:^|\s-\s+)(?:cmd|powershell|pwsh|bash|sh|zsh|fish|node|title|echo|chiispace-cli)(?:\.exe|\.cmd)?(?:\s|$)/i.test(name)
+    || /(?:^|\s-\s+)(?:claude|codex)(?:\.exe|\.cmd)?(?:$|\s+(?:-|resume\b|attach\b))/i.test(name)) return null;
+  return Array.from(name).slice(0, 160).join("");
+}
+
+export function savedPaneTitles(value: unknown, live: Iterable<string>): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const ids = new Set(live);
+  return Object.fromEntries(Object.entries(value).flatMap(([id, raw]) => {
+    const name = ids.has(id) ? paneTitle(raw) : null;
+    return name ? [[id, name]] : [];
+  }));
+}
+
 /** 헤더에 쓸 이름. 돌고 있는 명령이 있으면 그게 제일 쓸모 있다 —
  *  OSC 타이틀은 cmd.exe 가 자기 전체 경로를 넣어 버려 읽히지 않는다. */
 export function label(
@@ -100,18 +122,7 @@ export function label(
   stat: Record<string, PaneStat>,
   titles: Record<string, string>,
 ): string {
-  const t = titles[id];
-  const tail = t ? t.split(/[\\/]/).pop() || t : "";
-  // 에이전트는 자기 세션 이름을 터미널 타이틀에 실어 보낸다(claude 의 --name
-  // 설명에 그렇게 적혀 있다). 그 이름이 "claude" 라는 프로세스 이름보다 훨씬
-  // 쓸모 있다 — 여러 개를 띄워 놓으면 헤더가 전부 "claude" 라 구별이 안 된다.
-  // claude 는 일하는 중이면 타이틀 앞에 표시를 하나 붙인다(✱ 따위). 그것까지
-  // 헤더에 들이면 이름이 밀려 보이므로 앞머리의 기호는 떼고 쓴다.
-  const named = tail.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-  if (stat[id]?.agent && named) return named;
-  const p = stat[id]?.proc;
-  if (p) return p;
-  return tail || "shell";
+  return paneTitle(titles[id]) || stat[id]?.agent || stat[id]?.proc || "shell";
 }
 
 /** 홈 아래는 `~` 로 접는다. 목록에서 알고 싶은 것은 어느 프로젝트인지지 전체 경로가 아니다. */

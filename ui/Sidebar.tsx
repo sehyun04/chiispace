@@ -27,7 +27,7 @@ export function Sidebar({
   stat,
   titles,
   names,
-  sessionTitle,
+  paneTitles,
   casting,
   picking,
   renaming,
@@ -50,7 +50,7 @@ export function Sidebar({
   stat: Record<string, PaneStat>;
   titles: Record<string, string>;
   names: Record<string, string>;
-  sessionTitle: Record<string, string>;
+  paneTitles: Record<string, string>;
   casting: Record<string, string>;
   picking: string | null;
   renaming: string | null;
@@ -124,7 +124,7 @@ export function Sidebar({
                 {slots.map((sl) => {
                   const st = stat[sl.id];
                   const here = ti === active;
-                  const nm = names[sl.id] || sessionTitle[sl.id] || label(sl.id, stat, titles);
+                  const nm = names[sl.id] || paneTitles[sl.id] || label(sl.id, stat, titles);
                   return (
                     <div
                       key={sl.id}
