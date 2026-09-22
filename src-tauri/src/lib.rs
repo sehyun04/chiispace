@@ -317,7 +317,9 @@ pub fn run() {
             workspace::claude_sessions,
             workspace::claude_bg_sessions,
             workspace::claude_live_sessions,
+            workspace::claude_session_of_pid,
             workspace::claude_transcript,
+            workspace::claude_transcript_raw,
             workspace::state_save,
             workspace::state_load,
         ])
@@ -340,6 +342,9 @@ struct PaneStatus {
     working: bool,
     cwd: Option<String>,
     codex: Option<collab::CodexBinding>,
+    /// 이 칸이 돌리는 에이전트 프로세스의 pid. 그 pid 로 claude 자신이 써 둔 명부를 읽어
+    /// "이 칸이 어느 대화인가"에 답한다 — 대화 파일을 뒤져 고르지 않기 위해 필요하다.
+    agent_pid: Option<u32>,
 }
 
 // 박동은 작업을 확정하는 보조 신호라 화면에 남아 있는 라이브 스피너도 함께 본다.
@@ -445,7 +450,10 @@ fn pane_status(panes: State<Panes>, turns: State<AgentTurns>, collab: State<coll
     let mut turns = turns.0.lock().unwrap();
     map.iter()
         .map(|(id, s)| {
-            let agent = s.active_agent().map(|a| a.as_str().to_string());
+            let found = s
+                .shell_pid()
+                .and_then(|pid| kasa_pty::agent_pid_for_shell(&kasa_pty::process_table_shared(), pid));
+            let agent = found.map(|(kind, _)| kind.as_str().to_string());
             let raw_working = agent.is_some()
                 && (s.output_heartbeat() || pane_shows_working_spinner(s));
             PaneStatus {
@@ -458,6 +466,7 @@ fn pane_status(panes: State<Panes>, turns: State<AgentTurns>, collab: State<coll
                     .reported_cwd()
                     .map(|p| p.to_string_lossy().replace('\\', "/")),
                 codex: codex.get(id).cloned(),
+                agent_pid: found.map(|(_, pid)| pid),
             }
         })
         .collect()

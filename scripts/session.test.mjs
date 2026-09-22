@@ -110,3 +110,35 @@ test("깨진 폴더·인자와 구형 불완전 메타데이터는 자동 실행
   assert.equal(nativeSeed({ cmd: "chiispace-cli.exe codex-resume invalid" }, true).auto, false);
   for (const value of [null, 1, {}, { cmd: false }]) assert.equal(asSeed(value), null);
 });
+
+test("칸이 돌리던 대화 id가 있으면 그 대화로 되살리고, 없으면 폴더 최근 대화", () => {
+  const sid = "68e52d82-b9f5-40d5-b36f-14ec237927aa";
+  const stat = { id: "%0", proc: "claude", agent: "claude", busy: true, cwd: "C:/Repo" };
+  // 그 칸의 claude 가 답한 id 가 있으면 칸마다 제 대화로 돌아간다.
+  const withId = restoreCmd(stat, sid);
+  assert.equal(withId.cmd, `claude --resume ${sid}`);
+  assert.equal(withId.claudeSession, sid);
+  // 못 읽었으면 예전처럼 폴더의 최근 대화. 나빠지지 않는다.
+  for (const bad of [null, undefined, "", "not-a-uuid", "68e52d82b9f540d5b36f14ec237927aa", 12, {}])
+    assert.equal(restoreCmd(stat, bad).cmd, "claude --continue", String(bad));
+});
+
+test("저장된 대화 id는 보존하고 구형 문자열 속 id는 계속 정리", () => {
+  const sid = "68e52d82-b9f5-40d5-b36f-14ec237927aa";
+  const kept = nativeSeed({ cmd: `claude --resume ${sid}`, auto: true, claudeSession: sid, cwd: "C:/Repo" });
+  assert.equal(kept.cmd, `claude --resume ${sid}`);
+  assert.equal(kept.claudeSession, sid);
+  assert.equal(kept.cwd, "C:/Repo");
+  // 구형 전환에서도 살아남는다 — 이 필드는 구형 저장분에 아예 없다.
+  assert.equal(nativeSeed({ cmd: "claude", claudeSession: sid }, true).cmd, `claude --resume ${sid}`);
+  // 필드 없이 문자열에만 박힌 구형 id 는 예전처럼 정리한다.
+  assert.equal(nativeSeed({ cmd: `claude --resume ${sid}`, auto: true }, true).cmd, "claude --continue");
+  assert.equal(nativeSeed({ cmd: `claude --session-id ${sid}` }, true).cmd, "claude --continue");
+  // 모양이 틀린 값은 명령줄에 넣지 않는다.
+  assert.equal(nativeSeed({ cmd: "claude --continue", claudeSession: "nope" }).cmd, "claude --continue");
+  // 같은 폴더의 여러 칸이 각자 제 대화를 지킨다.
+  const other = "11111111-2222-4333-8444-555555555555";
+  const plan = continuePlan({ a: { cmd: "claude", claudeSession: sid }, b: { cmd: "claude", claudeSession: other } }, true);
+  assert.equal(plan.a.cmd, `claude --resume ${sid}`);
+  assert.equal(plan.b.cmd, `claude --resume ${other}`);
+});

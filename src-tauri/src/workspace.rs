@@ -548,6 +548,57 @@ pub fn claude_transcript(app: AppHandle, root: String, id: String, turns: usize)
     out
 }
 
+/// 대화 파일의 자리. `claude_transcript` 가 같은 탐색을 품고 있지만 그쪽은
+/// 터미널에 쓸 글까지 한 함수에서 만든다. 원문을 쓰는 쪽은 글자를 깎지
+/// 않으므로 자리 찾기만 따로 둔다.
+fn session_file(app: &AppHandle, root: &str, id: &str) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    let home = app.path().home_dir().ok()?;
+    let want = squash(root);
+    for d in std::fs::read_dir(home.join(".claude").join("projects")).ok()?.flatten() {
+        if squash(&d.file_name().to_string_lossy()) == want {
+            let p = d.path().join(format!("{id}.jsonl"));
+            return p.is_file().then_some(p);
+        }
+    }
+    None
+}
+
+/// 대화 원문 그대로. 말풍선은 이것을 직접 뜯는다.
+///
+/// `claude_transcript` 와 달리 줄이지도 색을 입히지도 않는다. 그쪽은 터미널에
+/// **써 넣을 글**이라 사람이 읽을 만큼만 남기지만, 이쪽은 화면이 뜯을
+/// **데이터**다. 도구 호출도 생각도 다 필요하고, 한 줄이라도 깎으면 그만큼
+/// 화면에서 사라진다.
+///
+/// 앱이 고르는 것은 아무것도 없다 — 어느 대화를 줄지는 `id` 로 불러온 쪽이
+/// 정한다. 파일을 뒤져 칸에 대화를 붙이던 길과는 무관하다.
+#[tauri::command]
+pub fn claude_transcript_raw(app: AppHandle, root: String, id: String) -> String {
+    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+    let Some(path) = session_file(&app, &root, &id) else { return String::new() };
+    let Ok(mut f) = std::fs::File::open(&path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    // 긴 대화는 수십 MB 까지 간다. 통째로 웹뷰에 넘기면 그리기 전에 멎는다.
+    const TAIL: u64 = 8 * 1024 * 1024;
+    let cut = len > TAIL;
+    if cut {
+        let _ = f.seek(SeekFrom::Start(len - TAIL));
+    }
+    let mut r = BufReader::new(f);
+    if cut {
+        // 자른 자리의 첫 줄은 반 토막이라 파싱되지 않는다.
+        let mut half = String::new();
+        let _ = r.read_line(&mut half);
+    }
+    let mut out = String::new();
+    for line in r.lines().map_while(Result::ok) {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
 // ── 세션 ─────────────────────────────────────────────────────────
 //
 // 배치와 연 폴더만 저장한다. PTY 는 되살리지 않는다 — 프로세스는 앱과 함께
@@ -646,5 +697,97 @@ mod live_session_tests {
         let _ = std::fs::remove_dir_all(&dir);
         // 대소문자는 우리가 맞춰 준다 — 저장된 명령의 id 와 그대로 비교하기 때문이다.
         assert_eq!(live, vec!["aaaa1111-0000-0000-0000-000000000000".to_string()]);
+    }
+}
+
+/// 이 pid 가 돌리는 claude 대화의 id. **추측하지 않는다.**
+///
+/// 과거에 칸마다 대화를 되살리려다 사고를 낸 방식은 `~/.claude/projects/<폴더>` 의 대화
+/// 파일을 뒤져 "가장 최근 것"을 골랐다. 그래서 사용자가 지금 쓰고 있는 대화를 칸이 뺏어
+/// 갔고, 한 대화에 두 프로세스가 붙지 못해 그 칸이 죽었다. 여기서 읽는 것은 그게 아니라
+/// **그 프로세스가 자기 pid 로 직접 써 둔 명부**(`~/.claude/sessions/<pid>.json`)다.
+/// 어느 칸이 어느 대화인지는 claude 자신이 답하므로 고를 일이 없다.
+///
+/// pid 는 돌려 쓰이므로 `procStart` 까지 맞추고(`alive`), 폴더를 받으면 그것도 본다 —
+/// 칸이 옮겨 다녔을 때 엉뚱한 대화를 붙이지 않기 위해서다. 하나라도 어긋나면 `None` 을
+/// 주고, 부르는 쪽은 그때 지금처럼 `--continue` 로 남겨 둔다(나빠지지 않는다).
+#[tauri::command]
+pub fn claude_session_of_pid(app: AppHandle, pid: u32, cwd: Option<String>) -> Option<String> {
+    session_of_pid_at(&claude_home(&app)?.join("sessions"), pid, cwd.as_deref())
+}
+
+/// claude 의 상태 폴더. `CLAUDE_CONFIG_DIR` 이 있으면 그쪽이다 — 그 변수를 준 채 띄운 claude 는
+/// 명부도 거기에 쓰므로, 홈만 보면 그 칸이 어느 대화인지 영영 못 읽는다. 앱이 띄운 claude 는
+/// 앱의 환경을 물려받으니 앱에서 읽은 값이 곧 그 칸이 쓰는 자리다.
+fn claude_home(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(std::path::PathBuf::from(dir));
+        }
+    }
+    app.path().home_dir().ok().map(|h| h.join(".claude"))
+}
+
+fn session_of_pid_at(dir: &std::path::Path, pid: u32, cwd: Option<&str>) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(format!("{pid}.json"))).ok()?;
+    let v = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    if v.get("pid").and_then(|p| p.as_u64()) != Some(pid as u64) {
+        return None;
+    }
+    let start = v
+        .get("procStart")
+        .and_then(|s| s.as_str())
+        .and_then(|s| s.parse::<u64>().ok());
+    if !alive(pid, start) {
+        return None;
+    }
+    if let Some(want) = cwd {
+        let same = v
+            .get("cwd")
+            .and_then(|c| c.as_str())
+            .is_some_and(|got| squash(got) == squash(want));
+        if !same {
+            return None;
+        }
+    }
+    let sid = v.get("sessionId").and_then(|s| s.as_str())?;
+    // 대화 id 는 uuid 다. 모양이 다르면 명령줄에 그대로 넣지 않는다.
+    let shaped = sid.len() == 36
+        && sid
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '-');
+    shaped.then(|| sid.to_lowercase())
+}
+
+#[cfg(test)]
+mod session_of_pid_tests {
+    use super::session_of_pid_at;
+
+    fn write(dir: &std::path::Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn reads_only_the_named_pid_and_checks_shape() {
+        let dir = std::env::temp_dir().join(format!("chiispace-sess-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let me = std::process::id();
+        let sid = "68e52d82-b9f5-40d5-b36f-14ec237927aa";
+        // procStart 가 없으면 살아 있는 pid 는 그대로 통과한다.
+        write(&dir, &format!("{me}.json"), &format!(r#"{{"pid":{me},"sessionId":"{sid}","cwd":"C:/Repo"}}"#));
+        assert_eq!(session_of_pid_at(&dir, me, None).as_deref(), Some(sid));
+        assert_eq!(session_of_pid_at(&dir, me, Some("C:/REPO")).as_deref(), Some(sid));
+        // 폴더가 다르면 붙이지 않는다.
+        assert_eq!(session_of_pid_at(&dir, me, Some("C:/Other")), None);
+        // 파일 안의 pid 가 다르면 무시한다.
+        write(&dir, &format!("{me}.json"), &format!(r#"{{"pid":{},"sessionId":"{sid}"}}"#, me + 1));
+        assert_eq!(session_of_pid_at(&dir, me, None), None);
+        // uuid 모양이 아니면 명령줄에 넣지 않는다.
+        write(&dir, &format!("{me}.json"), &format!(r#"{{"pid":{me},"sessionId":"not-a-uuid"}}"#));
+        assert_eq!(session_of_pid_at(&dir, me, None), None);
+        // 없는 pid 는 조용히 없음.
+        assert_eq!(session_of_pid_at(&dir, me + 12345, None), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

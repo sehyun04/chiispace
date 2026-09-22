@@ -3,9 +3,17 @@ export type CodexLaunch = { home: string; cwd: string; args?: string[] };
 export type CodexSession = CodexLaunch & { id: string; resumable?: boolean };
 export type PaneStat = {
   id: string; proc: string | null; agent: string | null; busy: boolean; working?: boolean; cwd: string | null;
+  agentPid?: number | null;
   codex?: { run: string; session?: CodexSession | null; launch?: CodexLaunch | null; failed: boolean } | null;
 };
-export type Seed = { cmd: string; auto?: boolean; cwd?: string; notice?: string; codex?: CodexSession; codexLaunch?: CodexLaunch };
+/** `claudeSession` 은 그 칸이 돌리던 대화의 id 다. 명령 문자열이 아니라 따로 드는 이유는,
+ *  구형 저장분을 정리하는 `nativeSeed` 가 문자열 속 id 를 지우기 때문이다. 필드로 두면
+ *  구형(문자열에 id 가 박힌 것)과 지금(그 칸의 claude 가 스스로 답한 것)을 가를 수 있다. */
+export type Seed = { cmd: string; auto?: boolean; cwd?: string; notice?: string; claudeSession?: string; codex?: CodexSession; codexLaunch?: CodexLaunch };
+
+/** 대화 id 로 쓸 수 있는 모양인가. 명령줄에 넣으므로 uuid 가 아니면 받지 않는다. */
+export const isSessionId = (v: unknown): v is string =>
+  typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 export function isAgentWorking(p?: PaneStat): boolean {
   return (p?.agent === "claude" || p?.agent === "codex") && !!p.working;
@@ -28,7 +36,9 @@ export function codexContinue(launch: CodexLaunch, auto = true, picker = false):
   return { cmd: `chiispace-cli.exe codex-continue ${encoded}${picker ? " --picker" : ""}`, auto, cwd: data.cwd, codexLaunch: data };
 }
 
-export function restoreCmd(p: PaneStat): Seed | null {
+/** 이 칸을 되살릴 명령. `session` 은 그 칸의 claude 가 자기 pid 명부에 써 둔 대화 id 로,
+ *  없으면 예전처럼 폴더의 최근 대화를 여는 `--continue` 가 된다(나빠지지 않는다). */
+export function restoreCmd(p: PaneStat, session?: string | null): Seed | null {
   if (p.codex && (!p.agent || p.agent === "codex")) {
     const launch = p.codex.launch;
     if (launch) return codexContinue(launch, !p.codex.failed);
@@ -37,7 +47,9 @@ export function restoreCmd(p: PaneStat): Seed | null {
   }
   const agent = p.agent ?? p.proc?.replace(/\.exe$/i, "").toLowerCase();
   const cwd = absolute(p.cwd) ? p.cwd : undefined;
-  if (agent === "claude") return { cmd: "claude --continue", auto: true, cwd };
+  if (agent === "claude") return isSessionId(session)
+    ? { cmd: `claude --resume ${session}`, auto: true, cwd, claudeSession: session }
+    : { cmd: "claude --continue", auto: true, cwd };
   if (agent === "codex") return { cmd: "codex resume --last", auto: true, cwd };
   if (p.agent) return { cmd: p.agent, auto: true, cwd };
   if (p.proc && !SHELLS.has(p.proc.toLowerCase())) return { cmd: p.proc };
@@ -56,6 +68,10 @@ export function nativeSeed(v: unknown, migrate = false): Seed | null {
     catch { return { cmd: "codex resume", auto: false, notice: "저장된 실행 정보가 잘못되어 대화를 직접 선택해야 합니다." }; }
   }
   const cwd = absolute(seed.cwd) ? seed.cwd : undefined;
+  // 칸이 실제로 돌리던 대화가 적혀 있으면 그 대화로 돌아간다. 구형 저장분에는 이 필드가
+  // 없으므로 예전 문자열 속 id 가 되살아나는 일은 없다 — 그것들은 아래에서 계속 정리된다.
+  if (isSessionId(seed.claudeSession))
+    return { cmd: `claude --resume ${seed.claudeSession}`, auto: seed.auto !== false, cwd, claudeSession: seed.claudeSession };
   if (/^claude(?:\s+(?:--continue|-c|--resume(?:\s+[0-9a-f-]{36})?|--session-id\s+[0-9a-f-]{36}))?$/i.test(seed.cmd))
     return { cmd: "claude --continue", auto: migrate || seed.auto !== false, cwd };
   if (/^codex(?:\s+resume(?:\s+(?:--last|[0-9a-f-]{36}))?)?$/i.test(seed.cmd))

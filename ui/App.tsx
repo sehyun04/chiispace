@@ -17,6 +17,7 @@ import {
   isAgentWorking,
   label,
   restoreCmd,
+  isSessionId,
   continuePlan,
   paneTitle,
   savedPaneTitles,
@@ -89,6 +90,11 @@ export default function App() {
   // 연달아 몇 번이나 비어 있었나. 끌 때는 에이전트가 PTY 보다 먼저 죽어서
   // 한 번의 스냅샷으로는 종료 중인지 명령이 끝난 것인지 가릴 수 없다.
   const idleRuns = useRef<Record<string, number>>({});
+  /** 칸이 돌리는 claude 대화의 id. 그 칸의 claude 가 자기 pid 명부에 써 둔 값을 그대로 받는다 —
+   *  대화 파일을 뒤져 고르지 않는다. 그렇게 고르다가 사용자가 쓰던 대화를 뺏은 적이 있다. */
+  const sessionOf = useRef<Record<string, string>>({});
+  /** 이미 물어본 pid. 같은 pid 를 800ms 폴링마다 다시 묻지 않는다. */
+  const askedPid = useRef<Record<string, number>>({});
   // CLI가 제목을 다시 보내기 전에도 칸을 구별할 수 있게 마지막 표시 이름을 별도로 보존한다.
   const [paneTitles, setPaneTitles] = useState<Record<string, string>>({});
   // 사용자가 직접 붙인 pane 이름. 자동으로 알아낸 것(돌고 있는 명령, claude 대화의
@@ -413,12 +419,41 @@ export default function App() {
     });
   }, [tabs, casting]);
 
+  // 칸이 어느 대화인지는 claude 자신에게 묻는다. pid 가 새로 보일 때만 한 번 묻고 캐시한다 —
+  // 800ms 폴링마다 다시 물으면 같은 답에 파일을 계속 읽는다. 답이 없으면 그냥 두어
+  // 복원이 예전처럼 `--continue` 로 떨어지게 한다(나빠지지 않는다).
+  const agentPids = Object.entries(stat)
+    .filter(([, p]) => p.agent === "claude" && typeof p.agentPid === "number")
+    .map(([id, p]) => `${id}:${p.agentPid}`)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!agentPids) return;
+    let stop = false;
+    void (async () => {
+      for (const entry of agentPids.split(",")) {
+        const [id, raw] = entry.split(":");
+        const pid = Number(raw);
+        if (stop || askedPid.current[id] === pid) continue;
+        askedPid.current[id] = pid;
+        try {
+          const sid = await invoke<string | null>("claude_session_of_pid", { pid, cwd: stat[id]?.cwd ?? null });
+          if (stop) return;
+          if (isSessionId(sid)) sessionOf.current[id] = sid;
+        } catch { /* 못 읽으면 붙이지 않는다 */ }
+      }
+    })();
+    return () => { stop = true; };
+    // 값이 같으면 참조도 같은 문자열로 좁혀야 800ms 폴링에 effect 가 딸려 돌지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentPids]);
+
   // 돌던 명령을 누적한다. stat 에 있는 pane 만 판단하고, 목록에서 사라진
   // pane 은 건드리지 않는다 — 사라진 것은 "명령이 끝났다"가 아니라 "PTY 가
   // 이미 죽었다"일 수 있고, 그 둘을 스냅샷만으로는 구별할 수 없다.
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
-      const name = restoreCmd(p);
+      const name = restoreCmd(p, sessionOf.current[id]);
       if (name) {
         procs.current[id] = name;
         sawRun.current[id] = true;
