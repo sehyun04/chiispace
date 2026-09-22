@@ -290,11 +290,7 @@ export default function App() {
           if (s.casting) setCasting(s.casting);
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
-            const roots: Record<string, string | null> = {};
-            for (const tab of s.tabs ?? []) {
-              for (const id of tab.layout ? L.leaves(tab.layout) : []) roots[id] = tab.root;
-            }
-            const m = continuePlan(s.procs, roots, s.restoreMode !== "native-continue");
+            const m = continuePlan(s.procs, s.restoreMode !== "native-continue");
             setSeeds(m);
             procs.current = { ...m };
             (window as unknown as { __restore?: unknown }).__restore = { seeds: m };

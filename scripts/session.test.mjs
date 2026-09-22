@@ -84,22 +84,21 @@ test("구형 ID 복원을 continue로 일회성 전환하고 임의 명령은 �
   }
 });
 
-test("같은 폴더의 중복 이어가기는 새 대화 대신 선택 목록", () => {
-  const result = continuePlan({ a: "claude --continue", b: "claude --continue", c: "codex", d: "codex" },
-    { a: "C:/Repo", b: "c:\\repo\\", c: "C:/Repo", d: "c:/repo" }, true);
+test("같은 폴더의 여러 칸도 저장된 대로 이어간다", () => {
+  // 둘째 칸부터 선택 목록으로 돌리던 가드를 뺐다. 사용자가 칸마다 그냥 이어 열리기를 원한다.
+  const result = continuePlan({ a: "claude --continue", b: "claude --continue", c: "codex", d: "codex" }, true);
   assert.equal(result.a.cmd, "claude --continue");
-  assert.equal(result.b.cmd, "claude --resume");
+  assert.equal(result.b.cmd, "claude --continue");
   assert.equal(result.c.cmd, "codex resume --last");
-  assert.equal(result.d.cmd, "codex resume");
-  assert.match(result.b.notice, /선택/);
-  assert.ok(Object.values(result).every(s => s.auto === true && !s.cmd.includes("--session-id")));
+  assert.equal(result.d.cmd, "codex resume --last");
+  assert.ok(Object.values(result).every(s => s.auto === true && !s.notice && !s.cmd.includes("--session-id")));
 });
 
-test("다른 작업 폴더는 각각 continue, 옵션 있는 중복 칸도 picker", () => {
-  const result = continuePlan({ a: codexContinue(launch), b: codexContinue(launch), c: "codex" },
-    { a: null, b: null, c: "C:/other" });
+test("옵션 있는 Codex 칸도 중복 여부와 무관하게 같은 명령", () => {
+  const result = continuePlan({ a: codexContinue(launch), b: codexContinue(launch), c: "codex" });
   assert.ok(!result.a.cmd.endsWith("--picker"));
-  assert.match(result.b.cmd, /--picker$/);
+  assert.ok(!result.b.cmd.endsWith("--picker"));
+  assert.equal(result.a.cmd, result.b.cmd);
   assert.equal(result.c.cmd, "codex resume --last");
   assert.deepEqual(result.b.codexLaunch.args, launch.args);
 });

@@ -219,12 +219,13 @@ trust_level = "trusted"
     const duplicateState = path.join(root, "duplicate.json");
     writeFileSync(duplicateState, JSON.stringify(duplicate));
     active = await launch(duplicateState);
-    await until(() => active.seeds?.["%1"]?.cmd.endsWith("--picker"));
+    // 중복 가드를 뺐다. 같은 폴더의 둘째 칸도 선택 목록이 아니라 같은 이어가기 명령을 받는다.
+    await until(() => active.seeds?.["%1"]?.cmd && !active.seeds["%1"].cmd.endsWith("--picker"));
+    assert.equal(active.seeds["%1"].cmd, active.seeds["%0"].cmd, "중복 칸만 다른 명령을 받음");
+    assert.ok(!active.seeds["%1"].notice, "중복 칸에 선택 안내가 남음");
     await until(() => active.latest["%0"]?.history.includes("CHIISPACE_SESSION_NEW"));
-    await until(() => /resume|session|conversation/i.test(active.latest["%1"]?.text ?? ""));
-    assert.ok(!active.latest["%1"].text.includes("Ask Codex to do anything"), "중복 칸이 선택 없이 대화에 연결됨");
     await close(active);
-    console.log("같은 폴더의 중복 칸은 자동 중복 연결 대신 선택 목록 확인");
+    console.log("같은 폴더의 중복 칸도 선택 목록 없이 같은 이어가기 명령 확인");
 
     const invalid = readState();
     invalid.procs["%1"].codexLaunch.args = ["--profile", "broken"];

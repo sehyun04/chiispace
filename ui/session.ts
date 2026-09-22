@@ -65,27 +65,16 @@ export function nativeSeed(v: unknown, migrate = false): Seed | null {
   return seed;
 }
 
-export function continuePlan(seeds: Record<string, unknown>, roots: Record<string, string | null>, migrate = false): Record<string, Seed> {
+/** 저장된 명령을 네이티브 이어가기 형태로 한 번 맞춘다.
+ *
+ *  같은 폴더의 두 번째 칸부터 선택 목록으로 돌리던 가드는 뺐다. 사용자가 칸마다 그냥
+ *  이어 열리기를 원했고 실제로 그렇게 쓰고 있다. `--continue` 가 폴더 기준이라 여러 칸이
+ *  같은 대화를 볼 수는 있지만, 그 판단은 앱이 아니라 CLI 와 사용자에게 맡긴다. */
+export function continuePlan(seeds: Record<string, unknown>, migrate = false): Record<string, Seed> {
   const out: Record<string, Seed> = {};
-  const used = new Set<string>();
   for (const [id, value] of Object.entries(seeds)) {
     const seed = nativeSeed(value, migrate);
-    if (!seed) continue;
-    const agent = seed.codexLaunch || seed.cmd === "codex resume --last" ? "codex"
-      : seed.cmd === "claude --continue" ? "claude" : null;
-    const root = seed.cwd ?? roots[id] ?? "";
-    const key = [agent, root].join("|").replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
-    if (agent && seed.auto !== false) {
-      // continue는 칸이 아닌 폴더 기준이다. 나머지 칸에 같은 대화를 자동으로 중복 연결하지 않는다.
-      if (used.has(key)) {
-        const picker = seed.codexLaunch ? codexContinue(seed.codexLaunch, true, true)
-          : { ...seed, cmd: agent === "claude" ? "claude --resume" : "codex resume" };
-        out[id] = { ...picker, notice: "같은 폴더의 다른 칸이 최근 대화를 이어갑니다. 이 칸에서는 대화를 선택하세요." };
-        continue;
-      }
-      used.add(key);
-    }
-    out[id] = seed;
+    if (seed) out[id] = seed;
   }
   return out;
 }
