@@ -22,6 +22,18 @@ test("셸·CLI 기본 제목과 실행 명령은 복원할 pane 이름으로 저
   assert.equal(label("%0", { "%0": { agent: "codex", proc: "node" } }, { "%0": "C:/Windows/System32/cmd.exe" }), "codex");
 });
 
+test("위임 알림에서 지어진 대화 이름은 칸 이름으로 저장하지 않음", () => {
+  // 알림 한 통이 /rename 으로 붙여 둔 이름을 밀어내면 칸을 구별할 수 없다.
+  for (const value of ["Chiispace task-42488-6", "chiispace task-1-2",
+    "Chiispace task-42488-6: use chiispace_claim, then chiispace_complete.",
+    "chiispace_claim 으로 받은 작업", "✳ chiispace_complete 보고"]) assert.equal(paneTitle(value), null, value);
+  // 같은 낱말이 들어가도 사람이 붙인 이름은 남는다.
+  assert.equal(paneTitle("치이스페 칸 이름 수정"), "치이스페 칸 이름 수정");
+  assert.equal(paneTitle("chiispace 배포 준비"), "chiispace 배포 준비");
+  assert.deepEqual(savedPaneTitles({ "%0": "Chiispace task-42488-6", "%1": "옆 칸 연동" }, ["%0", "%1"]),
+    { "%1": "옆 칸 연동" });
+});
+
 test("저장 이름은 살아 있는 칸만 복원하고 구형·깨진 이름 필드는 안전하게 무시", () => {
   const value = { "%0": "\u2731 이어갈 작업", "%1": "codex", "%2": 3, "%3": "닫힌 칸" };
   assert.deepEqual(savedPaneTitles(value, ["%0", "%1", "%2"]), { "%0": "이어갈 작업" });

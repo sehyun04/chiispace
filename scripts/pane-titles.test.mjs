@@ -108,7 +108,12 @@ test("실제 pane 자동 이름의 저장·재시작·숨긴 탭·수동 이름 
     await until(() => latest.panes["%2"].raw === "Codex");
     await check("%0", "서버 / 인증 검토");
     await check("%2", "새로 받은 이름");
+    // 옆 칸이 보낸 위임 알림을 에이전트가 대화 이름으로 삼아도 붙여 둔 이름은 그대로다.
+    send("%2", "Chiispace task-42488-6");
+    await until(() => latest.panes["%2"].raw === "Chiispace task-42488-6");
+    await check("%2", "새로 받은 이름");
     await until(() => readState().paneTitles?.["%0"] === "서버 / 인증 검토");
+    assert.equal(readState().paneTitles["%2"], "새로 받은 이름");
     assert.equal(readState().paneTitles["%99"], undefined);
     await close();
     await start();

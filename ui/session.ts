@@ -102,7 +102,13 @@ export function paneTitle(value: unknown): string | null {
   if (!name || /^(?:shell|claude(?: code)?|codex(?: cli)?|windows powershell)(?:\.exe)?$/i.test(name)
     // cmd는 사용자 제목 뒤에 실행 명령을 잠깐 덧붙인다. 그 문자열도 작업 이름이 아니다.
     || /(?:^|\s-\s+)(?:cmd|powershell|pwsh|bash|sh|zsh|fish|node|title|echo|chiispace-cli)(?:\.exe|\.cmd)?(?:\s|$)/i.test(name)
-    || /(?:^|\s-\s+)(?:claude|codex)(?:\.exe|\.cmd)?(?:$|\s+(?:-|resume\b|attach\b))/i.test(name)) return null;
+    || /(?:^|\s-\s+)(?:claude|codex)(?:\.exe|\.cmd)?(?:$|\s+(?:-|resume\b|attach\b))/i.test(name)
+    // 위임 알림은 받는 칸의 에이전트에게 프롬프트로 들어가고, 에이전트는 그것으로
+    // 대화 이름을 새로 짓는다. 그 이름을 자동 이름으로 받으면 사용자가 /rename 으로
+    // 붙여 둔 이름이 쪽지 한 통에 날아간다 — 칸 이름은 이 칸이 무엇을 하는 자리인지지
+    // 방금 받은 쪽지가 아니다.
+    || /^chiispace\s+task-/i.test(name)
+    || /\bchiispace_(?:claim|complete|delegate|status|context|peek|cancel)\b/i.test(name)) return null;
   return Array.from(name).slice(0, 160).join("");
 }
 
