@@ -384,19 +384,19 @@ test("칸이 돌리는 대화를 claude 명부에서 읽어 저장한다", { ski
       for (const c of await r.json()) window.__terms?.['%0']?.input(c);
     } finally { pending = false; }
   }, 100); return 'isolated roster test'; })()`;
-  const claudeBefore = claudePids();
-  const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
-  const screen = () => (latest.pane ?? []).join("\n");
-  const readState = () => JSON.parse(readFileSync(state, "utf8"));
-  const ESC = String.fromCharCode(27), CR = String.fromCharCode(13);
   // ConPTY 가 중간에 끼어서 앱 pid 아래 자손으로는 잡히지 않는다. 대신 이 테스트가 앱을
-  // 띄우기 전후의 차이로 고른다 — 칸이 하나뿐이라 새로 생긴 claude 도 하나여야 한다.
+  // 띄우기 전후의 차이로 고른다. 앱을 띄우기 전에 불러야 하므로 그보다 먼저 선언한다.
   const claudePids = () => {
     const raw = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
       "(Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -join ','"],
       { encoding: "utf8", windowsHide: true }).stdout.trim();
     return new Set(raw ? raw.split(",").map(Number) : []);
   };
+  const claudeBefore = claudePids();
+  const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
+  const screen = () => (latest.pane ?? []).join("\n");
+  const readState = () => JSON.parse(readFileSync(state, "utf8"));
+  const ESC = String.fromCharCode(27), CR = String.fromCharCode(13);
   try {
     let settled = false;
     for (let i = 0; i < 900 && !screen().includes("CHIISPACE_ROSTER_MARK"); i++) {
@@ -408,13 +408,17 @@ test("칸이 돌리는 대화를 claude 명부에서 읽어 저장한다", { ski
       await delay(100);
     }
     assert.match(screen(), /CHIISPACE_ROSTER_MARK/, "저장된 대화가 뜨지 않음");
+    // 사용자가 다른 창에서 claude 를 쓰는 중이면 새로 뜬 것이 섞인다. 명부는 격리한 설정
+    // 폴더에만 쓰고 앱은 제 칸 pid 의 명부만 읽으므로, 새로 생긴 것 모두에 써도 맞는 하나만 쓰인다.
     let pids = [];
-    for (let i = 0; i < 60 && pids.length !== 1; i++) { pids = [...claudePids()].filter(v => !claudeBefore.has(v)); if (pids.length !== 1) await delay(500); }
-    assert.equal(pids.length, 1, "이 칸의 claude 를 하나로 특정하지 못함: " + JSON.stringify(pids));
+    for (let i = 0; i < 60 && !pids.length; i++) { pids = [...claudePids()].filter(v => !claudeBefore.has(v)); if (!pids.length) await delay(500); }
+    assert.ok(pids.length, "새로 뜬 claude 가 없음");
     const sessionsDir = path.join(home, "sessions");
     mkdirSync(sessionsDir, { recursive: true });
-    writeFileSync(path.join(sessionsDir, pids[0] + ".json"),
-      JSON.stringify({ pid: pids[0], sessionId: sid, cwd: project, kind: "interactive" }));
+    for (const pid of pids) {
+      writeFileSync(path.join(sessionsDir, pid + ".json"),
+        JSON.stringify({ pid, sessionId: sid, cwd: project, kind: "interactive" }));
+    }
     for (let i = 0; i < 200 && readState().procs?.["%0"]?.claudeSession !== sid; i++) await delay(100);
     assert.equal(readState().procs["%0"].claudeSession, sid, "명부의 대화 id 가 칸에 저장되지 않음");
     assert.equal(readState().procs["%0"].cmd, "claude --resume " + sid, "다음에 켤 때 제 대화로 열리지 않음");

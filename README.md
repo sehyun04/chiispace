@@ -300,6 +300,13 @@ Claude는 `CHIISPACE_TEST_REAL_CLAUDE`에 설치된 exe를 지정한 뒤
 일반 삭제, 조합 종료 유실 뒤 첫 삭제, 조합 중 브라우저 삭제, 유령 조합 차단, 한글 단일 확정을 확인한다.
 `term.input()`만 호출하는 검증이나 물리 한글 IME 전체 동작 확인과는 구별한다.
 
+대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
+실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
+제출되어 대화 파일에 적히는지를 본다. 뒤의 것은 앱의 루프백 프록시 뒤에 **가짜 Anthropic 서버**를 두어,
+실제 claude 의 답이 쓰이는 동안 대화창에 흐르고 끝나면 대화 파일의 답으로 겹침 없이 넘어가는지 본다.
+격리 claude 는 승인한 API 키를 끝 20글자로 기억하므로 설정에 그 값도 넣는다(없으면 "Not logged in").
+유료 모델은 부르지 않는다.
+
 칸 이름은 같은 `CHIISPACE_TEST_EXE`로 `node --test scripts/pane-titles.test.mjs`를 실행한다.
 별도 세션과 실제 PTY의 제목 출력으로 헤더·옆 목록·연결 도구의 일치, 저장 후 재시작,
 숨긴 탭, 기본 제목 덮어쓰기 방지, 수동 이름 우선·해제, 닫힌 칸 정리를 검증한다.

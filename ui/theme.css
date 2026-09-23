@@ -96,5 +96,16 @@
   --ui-font: "Quicksand", "Jua", "Pretendard", "Malgun Gothic", system-ui, sans-serif;
   --mono-font: "D2KodingLigature Nerd Font", "Cascadia Code", "D2Coding", monospace;
 
+  /* 대화 화면의 색.
+   *
+   * 파스텔을 그대로 쓰면 크림 바탕에서 묻힌다(결정 26번). 여기 값은 전부 가장
+   * 밝은 카드 바탕(#fffdf8)에 대고 재서 4.5 를 넘긴 것들이다. 색조는 치이카와
+   * 팔레트 그대로 두고 명도만 내렸다 — 하늘색 #6fb7e0 은 2.17 이라 링크로
+   * 쓸 수 없었다. */
+  --me: #96663d; /* 내 말풍선. 그 위의 흰 글자 대비 4.92 */
+  --link: #2f7aa8; /* 4.62 */
+  --bad: #c34741; /* 4.81. 지난 대화를 터미널에 쓸 때의 빨강과 같은 값이다 */
+  --think: #7a5d99; /* 5.36 */
+
   color-scheme: light;
 }

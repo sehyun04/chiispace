@@ -34,6 +34,19 @@ anyhow = "1"
 # 시퀀스가 청크 경계에 걸리면 문자열로는 깨지지만 base64 는 바이트를 그대로 나른다.
 base64 = "0.22"
 
+# 대화창 실시간 표시(proxy.rs). 칸의 claude 가 API 로 보내는 요청을 루프백에서 받아
+# 그대로 넘기고, 돌아오는 SSE 를 옆에서 읽어 말풍선에 흘린다.
+# TLS 는 native-tls(Windows 는 SChannel)다. reqwest 기본인 rustls 는 aws-lc-rs 를
+# 끌고 와서 Windows 에서 cmake·NASM 없이는 빌드가 안 된다.
+# system-proxy 는 사용자가 회사 프록시 뒤에 있을 때 claude 가 원래 가던 길을 그대로 가게 한다.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "http2", "stream", "system-proxy"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio = { version = "1", features = ["net", "rt", "time"] }
+futures-util = "0.3"
+bytes = "1"
+
 # 터미널 엔진. 여기 소스는 우리가 갖지 않는다 — upstream(2rami/kasaterm)의
 # 크레이트를 그대로 당겨 쓴다. rev 를 박아 두는 이유: upstream main 은 활발히
 # 움직이고, 엔진이 말없이 바뀌면 여기가 깨진다. 올릴 때는 의도적으로 올린다.

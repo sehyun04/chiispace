@@ -14,6 +14,7 @@ mod launchers;
 mod conpty;
 mod pty_stream;
 mod codex_session;
+mod proxy;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -85,7 +86,12 @@ fn pty_open(
             ("CHIISPACE_CLI".into(), std::env::current_exe().map_err(|e| e.to_string())?
                 .with_file_name(if cfg!(windows) { "chiispace-cli.exe" } else { "chiispace-cli" })
                 .to_string_lossy().into_owned()),
-        ].into_iter().chain(app.state::<launchers::Launchers>().env.clone()).collect(),
+        ].into_iter()
+            .chain(app.state::<launchers::Launchers>().env.clone())
+            // 칸의 claude 가 부르는 API 를 앱의 루프백 프록시로 돌린다(proxy.rs). 대화창이
+            // 답이 끝나기를 기다리지 않고 쓰이는 동안을 보여줄 수 있는 유일한 길이다.
+            .chain(app.state::<proxy::Proxy>().env.clone())
+            .collect(),
         pane_id: id.clone(),
         ..Default::default()
     })
@@ -124,6 +130,41 @@ fn pty_write(
         turns.0.lock().unwrap().insert(id.clone(), false);
     }
     s.send_bytes(data.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// 대화창 입력바에서 쓴 말을 claude 에 넣고 제출한다.
+///
+/// 글과 Enter 를 한 덩어리로 보내면 claude 입력창은 그 전체를 붙여넣기로 받아
+/// Enter 가 줄바꿈이 되고 제출되지 않는다. 위임 쪽지(`collab_deliver`)가 이미
+/// 검증한 순서를 그대로 쓴다 — 켜져 있으면 bracketed paste 로 감싸 넣고, 잠깐
+/// 뒤에 Enter 를 따로 보낸다. 여러 줄 글도 그래야 한 번에 한 메시지로 들어간다.
+#[tauri::command]
+fn pty_submit(
+    collab: State<collab::Collab>,
+    panes: State<Panes>,
+    turns: State<AgentTurns>,
+    id: String,
+    text: String,
+) -> Result<(), String> {
+    // 사용자 입력과 같은 락을 잡아, 쪽지 전달이 그 사이에 끼어들지 않게 한다.
+    let mut queue = collab.0.lock().unwrap();
+    let map = panes.0.lock().unwrap();
+    let Some(s) = map.get(&id) else {
+        return Err(format!("없는 pane: {id}"));
+    };
+    let body = if s.full_snapshot().bracketed_paste {
+        format!("\x1b[200~{text}\x1b[201~")
+    } else {
+        text
+    };
+    queue.input(&id, body.as_bytes());
+    s.send_bytes(body.as_bytes()).map_err(|e| e.to_string())?;
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    queue.input(&id, b"\r");
+    if s.active_agent().is_some() {
+        turns.0.lock().unwrap().insert(id.clone(), false);
+    }
+    s.send_bytes(b"\r").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -289,6 +330,8 @@ pub fn run() {
             app.manage(Panes::default());
             app.manage(AgentTurns::default());
             app.manage(collab::Collab::default());
+            // 첫 칸이 뜨기 전에 주소가 정해져 있어야 한다. 이미 뜬 셸의 환경은 바꿀 수 없다.
+            app.manage(proxy::start(app.handle()));
             bridge::start(app.handle())?;
             app.manage(launchers::install(app.path().app_cache_dir()?)?);
             arm_autosend(app.handle());
@@ -303,6 +346,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty_open,
             pty_write,
+            pty_submit,
             pty_resize,
             pty_close,
             pane_status,
@@ -344,6 +388,10 @@ struct PaneStatus {
     codex: Option<collab::CodexBinding>,
     /// 이 칸이 돌리는 에이전트 프로세스의 pid. 그 pid 로 claude 자신이 써 둔 명부를 읽어
     /// "이 칸이 어느 대화인가"에 답한다 — 대화 파일을 뒤져 고르지 않기 위해 필요하다.
+    ///
+    /// 웹뷰는 `agentPid` 로 읽는다. 이름을 맞추지 않으면 그쪽에서는 늘 비어 보여서 명부를
+    /// 한 번도 묻지 않고, 칸마다 제 대화로 돌아오는 복원이 조용히 `--continue` 로 떨어진다.
+    #[serde(rename = "agentPid")]
     agent_pid: Option<u32>,
 }
 

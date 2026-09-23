@@ -551,17 +551,28 @@ pub fn claude_transcript(app: AppHandle, root: String, id: String, turns: usize)
 /// 대화 파일의 자리. `claude_transcript` 가 같은 탐색을 품고 있지만 그쪽은
 /// 터미널에 쓸 글까지 한 함수에서 만든다. 원문을 쓰는 쪽은 글자를 깎지
 /// 않으므로 자리 찾기만 따로 둔다.
+///
+/// 폴더가 맞는 곳을 먼저 보고, 없으면 모든 폴더에서 그 id 의 파일을 찾는다.
+/// 칸의 셸이 `cd` 로 옮겨 간 뒤에 claude 를 띄우면 대화는 그 폴더 밑에 쌓여
+/// 폴더 이름으로는 빗나간다. id 는 부른 쪽이 준 것이고 uuid 라 겹치지 않으므로,
+/// 폴더를 넓혀 찾는 것은 추측이 아니다 — 고르는 것은 여전히 id 다.
 fn session_file(app: &AppHandle, root: &str, id: &str) -> Option<std::path::PathBuf> {
-    use tauri::Manager;
-    let home = app.path().home_dir().ok()?;
+    // 경로 조각이 섞인 id 로 다른 파일을 열지 않게 uuid 모양만 받는다.
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    // id 를 준 명부(`claude_session_of_pid`)와 같은 자리를 본다. `CLAUDE_CONFIG_DIR` 을
+    // 쓰는 사람에게 명부는 찾고 대화 파일은 못 찾는 어긋남이 생기지 않게.
     let want = squash(root);
-    for d in std::fs::read_dir(home.join(".claude").join("projects")).ok()?.flatten() {
-        if squash(&d.file_name().to_string_lossy()) == want {
-            let p = d.path().join(format!("{id}.jsonl"));
-            return p.is_file().then_some(p);
+    let name = format!("{id}.jsonl");
+    let dirs: Vec<_> = std::fs::read_dir(claude_home(app)?.join("projects")).ok()?.flatten().collect();
+    if let Some(d) = dirs.iter().find(|d| squash(&d.file_name().to_string_lossy()) == want) {
+        let p = d.path().join(&name);
+        if p.is_file() {
+            return Some(p);
         }
     }
-    None
+    dirs.iter().map(|d| d.path().join(&name)).find(|p| p.is_file())
 }
 
 /// 대화 원문 그대로. 말풍선은 이것을 직접 뜯는다.
