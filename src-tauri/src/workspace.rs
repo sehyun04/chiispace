@@ -724,7 +724,34 @@ mod live_session_tests {
 /// 주고, 부르는 쪽은 그때 지금처럼 `--continue` 로 남겨 둔다(나빠지지 않는다).
 #[tauri::command]
 pub fn claude_session_of_pid(app: AppHandle, pid: u32, cwd: Option<String>) -> Option<String> {
-    session_of_pid_at(&claude_home(&app)?.join("sessions"), pid, cwd.as_deref())
+    let dir = claude_home(&app)?.join("sessions");
+    let table = kasa_pty::process_table_shared();
+    roster_pids(&table, pid)
+        .into_iter()
+        .find_map(|p| session_of_pid_at(&dir, p, cwd.as_deref()))
+}
+
+/// 명부를 쓴 claude 가 칸이 본 claude 가 아닐 수 있다.
+///
+/// 칸 셸 바로 아래의 `claude.exe` 는 실행기일 때가 있고, 실제 claude 는 그 자식으로 떠서
+/// **자기 pid 로** 명부를 쓴다(실행기가 옛 판이고 새 판이 따로 깔려 있을 때 그랬다).
+/// 칸이 본 pid 만 보면 명부가 멀쩡히 있는데도 영영 못 찾아, 대화창이 안 뜨고 복원도
+/// `--continue` 로 떨어진다. 실사용에서 그렇게 됐다. 그래서 그 아래 claude 자손까지 본다 —
+/// 자손은 칸의 프로세스 트리 안이라 다른 칸의 대화를 집을 일이 없다.
+/// MCP 서버·셸 같은 다른 자식은 이름으로 거른다.
+fn roster_pids(table: &[(u32, u32, String)], pid: u32) -> Vec<u32> {
+    let mut out = vec![pid];
+    let mut i = 0;
+    while i < out.len() && out.len() < 16 {
+        let parent = out[i];
+        for (child, ppid, name) in table {
+            if *ppid == parent && !out.contains(child) && name.to_lowercase().contains("claude") {
+                out.push(*child);
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 /// claude 의 상태 폴더. `CLAUDE_CONFIG_DIR` 이 있으면 그쪽이다 — 그 변수를 준 채 띄운 claude 는
@@ -773,7 +800,27 @@ fn session_of_pid_at(dir: &std::path::Path, pid: u32, cwd: Option<&str>) -> Opti
 
 #[cfg(test)]
 mod session_of_pid_tests {
-    use super::session_of_pid_at;
+    use super::{roster_pids, session_of_pid_at};
+
+    #[test]
+    fn looks_past_the_launcher_to_the_claude_that_wrote_the_roster() {
+        // 셸(10) → 실행기 claude(20) → 실제 claude(30). 실제 claude 는 MCP 서버(node)와
+        // 도구용 셸을 거느린다. 명부는 30 이 쓴다.
+        let t = |p: u32, pp: u32, n: &str| (p, pp, n.to_string());
+        let table = vec![
+            t(10, 1, "powershell.exe"),
+            t(20, 10, "claude.exe"),
+            t(30, 20, "claude.exe"),
+            t(40, 30, "node.exe"),
+            t(41, 30, "bash.exe"),
+            t(50, 10, "claude.exe"), // 같은 셸의 다른 자식이지 20 의 자손이 아니다
+        ];
+        assert_eq!(roster_pids(&table, 20), vec![20, 30]);
+        // 실행기 없이 바로 뜬 claude 는 제 pid 하나다.
+        assert_eq!(roster_pids(&table, 30), vec![30]);
+        // 표가 꼬여 제자리를 가리켜도 멈춘다.
+        assert_eq!(roster_pids(&[t(7, 7, "claude.exe")], 7), vec![7]);
+    }
 
     fn write(dir: &std::path::Path, name: &str, body: &str) {
         std::fs::write(dir.join(name), body).unwrap();

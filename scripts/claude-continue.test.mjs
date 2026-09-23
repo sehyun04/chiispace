@@ -386,11 +386,13 @@ test("칸이 돌리는 대화를 claude 명부에서 읽어 저장한다", { ski
   }, 100); return 'isolated roster test'; })()`;
   // ConPTY 가 중간에 끼어서 앱 pid 아래 자손으로는 잡히지 않는다. 대신 이 테스트가 앱을
   // 띄우기 전후의 차이로 고른다. 앱을 띄우기 전에 불러야 하므로 그보다 먼저 선언한다.
+  // pid -> 부모 pid. 칸 셸 아래 claude.exe 는 실행기이고 실제 claude 는 그 자식으로 떠서
+  // 자기 pid 로 명부를 쓴다. 명부를 쓸 자리를 현실과 같게 고르려면 부모를 알아야 한다.
   const claudePids = () => {
     const raw = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      "(Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -join ','"],
+      "(Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | ForEach-Object { \"$($_.ProcessId):$($_.ParentProcessId)\" }) -join ','"],
       { encoding: "utf8", windowsHide: true }).stdout.trim();
-    return new Set(raw ? raw.split(",").map(Number) : []);
+    return new Map(raw ? raw.split(",").map(s => s.split(":").map(Number)) : []);
   };
   const claudeBefore = claudePids();
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
@@ -408,10 +410,8 @@ test("칸이 돌리는 대화를 claude 명부에서 읽어 저장한다", { ski
       await delay(100);
     }
     assert.match(screen(), /CHIISPACE_ROSTER_MARK/, "저장된 대화가 뜨지 않음");
-    // 사용자가 다른 창에서 claude 를 쓰는 중이면 새로 뜬 것이 섞인다. 명부는 격리한 설정
-    // 폴더에만 쓰고 앱은 제 칸 pid 의 명부만 읽으므로, 새로 생긴 것 모두에 써도 맞는 하나만 쓰인다.
     let pids = [];
-    for (let i = 0; i < 60 && !pids.length; i++) { pids = [...claudePids()].filter(v => !claudeBefore.has(v)); if (!pids.length) await delay(500); }
+    for (let i = 0; i < 60 && !pids.length; i++) { const now = claudePids(); const fresh = [...now.keys()].filter(v => !claudeBefore.has(v)); pids = fresh.filter(p => !fresh.some(q => now.get(q) === p)); if (!pids.length) await delay(500); }
     assert.ok(pids.length, "새로 뜬 claude 가 없음");
     const sessionsDir = path.join(home, "sessions");
     mkdirSync(sessionsDir, { recursive: true });

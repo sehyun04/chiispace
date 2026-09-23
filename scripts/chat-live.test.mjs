@@ -137,11 +137,13 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     } finally { pending = false; }
   }, 100); return 'isolated live test'; })()`;
 
+  // pid -> 부모 pid. 칸 셸 아래 claude.exe 는 실행기이고 실제 claude 는 그 자식으로 떠서
+  // 자기 pid 로 명부를 쓴다. 명부를 쓸 자리를 현실과 같게 고르려면 부모를 알아야 한다.
   const claudePids = () => {
     const raw = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      "(Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -join ','"],
+      "(Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | ForEach-Object { \"$($_.ProcessId):$($_.ParentProcessId)\" }) -join ','"],
       { encoding: "utf8", windowsHide: true }).stdout.trim();
-    return new Set(raw ? raw.split(",").map(Number) : []);
+    return new Map(raw ? raw.split(",").map(s => s.split(":").map(Number)) : []);
   };
   const claudeBefore = claudePids();
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
@@ -160,8 +162,10 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
       await delay(100);
     }
     assert.match(screen(), /LIVE_READY_MARK/, "저장된 대화가 뜨지 않음");
+    // 명부는 새로 뜬 claude 중 **잎**(다른 새 claude 의 부모가 아닌 것)에만 쓴다 — 실제 claude 가
+    // 그렇게 쓴다. 전에는 새 pid 모두에 써서, 앱이 실행기 pid 로 묻다 못 찾는 버그를 가렸다.
     let pids = [];
-    for (let i = 0; i < 60 && !pids.length; i++) { pids = [...claudePids()].filter(v => !claudeBefore.has(v)); if (!pids.length) await delay(500); }
+    for (let i = 0; i < 60 && !pids.length; i++) { const now = claudePids(); const fresh = [...now.keys()].filter(v => !claudeBefore.has(v)); pids = fresh.filter(p => !fresh.some(q => now.get(q) === p)); if (!pids.length) await delay(500); }
     assert.ok(pids.length, "새로 뜬 claude 가 없음");
     mkdirSync(path.join(home, "sessions"), { recursive: true });
     for (const pid of pids) writeFileSync(path.join(home, "sessions", pid + ".json"), JSON.stringify({ pid, sessionId: sid, cwd: project, kind: "interactive" }));
