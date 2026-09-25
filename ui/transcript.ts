@@ -312,6 +312,12 @@ export function toItems(events: SessionEvent[], toolMap: ToolMap, keepSidechain 
     if (!keepSidechain && ev.isSidechain) continue;
 
     if (ev.type === "system") {
+      // 새 claude 는 슬래시 명령과 그 결과를 user 가 아니라 system(local_command)으로 적는다.
+      // 걸러 버리면 `/model` 로 바꾼 것이 대화창에서 흔적 없이 사라진다.
+      if (ev.subtype === "local_command" && typeof ev.content === "string") {
+        pushUserText(items, ev.content, ev.timestamp, ev.uuid);
+        continue;
+      }
       const text = flattenSystem(ev);
       if (text) items.push({ kind: "system", text });
       continue;

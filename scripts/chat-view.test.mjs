@@ -84,6 +84,7 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
         hidden: !!over && getComputedStyle(over).visibility === 'hidden',
         termFocused: !!document.activeElement?.classList.contains('xterm-helper-textarea'),
         toggle: slot?.querySelector('.pane-head .view')?.textContent ?? null,
+        cmds: [...(over?.querySelectorAll('.cmd span') ?? [])].map(e => e.textContent),
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
       for (const c of await r.json()) {
@@ -161,6 +162,22 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
     commands.push({ send: "CHAT_VIEW_SENT" });
     // claude 가 제출을 받아야만 원문에 적힌다. 줄바꿈으로 입력창에 머물면 여기서 멈춘다.
     assert.ok(await until(() => dom().mine?.includes("CHAT_VIEW_SENT"), 400), "보낸 말이 제출되지 않음: " + JSON.stringify(dom()) + "\n" + screen().slice(-800));
+
+    // 메뉴를 여는 명령은 보내면 터미널로 넘어가고, 메뉴를 닫으면 대화창으로 돌아와야 한다.
+    // 닫힌 것은 claude 가 대화 파일에 적는 명령·결과 줄로 안다(열 때는 아무것도 안 적는다).
+    // /config 는 첫 Esc 가 검색어 지우기라 두 번 눌러야 닫힌다.
+    for (const [cmd, escs] of [["/config", 2], ["/model", 1]]) {
+      commands.push({ send: cmd });
+      assert.ok(await until(() => dom().over && dom().hidden && dom().toggle === "대화로", 50), cmd + " 을 보냈는데 터미널로 넘어가지 않음: " + JSON.stringify(dom()));
+      assert.ok(await until(() => /Esc to (close|cancel|clear)/.test(screen()), 80), cmd + " 메뉴가 열리지 않음:\n" + screen().slice(-600));
+      await delay(800);
+      // 메뉴가 열려 있는 동안은 돌아오면 안 된다.
+      assert.equal(dom().hidden, true, cmd + " 메뉴가 열려 있는데 대화창이 덮였음");
+      for (let i = 0; i < escs; i++) { commands.push({ term: ESC }); await delay(500); }
+      assert.ok(await until(() => dom().over && !dom().hidden && dom().toggle === "터미널로", 80), cmd + " 을 닫았는데 대화창으로 돌아오지 않음: " + JSON.stringify(dom()));
+      assert.ok(dom().cmds.includes(cmd), cmd + " 기록이 대화창에 안 보임: " + JSON.stringify(dom().cmds));
+      assert.ok(await until(() => dom().inputFocused, 30), cmd + " 뒤 포커스가 입력바로 오지 않음");
+    }
 
     commands.push({ toggle: true });
     assert.ok(await until(() => dom().over === false && dom().toggle === "대화로", 50), "터미널로 돌아가지 않음");

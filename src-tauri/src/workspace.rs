@@ -575,6 +575,18 @@ fn session_file(app: &AppHandle, root: &str, id: &str) -> Option<std::path::Path
     dirs.iter().map(|d| d.path().join(&name)).find(|p| p.is_file())
 }
 
+/// 대화 파일의 크기. 없으면 0.
+///
+/// 대화창은 이것이 바뀔 때만 원문을 다시 받는다. 긴 대화는 원문이 수 MB 라 매번 통째로
+/// 넘기면 칸이 여럿일 때 앱이 무거워진다. 메뉴 명령이 끝났는지도 이것으로 안다 — claude 는
+/// 메뉴를 열 때는 아무것도 안 적고 닫힐 때 명령과 결과를 적는다.
+#[tauri::command]
+pub fn claude_transcript_size(app: AppHandle, root: String, id: String) -> u64 {
+    session_file(&app, &root, &id)
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map_or(0, |m| m.len())
+}
+
 /// 대화 원문 그대로. 말풍선은 이것을 직접 뜯는다.
 ///
 /// `claude_transcript` 와 달리 줄이지도 색을 입히지도 않는다. 그쪽은 터미널에

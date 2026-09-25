@@ -80,6 +80,19 @@ test("슬래시 명령은 카드로 승격한다", () => {
   assert.deepEqual(out, [{ kind: "command", name: "/rename", args: undefined, message: undefined }]);
 });
 
+test("새 claude 가 system 으로 적는 슬래시 명령도 보인다", () => {
+  // 메뉴 명령은 닫힐 때 명령 줄과 결과 줄을 한꺼번에 이 모양으로 남긴다.
+  const out = items(
+    { type: "system", subtype: "local_command", content: "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>" },
+    { type: "system", subtype: "local_command", content: "<local-command-stdout>Set model to `Opus 5.5`</local-command-stdout>" },
+    { type: "system", subtype: "local_command", content: "<local-command-stdout></local-command-stdout>" },
+  );
+  assert.deepEqual(out, [
+    { kind: "command", name: "/model", args: "", message: "model" },
+    { kind: "local-command", stdout: "Set model to `Opus 5.5`" },
+  ]);
+});
+
 test("로컬 명령 출력은 따로 선다", () => {
   const out = items(user("<local-command-stdout>내용</local-command-stdout>"));
   assert.deepEqual(out, [{ kind: "local-command", stdout: "내용" }]);

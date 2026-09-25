@@ -364,6 +364,7 @@ pub fn run() {
             workspace::claude_session_of_pid,
             workspace::claude_transcript,
             workspace::claude_transcript_raw,
+            workspace::claude_transcript_size,
             workspace::state_save,
             workspace::state_load,
         ])

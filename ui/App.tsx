@@ -98,9 +98,11 @@ export default function App() {
    *  대화 id 가 붙은 순간 대화창이 뜨려면 state 가 따로 있어야 한다. 값의 출처는
    *  `sessionOf` 와 같다 — 명부에서 읽은 id 뿐이다. */
   const [chatIds, setChatIds] = useState<Record<string, string>>({});
-  /** 대화창 대신 터미널을 보겠다고 고른 칸. 권한 묻기·선택지처럼 TUI 에만 있는
-   *  화면을 다뤄야 할 때 쓴다. */
-  const [termView, setTermView] = useState<Record<string, boolean>>({});
+  /** 대화창 대신 터미널을 보이는 칸. 권한 묻기·선택지처럼 TUI 에만 있는 화면을 다뤄야
+   *  할 때 쓴다. `true` 는 사용자가 직접 고른 것이라 그대로 두고, `"auto"` 는 메뉴 명령·
+   *  선택지 카드 때문에 잠깐 간 것이라 그 일이 끝나면(대화 파일이 자라면) 돌아온다.
+   *  둘을 가르지 않으면 `/model` 을 닫고 나서도 터미널에 눌러앉는다. */
+  const [termView, setTermView] = useState<Record<string, boolean | "auto">>({});
   /** 대화 파일에 무엇이든 적힌 칸. 그 전에는 대화창을 올려만 두고 터미널을 보인다(Chat.tsx). */
   const [chatReady, setChatReady] = useState<Record<string, boolean>>({});
   /** claude 를 마지막으로 본 때. 800ms 폴링이 한 번 비었다고 대화창을 걷었다
@@ -721,9 +723,11 @@ export default function App() {
   const chatState = (id?: string) => {
     if (!id) return { mount: false, shown: false };
     if (stat[id]?.agent === "claude") lastClaude.current[id] = Date.now();
+    // 잠깐 터미널로 간 동안에도 대화창은 걷지 않고 숨겨 둔다. 대화 파일을 계속 재야
+    // 메뉴가 끝난 것을 안다.
     const mount =
-      !!chatIds[id] && !termView[id] && Date.now() - (lastClaude.current[id] ?? 0) < 5000;
-    const shown = mount && !!chatReady[id];
+      !!chatIds[id] && termView[id] !== true && Date.now() - (lastClaude.current[id] ?? 0) < 5000;
+    const shown = mount && !!chatReady[id] && !termView[id];
     showsChat.current[id] = shown;
     return { mount, shown };
   };
@@ -927,7 +931,14 @@ export default function App() {
                             <button
                               className="view"
                               onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => setTermView((v) => ({ ...v, [s.id]: !v[s.id] }))}
+                              onClick={() =>
+                                setTermView((v) => {
+                                  if (!v[s.id]) return { ...v, [s.id]: true };
+                                  const next = { ...v };
+                                  delete next[s.id];
+                                  return next;
+                                })
+                              }
                             >
                               {termView[s.id] ? "대화로" : "터미널로"}
                             </button>
@@ -989,11 +1000,21 @@ export default function App() {
                             onReady={(ready) =>
                               setChatReady((r) => (r[s.id] === ready ? r : { ...r, [s.id]: ready }))
                             }
-                            onShowTerm={() => {
-                              setTermView((v) => ({ ...v, [s.id]: true }));
+                            onShowTerm={(auto) => {
+                              setTermView((v) => ({ ...v, [s.id]: auto ? "auto" : true }));
                               showsChat.current[s.id] = false;
                               termOf(s.id)?.focus();
                             }}
+                            away={termView[s.id] === "auto"}
+                            onBack={() =>
+                              setTermView((v) => {
+                                // 그 사이 사용자가 직접 터미널을 골랐으면 그 뜻이 이긴다.
+                                if (v[s.id] !== "auto") return v;
+                                const next = { ...v };
+                                delete next[s.id];
+                                return next;
+                              })
+                            }
                           />
                         ) : null}
                       </section>
