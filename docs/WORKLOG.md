@@ -180,7 +180,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 ## 4. 커밋과 배포 상태
 
 - 실행 경로 고정: `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-- 마지막 배포 코드: `537bb18`. 2026-09-23 20:46:05에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+- 마지막 배포 코드: `c5d6933`. 2026-09-25 22:42:49에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+  메뉴 명령 뒤 대화창 자동 복귀(15절 9~11번). 그 앞 배포는 `537bb18`(9월 23일 20:46:05).
   20:06 의 `16144b9` 판은 실사용에서 대화창이 뜨지 않았다 — 실행기 pid 로 명부를 찾았다(15절 7번).
   상세는 15절. 칸마다 제 대화로 이어가기(14절)는
   이 판에서 처음 실제로 동작한다 — `7165045` 에서는 `agentPid` 이름 불일치로 명부를 묻지 않았다.
@@ -189,8 +190,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
   체크아웃되어 exe 에 박힌 바이트가 캐시와 달라졌고, 앱이 켜자마자 `ConPTY cache mismatch` 로 죽었다.
   배포 전 검증 10개가 전부 실패해서 잡았다. `.gitattributes` 로 그 파일의 변환을 껐다.
   `target/agent-bridge/release/`는 내부 빌드·검증용이지 사용자 실행 위치가 아니다.
-- 직전 배포본 백업: `src-tauri/target/release/backups/before-roster-launcher-20260923-204605/`.
-  그 앞은 `before-chat-view-20260923-200653/`(그때는 앱이 떠 있어 exe 를 `*.old-…` 로 옮겨 냈다), `before-per-pane-session-20260923-013704/`, `before-continue-guard-20260923-005355/`,
+- 직전 배포본 백업: `src-tauri/target/release/backups/before-menu-return-20260925-224249/`.
+  그 앞은 `before-roster-launcher-20260923-204605/`, `before-chat-view-20260923-200653/`(그때는 앱이 떠 있어 exe 를 `*.old-…` 로 옮겨 냈다), `before-per-pane-session-20260923-013704/`, `before-continue-guard-20260923-005355/`,
   그 앞은 `before-delegation-title-20260923-001617/`.
   9월 22일의 앱·CLI와 교체 시점의 `session-before.json`을 보관했다. 백업 해시를 확인한 뒤 교체했다.
   **이번에는 사용자 앱이 실행 중이었다.** 임의 종료·재시작하지 않고, 실행 중인 두 exe 를
@@ -206,10 +207,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 
 | 파일 | SHA-256 |
 |---|---|
-| `chiispace.exe` | `AC494C60C65BC76CA8369519CC79E5D63ED708717F66CFFD30FC2CCB4A7DAC27` |
-| `chiispace-cli.exe` | `4D133A5149A69D1EF0C2C1D9C5A778F338C396B95E7404D08641A8B0651C60B8` |
+| `chiispace.exe` | `7778FEF68A840B714EB842238AD4E141EFABEFFCE26E133639C4909CDD7E757B` |
+| `chiispace-cli.exe` | `7F466E1F144136608D19860993E5A2A75F8AE96F7EE79F3990CF785A0BC563AD` |
 
-교체 직후 사용자 세션 SHA-256: `E515FE326AA9380BCBA8B36D6315C2627B674759D090D4B0415A18775C8C2E8D`.
+교체 직후 사용자 세션 SHA-256: `FDAE802F352035BB94E2303C74F7FE65563ABAE982F08AD4B0E6E4099A6EE4D2`.
 앱이 계속 떠 있어 사용자가 칸을 쓰는 대로 이 값은 바뀐다 — 배포가 세션을 건드리지 않았다는 근거는
 이 해시가 아니라, 교체한 것이 exe 두 개뿐이고 검증이 `CHIISPACE_STATE` 임시 파일만 썼다는 사실이다.
 사용자가 새 앱을 열면 앱이 정상 저장 과정에서 이름을 보존한다. 테스트에서 직접 세션을 고치지 않는다.
