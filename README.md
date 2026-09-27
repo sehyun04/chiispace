@@ -305,7 +305,8 @@ PowerShell의 입력·삭제 후 갈색 잔상은 같은 `CHIISPACE_TEST_EXE`로
 PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로그램의 명시적 색 보존을 확인한다.
 `CHIISPACE_TEST_SCREENSHOT=1`이면 각 단계의 자체 테스트 창도 캡처한다. 사용자 창에는 입력하지 않는다.
 바이트 경계·불완전 출력·선택 반전 보존은 `scripts/powershell-render.test.mjs`의 단위 검증이다.
-9월 27일 소스에는 보정이 반영됐으나 고정 경로 exe는 아직 9월 25일 배포판이다. 배포 상태는 작업 정리 4·16절을 따른다.
+9월 28일 02:22:33에 Codex 대화창을 포함한 최신 빌드를 고정 경로 exe에 반영했다. 첫 Codex 실행 때 `/hooks` 신뢰 검토가 필요하며,
+실제 모델 변경·`/status` 후 연속 대화는 아직 별도 검증 범위다. 배포 상태는 작업 정리 4·17절을 따른다.
 
 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
 실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
@@ -317,6 +318,10 @@ PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로�
 띄우게 하고, 그 서브에이전트의 일이 대화창에 한 줄로 보이는지, 본 대화 말풍선에 안 섞이는지, 마치면
 걷히는지 본다. 그 줄과 "부름" 줄을 눌러 서브에이전트 대화 전체가 열리는지, 그 화면의 Esc 가 claude 로 새지
 않는지도 본다. 가짜 서버도 서브에이전트를 본문이 아니라 `x-claude-code-agent-id` 헤더로 가른다.
+
+Codex 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로 `node --test scripts/codex-chat.test.mjs`를 실행한다.
+별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 최초 훅 신뢰 전 터미널 유지, 신뢰 후 두 칸 격리, 한글 제출,
+`/new`, 메뉴 전환, 재시작 이어가기, 종료 직후 낡은 제출 거부를 검증한다.
 
 칸 이름은 같은 `CHIISPACE_TEST_EXE`로 `node --test scripts/pane-titles.test.mjs`를 실행한다.
 별도 세션과 실제 PTY의 제목 출력으로 헤더·옆 목록·연결 도구의 일치, 저장 후 재시작,

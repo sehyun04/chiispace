@@ -130,12 +130,18 @@ test("Codex 훅 신뢰·칸별 대화창·입력·새 대화·네이티브 이�
     await until(() => pane("%0").screen?.includes("Ask Codex to do anything"));
     assert.ok(!pane("%0").shown, "신뢰하지 않은 훅으로 대화창 연결");
     await input("%0", "/hooks");
-    await until(() => pane("%0").screen?.includes("Press t to trust all"));
+    await until(() => {
+      const screen = pane("%0").screen ?? "";
+      return screen.includes("Press t to trust all") || screen.includes("t trust all");
+    });
     commands.push({ id: "%0", term: "t" });
     await delay(500);
     assert.ok(!pane("%0").screen.includes("need review"), "격리 훅 신뢰 실패");
     commands.push({ id: "%0", term: "\x1b" });
-    await until(() => !pane("%0").screen?.includes("Press enter to view hooks"));
+    await until(() => {
+      const screen = pane("%0").screen ?? "";
+      return !screen.includes("Press enter to view hooks") && !screen.includes("enter review");
+    });
     commands.push({ id: "%0", term: "\x15" });
     await delay(600);
     await input("%0", "FIRST_PANE_MARK");
