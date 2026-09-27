@@ -30,6 +30,7 @@ import {
 } from "./transcript";
 import { shortToolName, toolSummary, toolStats, diffLines } from "./tools";
 import { applyLive, caughtUp, partialInput, type Live, type LiveEvent } from "./live";
+import { SubAgents } from "./SubAgents";
 import "./chat.css";
 
 function Caret() {
@@ -695,6 +696,7 @@ export function Chat({
               </div>
             ))}
             {stream && <LiveRows live={stream} slug={slug} name={name} showFace={!lastIsAgent} />}
+            <SubAgents session={id} />
             {stuck && !stream && (
               <div className="ask">
                 <div className="ask-title">터미널에서 기다리는 것이 있다</div>

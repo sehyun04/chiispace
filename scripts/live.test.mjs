@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyLive, partialInput, caughtUp } from "../ui/live.ts";
+import { applyLive, partialInput, caughtUp, applySub, pruneSubs, subStreaming, subFinished } from "../ui/live.ts";
 
 const sse = (o) => JSON.stringify(o);
 const data = (req, ...events) => ({ session: "s", req, phase: "data", events: events.map(sse) });
@@ -108,4 +108,75 @@ test("대화 파일이 새로 자란 뒤에야 쓰이던 말풍선을 걷는다"
   assert.equal(caughtUp(done, 100, 180), true);
   assert.equal(caughtUp({ ...done, done: false }, 100, 180), false);
   assert.equal(caughtUp(done, null, 180), false);
+});
+
+// ── 서브에이전트 ──
+
+const sub = (agent, req, phase, events = [], label) => ({ session: "s", agent, req, phase, events: events.map(sse), label });
+
+test("서브에이전트는 에이전트마다 따로 모이고 처음 본 순서를 지킨다", () => {
+  let subs = [];
+  subs = applySub(subs, sub("a", 1, "begin", [], "로그 찾기"), 1);
+  subs = applySub(subs, sub("b", 2, "begin", [], "테스트 돌리기"), 2);
+  subs = applySub(subs, sub("a", 1, "data", [{ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "Grep" } }, { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"pattern":"ERR' } }]), 3);
+  assert.deepEqual(subs.map((s) => [s.agent, s.label]), [["a", "로그 찾기"], ["b", "테스트 돌리기"]]);
+  assert.deepEqual(subs[0].step, { kind: "tool", name: "Grep", json: '{"pattern":"ERR' });
+  assert.equal(subs[1].step, null);
+});
+
+test("요청과 요청 사이에도 마지막으로 한 일이 남는다", () => {
+  // 도구를 부르고 요청이 끝나면, 도구가 도는 동안은 스트림이 없다. 그때가 가장 길다.
+  let subs = applySub([], sub("a", 1, "begin", [], "빌드"), 1);
+  subs = applySub(subs, sub("a", 1, "data", [{ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "Bash" } }, { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"command":"cargo test"}' } }, { type: "message_stop" }]), 2);
+  subs = applySub(subs, sub("a", 1, "end"), 3);
+  assert.equal(subStreaming(subs[0]), false);
+  assert.equal(subs[0].step.name, "Bash");
+  // 다음 요청이 시작만 됐을 때도 그대로다.
+  subs = applySub(subs, sub("a", 2, "begin"), 4);
+  assert.equal(subStreaming(subs[0]), true);
+  assert.equal(subs[0].step.name, "Bash");
+  // 새 글이 오면 그것으로 바뀐다.
+  subs = applySub(subs, sub("a", 2, "data", [{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "3개 실패" } }]), 5);
+  assert.deepEqual(subs[0].step, { kind: "text", text: "3개 실패" });
+});
+
+test("이름이 없는 이벤트가 와도 붙은 이름을 지키고, 받은 목록은 고치지 않는다", () => {
+  const a = applySub([], sub("a", 1, "begin", [], "리뷰"), 1);
+  const frozen = JSON.stringify(a);
+  const b = applySub(a, sub("a", 1, "data", [{ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }]), 2);
+  assert.equal(JSON.stringify(a), frozen);
+  assert.equal(b[0].label, "리뷰");
+  assert.deepEqual(b[0].step, { kind: "thinking" });
+});
+
+test("오래 조용한 서브에이전트는 걷는다", () => {
+  let subs = applySub([], sub("a", 1, "begin", [], "x"), 1000);
+  subs = applySub(subs, sub("b", 2, "begin", [], "y"), 50000);
+  assert.deepEqual(pruneSubs(subs, 60000, 30000).map((s) => s.agent), ["b"]);
+  // 걷을 것이 없으면 같은 목록을 돌려준다(React 가 괜히 다시 그리지 않게).
+  assert.equal(pruneSubs(subs, 20000, 30000), subs);
+});
+
+test("서브에이전트는 마지막 답이 끝나야 마친 것이다", () => {
+  // 중간 요청은 도구를 부르며 끝난다. 그때 걷으면 도구가 도는 동안 사라진다.
+  let subs = applySub([], sub("a", 1, "begin", [], "x"), 1);
+  subs = applySub(subs, sub("a", 1, "data", [{ type: "message_delta", delta: { stop_reason: "tool_use" } }, { type: "message_stop" }]), 2);
+  assert.equal(subFinished(subs[0]), false);
+  subs = applySub(subs, sub("a", 2, "begin"), 3);
+  assert.equal(subFinished(subs[0]), false);
+  subs = applySub(subs, sub("a", 2, "data", [{ type: "message_delta", delta: { stop_reason: "end_turn" } }, { type: "message_stop" }]), 4);
+  assert.equal(subFinished(subs[0]), true);
+  // 끊겨서 끝난 것(이유 없음)은 마친 것이 아니다 — 조용함 기준이 걷는다.
+  const cut = applySub(applySub([], sub("b", 3, "begin"), 1), sub("b", 3, "end"), 2);
+  assert.equal(subFinished(cut[0]), false);
+  // 오류로 끝난 것은 마친 것이다.
+  const bad = applySub(applySub([], sub("c", 4, "begin"), 1), sub("c", 4, "data", [{ type: "error", error: { message: "Overloaded" } }]), 2);
+  assert.equal(subFinished(bad[0]), true);
+});
+
+test("걷은 서브에이전트의 늦은 끝 신호가 빈 줄을 되살리지 않는다", () => {
+  let subs = applySub([], sub("a", 1, "begin", [], "x"), 1);
+  subs = applySub(subs, sub("a", 1, "data", [{ type: "message_delta", delta: { stop_reason: "end_turn" } }, { type: "message_stop" }]), 2).filter((s) => !subFinished(s));
+  assert.deepEqual(subs, []);
+  assert.equal(applySub(subs, sub("a", 1, "end"), 3), subs);
 });

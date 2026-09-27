@@ -120,3 +120,66 @@ export function caughtUp(live: Live | null, rawAtEnd: number | null, rawNow: num
   if (!live?.done || rawAtEnd == null) return false;
   return rawNow > rawAtEnd;
 }
+
+// ── 서브에이전트 (proxy.rs → chat:sub) ──────────────────────────────
+
+export type SubEvent = LiveEvent & { agent: string; label?: string };
+
+/** 서브에이전트가 마지막으로 한 일. 요청과 요청 사이 — 도구가 실제로 도는 동안 — 에는
+ *  스트림이 없으므로, 이걸 들고 있지 않으면 가장 오래 걸리는 순간에 아무것도 안 보인다. */
+export type SubStep =
+  | { kind: "tool"; name: string; json: string }
+  | { kind: "text"; text: string }
+  | { kind: "thinking" };
+
+export type Sub = {
+  agent: string;
+  label: string;
+  live: Live | null;
+  step: SubStep | null;
+  /** 마지막으로 무엇이 온 때(ms). 오래 조용한 것은 걷는다. */
+  at: number;
+};
+
+function lastStep(live: Live | null): SubStep | null {
+  const blocks = live?.blocks.filter(Boolean) ?? [];
+  const b = blocks[blocks.length - 1];
+  if (!b) return null;
+  if (b.kind === "tool") return { kind: "tool", name: b.name, json: b.json };
+  if (b.kind === "text") return b.text.trim() ? { kind: "text", text: b.text } : null;
+  return { kind: "thinking" };
+}
+
+/** 서브에이전트 이벤트 한 묶음을 반영한 새 목록. 처음 본 에이전트는 뒤에 붙는다. */
+export function applySub(subs: Sub[], ev: SubEvent, now: number): Sub[] {
+  const i = subs.findIndex((s) => s.agent === ev.agent);
+  // 모르는 에이전트의 끝 신호는 버린다. 마쳐서 걷은 뒤에 스트림 종료가 늦게 오면 빈 줄이
+  // 새로 생겨 "시작하는 중"으로 오래 남는다.
+  if (i < 0 && ev.phase === "end") return subs;
+  const cur: Sub = i >= 0 ? subs[i] : { agent: ev.agent, label: ev.label || "서브에이전트", live: null, step: null, at: now };
+  const live = applyLive(cur.live, ev);
+  // 새 요청이 막 시작돼 아직 아무것도 안 왔으면 앞 요청의 마지막 일을 그대로 보인다.
+  const next: Sub = { ...cur, label: ev.label || cur.label, live, step: lastStep(live) ?? cur.step, at: now };
+  return i >= 0 ? subs.map((s, k) => (k === i ? next : s)) : [...subs, next];
+}
+
+/** 오래 조용한 서브에이전트를 걷는다. 마친 것은 `subFinished` 가 가려내므로 이것은 스트림이
+ *  끊겨 끝을 못 본 경우의 안전망이다. */
+export function pruneSubs(subs: Sub[], now: number, quietMs: number): Sub[] {
+  const keep = subs.filter((s) => now - s.at < quietMs);
+  return keep.length === subs.length ? subs : keep;
+}
+
+/** 지금 쓰는 중인가(요청이 흐르는 중). 아니면 도구가 도는 중이거나 쉬는 중이다. */
+export function subStreaming(s: Sub): boolean {
+  return !!s.live && !s.live.done;
+}
+
+/** 서브에이전트가 일을 마쳤는가. 중간 요청은 도구를 부르며 끝나고(`tool_use`), 마지막 요청만
+ *  답으로 끝난다. 본 대화가 다시 말하는 것으로는 알 수 없다 — 새 claude 는 서브에이전트를
+ *  백그라운드로 돌리며 본 대화를 계속 진행한다. */
+export function subFinished(s: Sub): boolean {
+  const l = s.live;
+  if (!l?.done) return false;
+  return !!l.error || (!!l.stop && l.stop !== "tool_use");
+}

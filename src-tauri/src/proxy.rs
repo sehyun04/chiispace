@@ -2,9 +2,10 @@
 //!
 //! 칸의 claude 는 `ANTHROPIC_BASE_URL` 로 이 프록시를 부르고, 프록시는 받은 요청을
 //! **그대로** 원래 가던 곳(사용자가 따로 정해 둔 주소, 없으면 공식 API)으로 넘긴다.
-//! 돌아오는 SSE 도 한 바이트도 바꾸지 않고 돌려주면서, 본 대화의 스트림일 때만 옆에서
-//! 줄을 읽어 웹뷰에 흘린다(`chat:live`). 대화 파일(jsonl)은 답이 끝나야 적히므로,
-//! 글자가 쳐지는 동안을 보려면 이 길밖에 없다.
+//! 돌아오는 SSE 도 한 바이트도 바꾸지 않고 돌려주면서, 본 대화의 스트림이면 옆에서
+//! 줄을 읽어 웹뷰에 흘린다(`chat:live`). 서브에이전트의 스트림은 따로 흘린다(`chat:sub`) —
+//! 서브에이전트가 일하는 몇 분 동안 대화창이 멈춘 것처럼 보이지 않게. 대화 파일(jsonl)은
+//! 답이 끝나야 적히므로, 글자가 쳐지는 동안을 보려면 이 길밖에 없다.
 //!
 //! - 인증 헤더는 넘기기만 하고 어디에도 남기지 않는다. 로그도 없다.
 //! - 127.0.0.1 에만 연다. 자격 증명을 채워 주지 않으므로 다른 프로그램이 이 주소를
@@ -148,7 +149,7 @@ async fn forward(req: Request<Incoming>, ctx: &Arc<Ctx>) -> Result<Response<Body
     let (parts, body) = req.into_parts();
     let body = body.collect().await?.to_bytes();
     let path = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
-    let watched = watch(&parts.method, &path, &body);
+    let watched = watch(&parts.method, &path, &parts.headers, &body);
 
     let mut headers = parts.headers;
     for h in HOP {
@@ -172,9 +173,9 @@ async fn forward(req: Request<Incoming>, ctx: &Arc<Ctx>) -> Result<Response<Body
     }
     let stream = resp.bytes_stream();
     let body: Body = match watched {
-        Some(session) if status.is_success() => {
+        Some(watched) if status.is_success() => {
             let req_id = ctx.seq.fetch_add(1, Ordering::Relaxed);
-            let mut tap = Tap::new(ctx.app.clone(), session, req_id);
+            let mut tap = Tap::new(ctx.app.clone(), watched, req_id);
             BoxBody::new(StreamBody::new(stream.map(move |r| match r {
                 Ok(b) => {
                     tap.feed(&b);
@@ -193,8 +194,24 @@ async fn forward(req: Request<Incoming>, ctx: &Arc<Ctx>) -> Result<Response<Body
     Ok(out)
 }
 
-/// 옆에서 읽을 요청인가. 본 대화의 스트리밍 요청이면 그 대화 id 를 준다.
-fn watch(method: &Method, path: &str, body: &[u8]) -> Option<String> {
+/// 옆에서 읽을 스트림이 누구의 것인가.
+#[derive(Debug, PartialEq)]
+enum Watched {
+    /// 본 대화. 말풍선으로 흐른다(`chat:live`).
+    Main { session: String },
+    /// 본 대화가 부른 서브에이전트(`chat:sub`). 같은 대화 id 를 달고 오므로 에이전트 id 로 가른다 —
+    /// 여럿이 나란히 돌 수 있고, 한 에이전트도 도구를 쓸 때마다 요청이 새로 나간다.
+    Sub { session: String, agent: String, label: String },
+}
+
+/// 서브에이전트 요청에만 붙는 헤더. 익명 서브에이전트는 16진수 id, 이름 붙은 팀원은
+/// `이름@session-…` 이다. 본 대화 요청에는 없다(cc-viewer `agent-id.js` 가 실데이터로 확인한 것).
+const AGENT_ID: &str = "x-claude-code-agent-id";
+
+/// 옆에서 읽을 요청인가. 스트리밍 요청이고 대화 id 가 실려 있어야 한다. 서브에이전트
+/// 헤더가 있으면 서브에이전트, 없으면 본 대화인지 본다. 제목 짓기 같은 보조 요청은
+/// 둘 다 아니라 읽지 않는다.
+fn watch(method: &Method, path: &str, headers: &hyper::HeaderMap, body: &[u8]) -> Option<Watched> {
     if method != Method::POST {
         return None;
     }
@@ -203,10 +220,44 @@ fn watch(method: &Method, path: &str, body: &[u8]) -> Option<String> {
         return None;
     }
     let v: Value = serde_json::from_slice(body).ok()?;
-    if v.get("stream").and_then(Value::as_bool) != Some(true) || !is_main(&v) {
+    if v.get("stream").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    session_of(&v)
+    let session = session_of(&v)?;
+    let agent = headers
+        .get(AGENT_ID)
+        .and_then(|h| h.to_str().ok())
+        .map(str::trim)
+        .filter(|a| !a.is_empty() && a.len() <= 200);
+    if let Some(agent) = agent {
+        let label = sub_label(&v, agent);
+        return Some(Watched::Sub { session, agent: agent.to_string(), label });
+    }
+    is_main(&v).then_some(Watched::Main { session })
+}
+
+/// 서브에이전트를 사람에게 가리킬 이름. 이름 붙은 팀원이면 그 이름, 아니면 맡은 일(첫 사용자
+/// 말)의 첫 줄. 시스템이 끼워 넣은 블록은 건너뛴다.
+fn sub_label(v: &Value, agent: &str) -> String {
+    if let Some((name, _)) = agent.split_once('@') {
+        let name = name.trim();
+        if !name.is_empty() && !name.chars().all(|c| c.is_ascii_hexdigit()) {
+            return name.chars().take(60).collect();
+        }
+    }
+    let texts: Vec<String> = match v.pointer("/messages/0/content") {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|b| b.get("text")?.as_str().map(str::to_owned)).collect(),
+        _ => Vec::new(),
+    };
+    texts
+        .iter()
+        .filter(|t| !t.trim_start().starts_with('<'))
+        .flat_map(|t| t.lines())
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(|l| l.chars().take(60).collect())
+        .unwrap_or_else(|| "서브에이전트".to_string())
 }
 
 /// 이 스트림이 속한 대화. claude 는 `metadata.user_id` 에 JSON 문자열로
@@ -315,28 +366,48 @@ struct Live {
     phase: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     events: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
 }
 
 /// 흘러가는 스트림 하나를 옆에서 읽는 자리. 떨어질 때(다 받았든, claude 가 끊었든)
 /// 끝났다고 알린다 — 그래야 말풍선의 "쓰는 중"이 걸린 채로 남지 않는다.
 struct Tap {
     app: AppHandle,
+    /// 본 대화는 `chat:live`, 서브에이전트는 `chat:sub`. 채널을 가르는 것은 본 대화의
+    /// 말풍선에 서브에이전트의 생각이 섞이지 않게 하려는 것이다.
+    channel: &'static str,
     session: String,
+    agent: Option<String>,
+    label: Option<String>,
     req: u64,
     lines: Lines,
 }
 
 impl Tap {
-    fn new(app: AppHandle, session: String, req: u64) -> Self {
-        let tap = Self { app, session, req, lines: Lines::default() };
+    fn new(app: AppHandle, watched: Watched, req: u64) -> Self {
+        let (channel, session, agent, label) = match watched {
+            Watched::Main { session } => ("chat:live", session, None, None),
+            Watched::Sub { session, agent, label } => ("chat:sub", session, Some(agent), Some(label)),
+        };
+        let tap = Self { app, channel, session, agent, label, req, lines: Lines::default() };
         tap.emit("begin", Vec::new());
         tap
     }
 
     fn emit(&self, phase: &'static str, events: Vec<String>) {
         let _ = self.app.emit(
-            "chat:live",
-            Live { session: self.session.clone(), req: self.req, phase, events },
+            self.channel,
+            Live {
+                session: self.session.clone(),
+                req: self.req,
+                phase,
+                events,
+                agent: self.agent.clone(),
+                label: self.label.clone(),
+            },
         );
     }
 
@@ -395,13 +466,17 @@ mod tests {
         let body = main_body();
         assert!(is_main(&body));
         let path = "/v1/messages?beta=true";
-        assert!(watch(&Method::POST, path, body.to_string().as_bytes()).is_some());
+        let none = hyper::HeaderMap::new();
+        assert_eq!(
+            watch(&Method::POST, path, &none, body.to_string().as_bytes()),
+            Some(Watched::Main { session: "c12278f4-e932-4ba5-b3cc-00aaac5b495e".into() })
+        );
         // 스트림이 아니거나 다른 경로면 읽지 않는다.
         let mut quiet = body.clone();
         quiet["stream"] = json!(false);
-        assert!(watch(&Method::POST, path, quiet.to_string().as_bytes()).is_none());
-        assert!(watch(&Method::POST, "/v1/messages/count_tokens", body.to_string().as_bytes()).is_none());
-        assert!(watch(&Method::GET, path, body.to_string().as_bytes()).is_none());
+        assert!(watch(&Method::POST, path, &none, quiet.to_string().as_bytes()).is_none());
+        assert!(watch(&Method::POST, "/v1/messages/count_tokens", &none, body.to_string().as_bytes()).is_none());
+        assert!(watch(&Method::GET, path, &none, body.to_string().as_bytes()).is_none());
     }
 
     #[test]
@@ -423,6 +498,44 @@ mod tests {
         let mut near = main_body();
         near["system"][0]["text"] = json!("cc_is_subagent=truex");
         assert!(is_main(&near));
+    }
+
+    fn with_agent(id: &str) -> hyper::HeaderMap {
+        let mut h = hyper::HeaderMap::new();
+        h.insert(AGENT_ID, id.parse().unwrap());
+        h
+    }
+
+    #[test]
+    fn subagents_are_watched_on_their_own_channel() {
+        let path = "/v1/messages?beta=true";
+        // 서브에이전트는 본 대화처럼 생긴 요청을 보내도(도구·시스템 문구가 같아도) 헤더로 갈린다.
+        let mut sub = main_body();
+        sub["messages"] = json!([{"role":"user","content":[
+            {"type":"text","text":"<system-reminder>무시</system-reminder>"},
+            {"type":"text","text":"\n  로그에서 실패 원인 찾기\n자세히는 이렇다"}
+        ]}]);
+        assert_eq!(
+            watch(&Method::POST, path, &with_agent("a7eea0a140349f80d"), sub.to_string().as_bytes()),
+            Some(Watched::Sub {
+                session: "c12278f4-e932-4ba5-b3cc-00aaac5b495e".into(),
+                agent: "a7eea0a140349f80d".into(),
+                label: "로그에서 실패 원인 찾기".into(),
+            })
+        );
+        // 이름 붙은 팀원은 그 이름으로 부른다.
+        let named = watch(&Method::POST, path, &with_agent("frontend-reviewer@session-17e1f37a"), sub.to_string().as_bytes());
+        assert!(matches!(named, Some(Watched::Sub { label, .. }) if label == "frontend-reviewer"));
+        // 맡은 일을 못 읽으면 그냥 서브에이전트다.
+        let mut blank = sub.clone();
+        blank["messages"] = json!([]);
+        let b = watch(&Method::POST, path, &with_agent("a7eea0a140349f80d"), blank.to_string().as_bytes());
+        assert!(matches!(b, Some(Watched::Sub { label, .. }) if label == "서브에이전트"));
+        // 헤더가 비었으면 서브에이전트로 치지 않는다.
+        assert!(matches!(
+            watch(&Method::POST, path, &with_agent(" "), main_body().to_string().as_bytes()),
+            Some(Watched::Main { .. })
+        ));
     }
 
     #[test]

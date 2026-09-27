@@ -699,3 +699,62 @@
   align-items: center;
   justify-content: center;
 }
+
+/* ── 서브에이전트가 지금 하는 일 (SubAgents.tsx) ──
+ * "부름" 한 줄 바로 아래에 에이전트마다 한 줄. 결과가 본 대화로 돌아오면 사라진다. */
+.subs {
+  margin: -4px 0 10px 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.sub-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--me);
+  animation: sub-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sub-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.sub-label {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--ink);
+}
+.sub-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono-font);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sub-dot {
+    animation: none;
+  }
+}
