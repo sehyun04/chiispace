@@ -300,6 +300,13 @@ Claude는 `CHIISPACE_TEST_REAL_CLAUDE`에 설치된 exe를 지정한 뒤
 일반 삭제, 조합 종료 유실 뒤 첫 삭제, 조합 중 브라우저 삭제, 유령 조합 차단, 한글 단일 확정을 확인한다.
 `term.input()`만 호출하는 검증이나 물리 한글 IME 전체 동작 확인과는 구별한다.
 
+PowerShell의 입력·삭제 후 갈색 잔상은 같은 `CHIISPACE_TEST_EXE`로
+`node --test scripts/terminal-render.test.mjs`를 실행한다. 사용자 프로필·히스토리를 쓰지 않는
+PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로그램의 명시적 색 보존을 확인한다.
+`CHIISPACE_TEST_SCREENSHOT=1`이면 각 단계의 자체 테스트 창도 캡처한다. 사용자 창에는 입력하지 않는다.
+바이트 경계·불완전 출력·선택 반전 보존은 `scripts/powershell-render.test.mjs`의 단위 검증이다.
+9월 27일 소스에는 보정이 반영됐으나 고정 경로 exe는 아직 9월 25일 배포판이다. 배포 상태는 작업 정리 4·16절을 따른다.
+
 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
 실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
 제출되어 대화 파일에 적히는지를 본다. 뒤의 것은 앱의 루프백 프록시 뒤에 **가짜 Anthropic 서버**를 두어,
