@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { delegateTerminalQueries } from "./terminal-queries";
+import { powerShellOutput } from "./powershell-render";
 import "@xterm/xterm/css/xterm.css";
 
 /** 치이카와 팔레트로 맞춘 xterm 테마. 밝은 바탕이라 ANSI 색은 채도를 낮춰야
@@ -256,6 +257,11 @@ export function Term({
 
     let alive = true;
     const unlisteners: Array<() => void> = [];
+    const output = powerShellOutput(data => t.write(data), () => {
+      const pane = el.closest<HTMLElement>("[data-pane]");
+      return !pane?.dataset.agent && /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(pane?.dataset.proc || shell || "");
+    });
+    unlisteners.push(() => output.dispose());
 
     // PTY 는 fit 이 끝난 뒤에 연다. 먼저 열면 기본 80x24 로 뜬 셸이 곧바로
     // 리사이즈를 맞으며 첫 화면을 다시 그린다 — 좁은 pane 일수록 눈에 띈다.
@@ -305,7 +311,7 @@ export function Term({
     const hardStop = setTimeout(fire, 6000);
     listen<{ id: string; b64: string }>("pty:data", (ev) => {
       if (!alive || ev.payload.id !== id) return;
-      t.write(decode(ev.payload.b64));
+      output.write(decode(ev.payload.b64));
       if (seedOnce.current && !seeded) {
         clearTimeout(quiet);
         quiet = setTimeout(fire, 600);

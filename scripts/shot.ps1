@@ -13,6 +13,7 @@ param(
   [string]$Exe = "$PSScriptRoot\..\src-tauri\target\debug\chiispace.exe",
   [string]$Title = "chiispace",
   [string]$Out = "$env:TEMP\chiispace-shot.png",
+  [int]$ProcessId = 0,
   [int]$WaitSec = 10
 )
 
@@ -52,12 +53,13 @@ public class Shot {
 
 [void][Shot]::SetProcessDPIAware()
 
-$p = Start-Process -FilePath $Exe -PassThru
+$ownsProcess = $ProcessId -eq 0
+$p = if ($ownsProcess) { Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden } else { Get-Process -Id $ProcessId -ErrorAction Stop }
 Start-Sleep -Seconds $WaitSec
 $h = [Shot]::Find($p.Id, $Title)
 if ($h -eq [IntPtr]::Zero) {
   Write-Output "창을 못 찾았다: '$Title'"
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+  if ($ownsProcess -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
   exit 1
 }
 
@@ -78,7 +80,9 @@ $bmp.Dispose()
 # 창 닫기를 먼저 청한다. 곧바로 죽이면 PTY 가 한꺼번에 무너지며 그 부고가 웹뷰에
 # 닿아 배치가 지워지고, 그 빈 배치가 세션 파일에 저장된다 — 사용자가 쓰던 칸들이
 # 검증 한 번에 날아간다. 실제로 그렇게 잃었다.
-$p.CloseMainWindow() | Out-Null
-for ($i = 0; $i -lt 30 -and -not $p.HasExited; $i++) { Start-Sleep -Milliseconds 100 }
-if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+if ($ownsProcess) {
+  $p.CloseMainWindow() | Out-Null
+  for ($i = 0; $i -lt 30 -and -not $p.HasExited; $i++) { Start-Sleep -Milliseconds 100 }
+  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+}
 Write-Output "저장: $Out (${w}x${ht}) PrintWindow=$ok 중앙픽셀=$mid"
