@@ -132,7 +132,8 @@ test("생각은 따로 선다", () => {
 
 test("서브에이전트 호출은 한 줄 표시다", () => {
   const out = items(asst([{ type: "tool_use", id: "t1", name: "Task", input: { subagent_type: "Explore", description: "찾기" } }]));
-  assert.deepEqual(out, [{ kind: "launch", agentType: "Explore", description: "찾기" }]);
+  // 부른 호출 id 를 싣는다. 이 줄을 눌러 그 서브에이전트의 대화로 건너간다.
+  assert.deepEqual(out, [{ kind: "launch", agentType: "Explore", description: "찾기", id: "t1" }]);
 });
 
 test("답한 질문만 문답 카드가 된다", () => {

@@ -290,6 +290,7 @@
 
 /* ── 그 밖의 카드 ── */
 
+/* 잉크는 2단계다. 3단계는 이 바탕(--paper-2) 위에서 대비 3.87 이라 작은 글자로 못 쓴다. */
 .note {
   margin: 0 0 8px 38px;
   padding: 5px 10px;
@@ -297,7 +298,7 @@
   background: var(--paper-2);
   font-size: 11px;
   font-weight: 600;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .note.mid {
   margin: 10px 0;
@@ -757,4 +758,95 @@
   .sub-dot {
     animation: none;
   }
+}
+
+/* ── 서브에이전트 대화 보기 (SubagentView.tsx) ──
+ * 진행 줄(.sub)과 "… 부름" 줄(.note.launch)을 누르면 연다. 대화창 전체를 덮는다 —
+ * 입력바까지 덮어야 여기서 친 키가 아래 claude 로 새지 않는다(Esc 는 따로 막는다). */
+button.sub,
+button.note.launch {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.note.launch {
+  display: block;
+  width: calc(100% - 38px);
+}
+/* 올리면 카드 바탕으로 밝힌다. 어둡게 하면 글자 대비가 모자란다(--line 위 링크색 3.10). */
+button.sub:hover,
+button.note.launch:hover {
+  background: var(--card);
+}
+button.note.launch::after {
+  content: " · 대화 보기";
+  text-decoration: underline;
+}
+
+.subview {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  font-family: var(--ui-font);
+}
+.subview-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.subview-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 9px;
+  padding: 4px 9px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.subview-back:hover {
+  background: var(--line);
+}
+.subview-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+/* 연보라(--lilac) 위 흰 글자는 대비 2.23 이라 생각 색을 쓴다(5.45). */
+.subview-kind {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--think);
+  color: #fff;
+}
+.subview-task {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
 }

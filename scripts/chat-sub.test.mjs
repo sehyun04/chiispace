@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import os from "node:os";
@@ -11,7 +11,7 @@ const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-test("서브에이전트가 일하는 동안 대화창에 그 일이 한 줄로 보이고, 결과가 돌아가면 걷힌다", { skip: !exe || !claude, timeout: 180000 }, async () => {
+test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그 대화 전체를 열 수 있고, 결과가 돌아가면 걷힌다", { skip: !exe || !claude, timeout: 180000 }, async () => {
   // 가짜 Anthropic 서버가 본 대화에서 Agent 도구를 부르게 하면 실제 claude 가 실제로
   // 서브에이전트를 띄워 같은 서버로 요청을 보낸다. 그 요청은 앱 프록시를 지나며 chat:sub 로
   // 흐른다. 서브에이전트의 답을 붙잡아 둔 동안 대화창을 본다. 유료 모델은 부르지 않는다.
@@ -136,10 +136,23 @@ test("서브에이전트가 일하는 동안 대화창에 그 일이 한 줄로 
           state: e.querySelector('.tool-stat')?.textContent ?? null,
         })),
         notes: texts('.note'),
+        view: (() => {
+          const v = over?.querySelector('.subview');
+          if (!v) return null;
+          return {
+            title: v.querySelector('.subview-title')?.textContent,
+            kind: v.querySelector('.subview-kind')?.textContent,
+            task: v.querySelector('.subview-task')?.textContent ?? null,
+            bubbles: [...v.querySelectorAll('.bubble')].map(e => e.textContent),
+          };
+        })(),
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
       for (const c of await r.json()) {
         if (c.term) window.__terms?.['%0']?.input(c.term);
+        if (c.click) over?.querySelector(c.click)?.click();
+        // 사람이 Esc 를 누른 것처럼 지금 포커스가 있는 곳에서 올린다.
+        if (c.esc) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         if (c.send && input) {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -190,13 +203,34 @@ test("서브에이전트가 일하는 동안 대화창에 그 일이 한 줄로 
     assert.match(row.label ?? "", /SUB_TASK|로그/, "서브에이전트에 맡긴 일이 이름으로 안 보임: " + JSON.stringify(row));
     assert.ok(![...dom().theirs, ...dom().live].some(t => t.includes("SUB_WORKING")), "서브에이전트의 글이 본 대화 말풍선에 섞였음");
     assert.ok(seen.subHeader, "서브에이전트 요청에 에이전트 id 헤더가 없음 — 프록시가 가를 근거가 없다");
+    // 서브에이전트 대화 파일의 이름이 헤더의 에이전트 id 와 같아야 진행 줄에서 그 대화로 건너갈 수 있다.
+    const subFile = path.join(store, sid, "subagents", "agent-" + seen.subHeader + ".jsonl");
+    // 파일은 스트림보다 조금 늦게 생긴다(meta 가 먼저, 대화는 0.5초쯤 뒤). 앱도 생길 때까지 다시 찾는다.
+    assert.ok(await until(() => existsSync(subFile), 50), "서브에이전트 대화 파일 이름이 헤더 id 와 다름: " + subFile);
+
+    // 일하는 중에 그 줄을 누르면 서브에이전트의 대화가 열린다. 첫 말은 맡긴 일로 보인다.
+    commands.push({ click: ".sub" });
+    assert.ok(await until(() => dom().view?.task?.includes("SUB_TASK"), 100), "진행 줄을 눌렀는데 서브에이전트 대화가 안 열림: " + JSON.stringify(dom()));
+    assert.equal(dom().view.title, "로그 찾기");
+    assert.equal(dom().view.kind, "general-purpose");
 
     // 서브에이전트가 마지막 답을 끝내면 그 줄은 걷히고, 본 대화의 답은 제자리에 선다.
     // 새 claude 는 서브에이전트를 백그라운드로 돌려 본 대화가 먼저 답할 수도 있다 — 순서는 묻지 않는다.
     release();
+    // 열어 둔 채로 끝나면 그 화면에 서브에이전트의 마지막 답까지 들어온다.
+    assert.ok(await until(() => dom().view?.bubbles?.some(t => t.includes("SUB_DONE")), 300), "열어 둔 서브에이전트 화면에 마지막 답이 안 들어옴: " + JSON.stringify(dom().view));
+    // Esc 는 이 화면만 닫는다. 아래 입력바로 새면 claude 가 하던 일을 끊는다.
+    commands.push({ esc: true });
+    assert.ok(await until(() => dom().view === null, 50), "Esc 로 서브에이전트 화면이 안 닫힘");
     assert.ok(await until(() => !dom().subs?.length, 300), "서브에이전트가 끝났는데 줄이 안 걷힘: " + JSON.stringify({ dom: dom(), seen }));
     assert.ok(await until(() => dom().theirs?.some(t => t.includes("MAIN_AFTER_SUB")), 300), "본 대화의 답이 안 섬: " + JSON.stringify({ dom: dom(), seen }));
     assert.ok(![...dom().theirs, ...dom().live].some(t => t.includes("SUB_WORKING") || t.includes("SUB_DONE")), "서브에이전트의 글이 본 대화 말풍선에 섞였음");
+    assert.ok(!/Interrupted/i.test(screen()), "서브에이전트 화면을 닫은 Esc 가 claude 로 샜음:\n" + screen().slice(-600));
+    // 끝난 뒤에도 "… 부름" 줄을 누르면 그 서브에이전트의 대화를 다시 연다(부른 호출 id 로 찾는다).
+    commands.push({ click: ".note.launch" });
+    assert.ok(await until(() => dom().view?.bubbles?.some(t => t.includes("SUB_DONE")), 100), "부름 줄로 서브에이전트 대화가 안 열림: " + JSON.stringify(dom()));
+    commands.push({ click: ".subview-back" });
+    assert.ok(await until(() => dom().view === null, 50), "본 대화로 돌아가지 않음");
     assert.equal(seen.main1, 1);
     assert.ok(seen.main2 >= 1, "서브에이전트 결과를 받은 본 대화 요청이 없음");
     assert.equal(app.exitCode, null);

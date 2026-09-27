@@ -175,7 +175,8 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
       assert.equal(dom().hidden, true, cmd + " 메뉴가 열려 있는데 대화창이 덮였음");
       for (let i = 0; i < escs; i++) { commands.push({ term: ESC }); await delay(500); }
       assert.ok(await until(() => dom().over && !dom().hidden && dom().toggle === "터미널로", 80), cmd + " 을 닫았는데 대화창으로 돌아오지 않음: " + JSON.stringify(dom()));
-      assert.ok(dom().cmds.includes(cmd), cmd + " 기록이 대화창에 안 보임: " + JSON.stringify(dom().cmds));
+      // 돌아오기와 원문 다시 읽기가 같이 시작돼 기록은 한순간 늦게 뜰 수 있다.
+      assert.ok(await until(() => dom().cmds?.includes(cmd), 30), cmd + " 기록이 대화창에 안 보임: " + JSON.stringify(dom().cmds));
       assert.ok(await until(() => dom().inputFocused, 30), cmd + " 뒤 포커스가 입력바로 오지 않음");
     }
 

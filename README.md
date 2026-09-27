@@ -315,7 +315,8 @@ PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로�
 유료 모델은 부르지 않는다.
 `scripts/chat-sub.test.mjs` 는 가짜 서버가 본 대화에서 Agent 도구를 부르게 해 실제 claude 가 서브에이전트를
 띄우게 하고, 그 서브에이전트의 일이 대화창에 한 줄로 보이는지, 본 대화 말풍선에 안 섞이는지, 마치면
-걷히는지 본다. 가짜 서버도 서브에이전트를 본문이 아니라 `x-claude-code-agent-id` 헤더로 가른다.
+걷히는지 본다. 그 줄과 "부름" 줄을 눌러 서브에이전트 대화 전체가 열리는지, 그 화면의 Esc 가 claude 로 새지
+않는지도 본다. 가짜 서버도 서브에이전트를 본문이 아니라 `x-claude-code-agent-id` 헤더로 가른다.
 
 칸 이름은 같은 `CHIISPACE_TEST_EXE`로 `node --test scripts/pane-titles.test.mjs`를 실행한다.
 별도 세션과 실제 PTY의 제목 출력으로 헤더·옆 목록·연결 도구의 일치, 저장 후 재시작,

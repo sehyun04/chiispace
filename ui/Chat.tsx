@@ -10,7 +10,7 @@
  *  살아 있어서 언제든 도로 볼 수 있다.
  *
  *  어느 대화를 그릴지는 부른 쪽이 준 id 다. 이 화면은 대화를 고르지 않는다. */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Markdown } from "./Markdown";
@@ -31,6 +31,7 @@ import {
 import { shortToolName, toolSummary, toolStats, diffLines } from "./tools";
 import { applyLive, caughtUp, partialInput, type Live, type LiveEvent } from "./live";
 import { SubAgents } from "./SubAgents";
+import { OpenSubContext, SubagentView, type SubTarget } from "./SubagentView";
 import "./chat.css";
 
 function Caret() {
@@ -155,6 +156,7 @@ function Row({
   tokens?: number;
   onShowTerm?: (auto?: boolean) => void;
 }) {
+  const openSub = useContext(OpenSubContext);
   switch (item.kind) {
     case "bubble": {
       const mine = item.role === "user";
@@ -191,8 +193,17 @@ function Row({
           <Markdown text={item.text} />
         </Card>
       );
-    case "launch":
-      return <div className="note">{item.description ?? "서브에이전트"} 부름{item.agentType ? ` · ${item.agentType}` : ""}</div>;
+    case "launch": {
+      const text = `${item.description ?? "서브에이전트"} 부름${item.agentType ? ` · ${item.agentType}` : ""}`;
+      // 누르면 그 서브에이전트의 대화 전체를 연다. 어느 것인지는 부른 호출 id 로 찾는다(meta.json).
+      return item.id && openSub ? (
+        <button className="note launch" onClick={() => openSub({ toolUseId: item.id, label: item.description ?? "서브에이전트" })} title="서브에이전트 대화 보기">
+          {text}
+        </button>
+      ) : (
+        <div className="note">{text}</div>
+      );
+    }
     case "qa":
       return (
         <div className="qa">
@@ -731,6 +742,11 @@ export function Chat({
  *  작업 중 띠가 붙었다 떨어지며 바뀌므로 재서 따라간다. */
 export function ChatPane({ shown = true, ...props }: ChatProps & { shown?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
+  // 열어 본 서브에이전트 대화. 칸의 대화가 바뀌면(/clear 등) 닫는다 — 다른 대화의 서브에이전트다.
+  const [openSub, setOpenSub] = useState<SubTarget | null>(null);
+  useEffect(() => {
+    setOpenSub(null);
+  }, [props.id]);
   // 재기 전의 0 은 화면에 나가지 않는다 — layout effect 가 그리기 전에 고쳐 놓는다.
   // 그 사이를 visibility 로 숨기면 안 된다. 바로 그때 App 이 입력바에 포커스를 주는데
   // 숨은 요소는 포커스를 못 받아 키가 아래 터미널로 샌다.
@@ -749,7 +765,20 @@ export function ChatPane({ shown = true, ...props }: ChatProps & { shown?: boole
   return (
     // 보이지 않을 때도 걷지 않고 올려 둔다. 대화 파일을 계속 읽어야 첫 말이 적히는 순간을 안다.
     <div ref={box} className="chat-over" style={shown ? { top } : { top, visibility: "hidden", pointerEvents: "none" }}>
-      <Chat {...props} />
+      <OpenSubContext.Provider value={setOpenSub}>
+        <Chat {...props} />
+        {openSub && (
+          <SubagentView
+            root={props.root}
+            session={props.id}
+            target={openSub}
+            onClose={() => setOpenSub(null)}
+            renderRow={(item, o) => (
+              <Row key={o.key} item={item} slug={props.slug} name={o.name} showFace={o.showFace} grouped={o.grouped} />
+            )}
+          />
+        )}
+      </OpenSubContext.Provider>
     </div>
   );
 }

@@ -365,6 +365,9 @@ pub fn run() {
             workspace::claude_transcript,
             workspace::claude_transcript_raw,
             workspace::claude_transcript_size,
+            workspace::claude_subagents,
+            workspace::claude_subagent_raw,
+            workspace::claude_subagent_size,
             workspace::state_save,
             workspace::state_load,
         ])

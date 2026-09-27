@@ -81,6 +81,7 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   서브에이전트 스트림은 `x-claude-code-agent-id` 헤더로 가려 `chat:sub` 로 따로 흘린다 — 본 대화 채널에 섞으면
   서브에이전트의 생각이 본 대화의 답처럼 보인다. 서브에이전트 줄은 **마지막 답(`end_turn`)이 끝날 때** 걷는다.
   본 대화가 다시 말하는 것으로 걷지 마라 — 새 claude 는 서브에이전트를 백그라운드로 돌리며 본 대화를 이어 간다.
+  서브에이전트 대화 보기 화면의 **Esc 는 화면만 닫는다**(window 캡처에서 막는다). 새면 아래 입력바를 거쳐 claude 가 멈춘다.
 - 위임 알림에서 지어진 대화 이름은 자동 칸 이름으로 받지 않는다(`paneTitle`의 `chiispace task-`·
   `chiispace_*` 필터). 알림은 받는 칸 에이전트의 첫 프롬프트라 그 에이전트가 그것으로 대화 이름을
   짓는데, 앱에는 여느 자동 제목과 똑같이 도착해 구별되지 않는다. 필터를 지우면 `/rename`으로 붙인
@@ -359,6 +360,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/Term.tsx` (458줄) | xterm.js 배선 · 한글 IME · 복원 명령 |
 | `ui/Chat.tsx` · `ui/chat.css` · `ui/Markdown.tsx` | 대화창 — 말풍선 · 입력바 · 쓰이는 중인 답 · 칸 위 덮개 |
 | `ui/SubAgents.tsx` | 서브에이전트가 지금 하는 일 — 에이전트마다 한 줄(`chat:sub`) |
+| `ui/SubagentView.tsx` | 서브에이전트 대화 전체 보기 — 진행 줄·"부름" 줄을 누르면 연다 |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
 | `ui/app.css` (860줄) · `ui/theme.css` (100줄) | 치이카와 테마 |

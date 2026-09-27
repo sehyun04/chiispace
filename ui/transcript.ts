@@ -270,7 +270,8 @@ export type Item =
   | { kind: "qa"; qa: { q: string; a: string }[] }
   /** 아직 답하지 않은 질문. 고르는 화면은 터미널에만 있다. */
   | { kind: "ask"; questions: string[] }
-  | { kind: "launch"; agentType?: string; description?: string }
+  /** 서브에이전트를 부른 것. `id` 는 그 도구 호출의 id — 서브에이전트 기록(meta.json)의 toolUseId 와 같다. */
+  | { kind: "launch"; agentType?: string; description?: string; id?: string }
   | { kind: "system"; text: string }
   | { kind: "interrupted" };
 
@@ -469,7 +470,7 @@ export function toItems(events: SessionEvent[], toolMap: ToolMap, keepSidechain 
       } else if (b.type === "tool_use" && (b.name === "Agent" || b.name === "Task")) {
         // 서브에이전트를 부른 것은 한 줄 표시로 둔다. 그 안의 대화는 따로 본다.
         const inp = b.input as { subagent_type?: string; description?: string };
-        items.push({ kind: "launch", agentType: inp?.subagent_type, description: inp?.description });
+        items.push({ kind: "launch", agentType: inp?.subagent_type, description: inp?.description, id: b.id });
       } else if (b.type === "tool_use") {
         items.push({ kind: "tool", toolUse: { id: b.id, name: b.name, input: b.input }, pair: b.id ? toolMap.get(b.id) : undefined });
       }

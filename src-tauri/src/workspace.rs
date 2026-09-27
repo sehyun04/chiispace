@@ -598,9 +598,13 @@ pub fn claude_transcript_size(app: AppHandle, root: String, id: String) -> u64 {
 /// 정한다. 파일을 뒤져 칸에 대화를 붙이던 길과는 무관하다.
 #[tauri::command]
 pub fn claude_transcript_raw(app: AppHandle, root: String, id: String) -> String {
+    session_file(&app, &root, &id).map(|p| read_tail(&p)).unwrap_or_default()
+}
+
+/// 대화 파일의 끝부분을 줄 단위로. 본 대화와 서브에이전트 대화가 같이 쓴다.
+fn read_tail(path: &std::path::Path) -> String {
     use std::io::{BufRead, BufReader, Seek, SeekFrom};
-    let Some(path) = session_file(&app, &root, &id) else { return String::new() };
-    let Ok(mut f) = std::fs::File::open(&path) else { return String::new() };
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     // 긴 대화는 수십 MB 까지 간다. 통째로 웹뷰에 넘기면 그리기 전에 멎는다.
     const TAIL: u64 = 8 * 1024 * 1024;
@@ -620,6 +624,141 @@ pub fn claude_transcript_raw(app: AppHandle, root: String, id: String) -> String
         out.push('\n');
     }
     out
+}
+
+// ── 서브에이전트 대화 ────────────────────────────────────────────
+//
+// claude 는 서브에이전트의 대화를 본 대화 파일에 섞지 않고 그 옆
+// `<대화 id>/subagents/agent-<에이전트 id>.jsonl` 에 따로 쓴다. 무엇을 맡았는지는 같은 이름의
+// `.meta.json`(종류·설명·부른 호출 id)에 있다. 에이전트 id 는 프록시가 요청 헤더에서 보는
+// `x-claude-code-agent-id` 와 같다. 대화창은 누른 줄이 가리키는 것만 연다 — 고르지 않는다.
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct SubagentInfo {
+    agent: String,
+    #[serde(rename = "agentType")]
+    agent_type: Option<String>,
+    description: Option<String>,
+    /// 본 대화에서 이 서브에이전트를 부른 도구 호출의 id. "… 부름" 줄에서 여기로 건너온다.
+    #[serde(rename = "toolUseId")]
+    tool_use_id: Option<String>,
+}
+
+/// 파일 이름에 넣을 에이전트 id. 경로 조각이 섞인 값으로 다른 파일을 열지 않게 모양만 받는다.
+fn agent_shaped(a: &str) -> bool {
+    !a.is_empty() && a.len() <= 64 && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn subagents_dir(app: &AppHandle, root: &str, id: &str) -> Option<std::path::PathBuf> {
+    Some(session_file(app, root, id)?.with_extension("").join("subagents"))
+}
+
+fn subagents_at(dir: &std::path::Path) -> Vec<SubagentInfo> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(agent) = name.strip_prefix("agent-").and_then(|n| n.strip_suffix(".jsonl")) else { continue };
+        if !agent_shaped(agent) {
+            continue;
+        }
+        let meta = std::fs::read_to_string(dir.join(format!("agent-{agent}.meta.json")))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        let field = |k: &str| meta.as_ref().and_then(|m| m.get(k)?.as_str().map(str::to_owned));
+        out.push(SubagentInfo {
+            agent: agent.to_string(),
+            agent_type: field("agentType"),
+            description: field("description"),
+            tool_use_id: field("toolUseId"),
+        });
+    }
+    out.sort_by(|a, b| a.agent.cmp(&b.agent));
+    out
+}
+
+/// 이 대화가 부른 서브에이전트들.
+#[tauri::command]
+pub fn claude_subagents(app: AppHandle, root: String, id: String) -> Vec<SubagentInfo> {
+    subagents_dir(&app, &root, &id).map(|d| subagents_at(&d)).unwrap_or_default()
+}
+
+fn subagent_file(app: &AppHandle, root: &str, id: &str, agent: &str) -> Option<std::path::PathBuf> {
+    if !agent_shaped(agent) {
+        return None;
+    }
+    Some(subagents_dir(app, root, id)?.join(format!("agent-{agent}.jsonl")))
+}
+
+/// 서브에이전트 대화 원문. 본 대화와 같은 모양이라 같은 방식으로 뜯는다(레코드가 전부 사이드체인이다).
+#[tauri::command]
+pub fn claude_subagent_raw(app: AppHandle, root: String, id: String, agent: String) -> String {
+    subagent_file(&app, &root, &id, &agent).map(|p| read_tail(&p)).unwrap_or_default()
+}
+
+/// 서브에이전트 대화 파일의 크기. 바뀔 때만 원문을 다시 받는다(본 대화와 같은 이유).
+#[tauri::command]
+pub fn claude_subagent_size(app: AppHandle, root: String, id: String, agent: String) -> u64 {
+    subagent_file(&app, &root, &id, &agent)
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map_or(0, |m| m.len())
+}
+
+#[cfg(test)]
+mod subagent_tests {
+    use super::{agent_shaped, read_tail, subagents_at, SubagentInfo};
+
+    #[test]
+    fn lists_subagents_with_what_they_were_asked() {
+        let dir = std::env::temp_dir().join(format!("chiispace-subagents-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("agent-a7e7100f5fcb46100.jsonl"), "{}\n").unwrap();
+        std::fs::write(
+            dir.join("agent-a7e7100f5fcb46100.meta.json"),
+            r#"{"agentType":"Explore","description":"proxy.rs 조사","toolUseId":"toolu_018k"}"#,
+        )
+        .unwrap();
+        // meta 가 없어도 대화는 연다.
+        std::fs::write(dir.join("agent-b1.jsonl"), "{}\n").unwrap();
+        // 이름 모양이 다른 것은 서브에이전트가 아니다.
+        std::fs::write(dir.join("agent-a7e7100f5fcb46100.meta.json.bak"), "x").unwrap();
+        std::fs::write(dir.join("notes.jsonl"), "x").unwrap();
+        let got = subagents_at(&dir);
+        assert_eq!(
+            got,
+            vec![
+                SubagentInfo {
+                    agent: "a7e7100f5fcb46100".into(),
+                    agent_type: Some("Explore".into()),
+                    description: Some("proxy.rs 조사".into()),
+                    tool_use_id: Some("toolu_018k".into()),
+                },
+                SubagentInfo { agent: "b1".into(), agent_type: None, description: None, tool_use_id: None },
+            ]
+        );
+        // 없는 폴더는 빈 목록이다(서브에이전트를 한 번도 안 부른 대화).
+        assert!(subagents_at(&dir.join("없음")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agent_ids_cannot_reach_other_files() {
+        assert!(agent_shaped("a7e7100f5fcb46100"));
+        assert!(!agent_shaped(""));
+        assert!(!agent_shaped("../../secret"));
+        assert!(!agent_shaped("a\\b"));
+        assert!(!agent_shaped(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn reads_whole_lines_only() {
+        let p = std::env::temp_dir().join(format!("chiispace-tail-{}.jsonl", std::process::id()));
+        std::fs::write(&p, "{\"a\":1}\n{\"b\":2}\n").unwrap();
+        assert_eq!(read_tail(&p), "{\"a\":1}\n{\"b\":2}\n");
+        assert_eq!(read_tail(&p.with_extension("없음")), "");
+        let _ = std::fs::remove_file(&p);
+    }
 }
 
 // ── 세션 ─────────────────────────────────────────────────────────
