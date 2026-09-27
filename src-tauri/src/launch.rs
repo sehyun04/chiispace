@@ -114,6 +114,9 @@ pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
             &std::env::var("CHIISPACE_SOCKET_PATH")?,
             token,
         );
+        if launch.is_some() {
+            defaults.extend(crate::codex_chat_hook::args());
+        }
     }
     let args = append_args(defaults, args);
     // 대화 선택과 권한 적용은 설치된 CLI에 맡긴다. 로컬 실행을 원격 TUI로 바꾸지 않는다.

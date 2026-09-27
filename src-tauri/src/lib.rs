@@ -14,6 +14,9 @@ mod launchers;
 mod conpty;
 mod pty_stream;
 mod codex_session;
+mod codex_chat;
+mod codex_chat_hook;
+mod pane_agent;
 mod proxy;
 
 use std::collections::HashMap;
@@ -126,7 +129,7 @@ fn pty_write(
     };
     queue.input(&id, data.as_bytes());
     // 에이전트 실행 명령의 Enter는 제외해야 앱 시작과 세션 복원 때 캐릭터가 움직이지 않는다.
-    if data.bytes().any(|b| matches!(b, b'\r' | b'\n')) && s.active_agent().is_some() {
+    if data.bytes().any(|b| matches!(b, b'\r' | b'\n')) && pane_agent::find(s).is_some() {
         turns.0.lock().unwrap().insert(id.clone(), false);
     }
     s.send_bytes(data.as_bytes()).map_err(|e| e.to_string())
@@ -145,6 +148,9 @@ fn pty_submit(
     turns: State<AgentTurns>,
     id: String,
     text: String,
+    agent: Option<String>,
+    run: Option<String>,
+    session: Option<String>,
 ) -> Result<(), String> {
     // 사용자 입력과 같은 락을 잡아, 쪽지 전달이 그 사이에 끼어들지 않게 한다.
     let mut queue = collab.0.lock().unwrap();
@@ -152,6 +158,18 @@ fn pty_submit(
     let Some(s) = map.get(&id) else {
         return Err(format!("없는 pane: {id}"));
     };
+    if let Some(agent) = &agent {
+        if pane_agent::fresh(s).map(|(a, _)| a.as_str()) != Some(agent.as_str()) {
+            return Err("에이전트가 종료되어 메시지를 보내지 않았습니다".into());
+        }
+        if agent == "codex" && !queue.codex.get(&id).is_some_and(|b| !b.failed && Some(&b.run) == run.as_ref()) {
+            return Err("Codex 실행이 바뀌어 메시지를 보내지 않았습니다".into());
+        }
+        if agent == "codex" && !queue.codex.get(&id).and_then(|b| b.chat.as_ref())
+            .is_some_and(|c| !c.waiting && Some(&c.id) == session.as_ref()) {
+            return Err("Codex 대화가 바뀌었거나 승인을 기다려 메시지를 보내지 않았습니다".into());
+        }
+    }
     let body = if s.full_snapshot().bracketed_paste {
         format!("\x1b[200~{text}\x1b[201~")
     } else {
@@ -161,7 +179,7 @@ fn pty_submit(
     s.send_bytes(body.as_bytes()).map_err(|e| e.to_string())?;
     std::thread::sleep(std::time::Duration::from_millis(120));
     queue.input(&id, b"\r");
-    if s.active_agent().is_some() {
+    if pane_agent::find(s).is_some() {
         turns.0.lock().unwrap().insert(id.clone(), false);
     }
     s.send_bytes(b"\r").map_err(|e| e.to_string())
@@ -368,6 +386,8 @@ pub fn run() {
             workspace::claude_subagents,
             workspace::claude_subagent_raw,
             workspace::claude_subagent_size,
+            codex_chat::codex_transcript_raw,
+            codex_chat::codex_transcript_size,
             workspace::state_save,
             workspace::state_load,
         ])
@@ -502,9 +522,7 @@ fn pane_status(panes: State<Panes>, turns: State<AgentTurns>, collab: State<coll
     let mut turns = turns.0.lock().unwrap();
     map.iter()
         .map(|(id, s)| {
-            let found = s
-                .shell_pid()
-                .and_then(|pid| kasa_pty::agent_pid_for_shell(&kasa_pty::process_table_shared(), pid));
+            let found = pane_agent::find(s);
             let agent = found.map(|(kind, _)| kind.as_str().to_string());
             let raw_working = agent.is_some()
                 && (s.output_heartbeat() || pane_shows_working_spinner(s));

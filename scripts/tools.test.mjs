@@ -21,6 +21,11 @@ test("명령은 줄바꿈을 접어 한 줄로", () => {
   assert.equal(toolSummary("PowerShell", { command: "Get-ChildItem" }), "Get-ChildItem");
 });
 
+test("Codex의 명령과 평문 패치는 실제 호출 내용을 요약", () => {
+  assert.equal(toolSummary("exec_command", { cmd: "cargo test" }), "cargo test");
+  assert.equal(toolSummary("apply_patch", "*** Begin Patch\n*** Update File: ui/App.tsx\n@@\n-old\n+new"), "ui/App.tsx");
+});
+
 test("앞의 폴더 이동은 줄이고 진짜 명령을 남긴다", () => {
   // 이게 없으면 긴 경로가 한 줄을 다 먹어 무슨 명령인지가 잘린다.
   assert.equal(

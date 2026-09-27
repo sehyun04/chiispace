@@ -269,7 +269,7 @@ impl Backend for Host {
         let mut queue = collab.0.lock().unwrap();
         let pane = self.pane(&id)?;
         queue.input(&id, bytes);
-        if bytes.iter().any(|b| matches!(b, b'\r' | b'\n')) && pane.active_agent().is_some() {
+        if bytes.iter().any(|b| matches!(b, b'\r' | b'\n')) && crate::pane_agent::find(&pane).is_some() {
             self.0
                 .state::<AgentTurns>()
                 .0
@@ -304,7 +304,7 @@ impl Backend for Host {
                     title: s.title.unwrap_or_default(),
                     cwd: s.cwd.unwrap_or_default(),
                     character: s.character,
-                    harness: pane.active_agent().map(|a| a.as_str().to_owned()),
+                    harness: crate::pane_agent::find(&pane).map(|(a, _)| a.as_str().to_owned()),
                     status: if pane.has_active_job() {
                         "working"
                     } else {

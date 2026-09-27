@@ -28,11 +28,16 @@ export function shortToolName(name?: string): string {
 
 /** 접힌 카드에 보일 한 줄. 무엇을 한 호출인지 이것만으로 알아야 한다. */
 export function toolSummary(name: string | undefined, input: unknown): string {
+  if (typeof input === "string") {
+    const file = input.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m)?.[1];
+    return file ? shortPath(file) : input.replace(/\s+/g, " ").slice(0, 120);
+  }
   const o = (input ?? {}) as Record<string, unknown>;
   switch (name) {
     case "Bash":
+    case "exec_command":
     case "PowerShell": {
-      const cmd = str(o.command);
+      const cmd = str(o.command) ?? str(o.cmd);
       if (!cmd) return "명령";
       // `cd <긴 경로> && 진짜 명령` 이 아주 흔한데, 그 경로가 한 줄을 다 먹어
       // 정작 무엇을 하는 명령인지가 잘려 나간다. 앞의 이동만 줄인다.

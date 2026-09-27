@@ -32,6 +32,7 @@ import { shortToolName, toolSummary, toolStats, diffLines } from "./tools";
 import { applyLive, caughtUp, partialInput, type Live, type LiveEvent } from "./live";
 import { SubAgents } from "./SubAgents";
 import { OpenSubContext, SubagentView, type SubTarget } from "./SubagentView";
+import { codexTranscript } from "./codex-transcript";
 import "./chat.css";
 
 function Caret() {
@@ -258,6 +259,10 @@ function Row({
 }
 
 type ChatProps = {
+  agent?: "claude" | "codex";
+  run?: string;
+  waiting?: boolean;
+  revision?: number;
   root: string;
   /** 어느 대화인지는 부른 쪽이 정한다. 이 화면은 고르지 않는다. */
   id: string;
@@ -295,14 +300,22 @@ function Composer({
   onSent,
   onShowTerm,
   beforeMenu,
+  agent,
+  run,
+  session,
+  waiting,
 }: {
   paneId: string;
   live: boolean;
   busy: boolean;
-  onSent: (text: string) => void;
+  onSent: (text: string) => () => void;
   onShowTerm?: (auto?: boolean) => void;
   /** 메뉴 명령을 보내기 직전에 부른다. 끝났는지 잴 기준을 잡는다. */
   beforeMenu?: () => Promise<void>;
+  agent: "claude" | "codex";
+  run?: string;
+  session: string;
+  waiting: boolean;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -330,18 +343,24 @@ function Composer({
 
   const send = () => {
     const t = text.trim();
-    if (!t || !live) return;
+    if (!t || !live || waiting) return;
     setText("");
-    const menu = /^\/[\w-]+$/.test(t) && !STAY_IN_CHAT.has(t);
-    if (!menu) onSent(t);
+    const command = t.match(/^\/[\w-]+\b/)?.[0];
+    const menu = agent === "codex"
+      ? !!command && !["/compact", "/exit", "/quit", "/rename"].includes(command)
+      : /^\/[\w-]+$/.test(t) && !STAY_IN_CHAT.has(t);
+    const undo = menu ? () => {} : onSent(t);
     void (menu && beforeMenu ? beforeMenu() : Promise.resolve())
-      .then(() => invoke("pty_submit", { id: paneId, text: t }))
+      .then(() => invoke("pty_submit", { id: paneId, text: t, agent, run, session }))
       .then(() => {
         // 메뉴가 닫히면 대화창으로 돌아온다. 닫힌 것은 대화 파일이 알려 준다.
-        if (menu) onShowTerm?.(true);
+        if (menu) onShowTerm?.(agent === "claude" || command === "/new" || command === "/clear");
       })
       // 못 보냈으면 쓴 말을 되살린다. 사라지면 다시 칠 방법이 없다.
-      .catch(() => setText(t));
+      .catch(() => {
+        undo();
+        setText(current => current ? `${t}\n${current}` : t);
+      });
   };
 
   return (
@@ -350,8 +369,8 @@ function Composer({
         ref={ref}
         rows={1}
         value={text}
-        disabled={!live}
-        placeholder={live ? "보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈 · 빈 칸에서 Esc 는 중단" : "claude 가 떠 있지 않다"}
+        disabled={!live || waiting}
+        placeholder={waiting ? "터미널에서 실행 허락을 확인해 줘" : live ? "보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈 · 빈 칸에서 Esc 는 중단" : `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // 조합 중인 Enter 는 글자를 확정하는 키지 보내는 키가 아니다.
@@ -450,6 +469,10 @@ function LiveRows({ live, slug, name, showFace }: { live: Live; slug?: string; n
 type Sent = { text: string; mine: number; at: number };
 
 export function Chat({
+  agent = "claude",
+  run,
+  waiting = false,
+  revision = 0,
   root,
   id,
   paneId,
@@ -463,6 +486,7 @@ export function Chat({
   away = false,
   onBack,
 }: ChatProps) {
+  const transcriptArgs = () => agent === "codex" ? { paneId, run, id } : { root, id };
   const [raw, setRaw] = useState<string | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   // 맨 아래를 보고 있었는지. 위로 올려다보는 중이면 따라 내리지 않는다 —
@@ -476,7 +500,7 @@ export function Chat({
   // 메뉴가 끝났는지 잴 기준 — 터미널로 가기 직전의 대화 파일 크기.
   const awayFrom = useRef<number | null>(null);
   const markAway = () =>
-    invoke<number>("claude_transcript_size", { root, id })
+    invoke<number>(`${agent}_transcript_size`, transcriptArgs())
       .then((n) => {
         awayFrom.current = n;
       })
@@ -491,11 +515,11 @@ export function Chat({
   }, [away]);
 
   useEffect(() => {
-    if (!root || !id) return;
+    if ((!root && agent === "claude") || !id) return;
     let alive = true;
     setRaw(null);
     const load = () => {
-      invoke<string>("claude_transcript_raw", { root, id })
+      invoke<string>(`${agent}_transcript_raw`, transcriptArgs())
         .then((t) => {
           if (alive) setRaw(t);
         })
@@ -508,7 +532,7 @@ export function Chat({
     // 여럿일 때 앱이 무거워진다.
     let size = -1;
     const tick = () => {
-      invoke<number>("claude_transcript_size", { root, id })
+      invoke<number>(`${agent}_transcript_size`, transcriptArgs())
         .then((n) => {
           if (!alive) return;
           if (n !== size) {
@@ -520,7 +544,7 @@ export function Chat({
           // 한꺼번에 적는다. 기준은 명령을 보내기 직전에 새로 잰다(markAway) — 터미널로 간
           // 뒤에 재면, 곧바로 결과를 적는 명령이나 재빨리 닫은 메뉴는 기준에 이미 결과가
           // 들어가 영영 안 돌아온다. 마지막 폴링 값을 쓰면 그 사이 적힌 답을 "끝났다"로 읽는다.
-          if (!awayRef.current) return;
+          if (!awayRef.current || agent === "codex") return;
           if (awayFrom.current === null) awayFrom.current = n;
           else if (n !== awayFrom.current) {
             awayFrom.current = null;
@@ -537,7 +561,9 @@ export function Chat({
       window.clearInterval(timer);
       loadRef.current = () => {};
     };
-  }, [root, id, refreshMs]);
+  }, [root, id, refreshMs, agent, paneId, run]);
+
+  useEffect(() => { loadRef.current(); }, [revision]);
 
   // 새 대화는 첫 말을 보내기 전까지 파일이 없다. 그동안 claude 가 폴더 신뢰·API 키 같은
   // 대화상자를 띄울 수 있는데 그것들은 TUI 에만 있다. 이 화면이 덮으면 답할 길이 없으므로
@@ -545,8 +571,8 @@ export function Chat({
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
   useEffect(() => {
-    readyRef.current?.(!!raw);
-  }, [raw]);
+    readyRef.current?.(agent === "codex" ? raw !== null : !!raw);
+  }, [raw, agent]);
 
   // ── 쓰이는 중인 답(proxy.rs → chat:live) ──
   const [stream, setStream] = useState<Live | null>(null);
@@ -561,7 +587,7 @@ export function Chat({
   };
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || agent !== "claude") return;
     put(null);
     endLen.current = null;
     const want = id.toLowerCase();
@@ -590,7 +616,7 @@ export function Chat({
       alive = false;
       unlisten?.();
     };
-  }, [id]);
+  }, [id, agent]);
 
   // 끝난 답은 파일이 따라잡으면 걷는다. 파일이 끝내 안 자라도(오류로 끊긴 답) 오래 남기지 않는다.
   useEffect(() => {
@@ -609,13 +635,14 @@ export function Chat({
 
   const { items, durs, toks } = useMemo(() => {
     if (!raw) return { items: [] as Item[], durs: new Map<string, number>(), toks: new Map<string, number>() };
+    if (agent === "codex") return codexTranscript(raw);
     const events = parseJsonl(raw);
     return {
       items: toItems(events, buildToolMap(events)),
       durs: turnDurations(events),
       toks: turnTokens(events),
     };
-  }, [raw]);
+  }, [raw, agent]);
 
   // ── 보낸 말: 파일에 적히기 전에도 바로 보인다 ──
   const mineTexts = useMemo(
@@ -632,8 +659,10 @@ export function Chat({
     });
   }, [mineTexts]);
   const onSent = (text: string) => {
-    setSent((s) => [...s, { text, mine: mineTexts.length, at: Date.now() }]);
+    const pending = { text, mine: mineTexts.length, at: Date.now() };
+    setSent((s) => [...s, pending]);
     window.setTimeout(() => loadRef.current(), 400);
+    return () => setSent(s => s.filter(p => p !== pending));
   };
 
   // ── 터미널에서만 답할 수 있는 순간 ──
@@ -707,11 +736,14 @@ export function Chat({
               </div>
             ))}
             {stream && <LiveRows live={stream} slug={slug} name={name} showFace={!lastIsAgent} />}
-            <SubAgents session={id} />
-            {stuck && !stream && (
+            {agent === "claude" && <SubAgents session={id} />}
+            {agent === "codex" && working && !waiting && (
+              <div className="note" role="status">Codex 작업 중 · 완료된 메시지부터 표시돼</div>
+            )}
+            {(waiting || (stuck && !stream)) && (
               <div className="ask">
                 <div className="ask-title">터미널에서 기다리는 것이 있다</div>
-                <div className="q">claude 가 {shortToolName(pendingTool ?? undefined)} 실행 허락을 기다리는 것 같다.</div>
+                <div className="q">{waiting ? "Codex가 실행 허락을 기다리고 있어." : `${agent} 가 ${shortToolName(pendingTool ?? undefined)} 실행 허락을 기다리는 것 같다.`}</div>
                 <button className="ask-go" onClick={() => showTerm(true)}>
                   터미널 보기
                 </button>
@@ -723,6 +755,10 @@ export function Chat({
       {paneId && (
         <Composer
           paneId={paneId}
+          agent={agent}
+          run={run}
+          session={id}
+          waiting={waiting}
           live={live}
           busy={working || streaming}
           onSent={onSent}

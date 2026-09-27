@@ -4,7 +4,8 @@ export type CodexSession = CodexLaunch & { id: string; resumable?: boolean };
 export type PaneStat = {
   id: string; proc: string | null; agent: string | null; busy: boolean; working?: boolean; cwd: string | null;
   agentPid?: number | null;
-  codex?: { run: string; session?: CodexSession | null; launch?: CodexLaunch | null; failed: boolean } | null;
+  codex?: { run: string; session?: CodexSession | null; launch?: CodexLaunch | null; failed: boolean;
+    chat?: { id: string; busy: boolean; waiting: boolean; revision: number } | null } | null;
 };
 /** `claudeSession` 은 그 칸이 돌리던 대화의 id 다. 명령 문자열이 아니라 따로 드는 이유는,
  *  구형 저장분을 정리하는 `nativeSeed` 가 문자열 속 id 를 지우기 때문이다. 필드로 두면

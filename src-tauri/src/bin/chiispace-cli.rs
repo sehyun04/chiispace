@@ -10,6 +10,8 @@ mod mcp;
 mod rpc;
 #[path = "../codex_session.rs"]
 mod codex_session;
+#[path = "../codex_chat_hook.rs"]
+mod codex_chat_hook;
 
 use anyhow::{anyhow, bail, Context, Result};
 use kasa_socket::Request;
@@ -88,6 +90,19 @@ fn run() -> Result<()> {
     }
     if args.first().map(String::as_str) == Some("mcp") {
         return mcp::run();
+    }
+    if args.first().map(String::as_str) == Some("codex-chat-hook") {
+        // 훅 본문에는 프롬프트도 있다. 메타데이터 외에는 IPC나 로그로 복제하지 않는다.
+        let mut raw = String::new();
+        std::io::stdin().take(1_048_577).read_to_string(&mut raw)?;
+        if raw.len() > 1_048_576 { return Ok(()); }
+        if let Ok(notice) = serde_json::from_str::<codex_chat_hook::Notice>(&raw) {
+            if notice.validate().is_ok() {
+                let _ = rpc::collab("codex_chat", serde_json::to_value(notice)?);
+            }
+        }
+        // 연결 실패가 Codex의 턴을 막거나 모델에 추가 지침을 넣지 않게 조용히 끝낸다.
+        return Ok(());
     }
     if matches!(args.first().map(String::as_str), Some("codex-resume" | "codex-continue")) {
         let picker = args.get(2).map(String::as_str) == Some("--picker");

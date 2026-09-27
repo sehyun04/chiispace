@@ -62,6 +62,7 @@ pub struct CodexBinding {
     pub session: Option<crate::codex_session::Session>,
     pub launch: Option<crate::codex_session::Launch>,
     pub failed: bool,
+    pub chat: Option<crate::codex_chat::Chat>,
 }
 
 #[derive(Default)]
@@ -284,7 +285,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             },
         );
         if harness == "codex" {
-            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, launch, failed: false });
+            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, launch, failed: false, chat: None });
         }
         return Ok(json!({"token": token}));
     }
@@ -312,8 +313,16 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             let session: crate::codex_session::Session = serde_json::from_value(params["session"].clone())?;
             session.validate()?;
             q.codex.insert(pane.into(), CodexBinding {
-                run: token.into(), session: Some(session), launch: None, failed: false,
+                run: token.into(), session: Some(session), launch: None, failed: false, chat: None,
             });
+            Ok(json!({}))
+        }
+        "chiispace.codex_chat" => {
+            if q.authenticate(pane, token)?.harness != "codex" { bail!("Codex 실행이 아닙니다"); }
+            let notice: crate::codex_chat_hook::Notice = serde_json::from_value(params.clone())?;
+            notice.validate()?;
+            let binding = q.codex.get_mut(pane).filter(|b| b.run == token && b.launch.is_some()).ok_or_else(|| anyhow!("로컬 Codex 실행이 아닙니다"))?;
+            crate::codex_chat::update(&mut binding.chat, notice);
             Ok(json!({}))
         }
         "chiispace.context" => {
@@ -493,7 +502,7 @@ pub fn collab_deliver(app: AppHandle, task_id: String, revision: u64) -> Result<
     let Some(pane) = map.get(&task.to) else {
         return Ok(false);
     };
-    if pane.active_agent().map(|a| a.as_str()) != Some(agent.harness.as_str())
+    if crate::pane_agent::find(pane).map(|(a, _)| a.as_str()) != Some(agent.harness.as_str())
         || pane.output_heartbeat()
         || crate::pane_shows_working_spinner(pane)
     {

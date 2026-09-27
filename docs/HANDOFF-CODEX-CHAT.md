@@ -1,0 +1,145 @@
+# Codex 대화창 다음 핸드오프
+
+기준: 2026-09-28. Claude의 `473de39` 위에 Codex 중간 소스를 별도 보존하는 시점이다. 고정 경로 배포 코드는 `38e304e`다.
+이 문서는 **미완료 작업 인계**다. Codex 대화창 구현 완료·회귀 검증 완료·배포 완료 기록이 아니다.
+작성 시 고정 경로의 앱·CLI SHA-256이 WORKLOG 4절의 기존 배포본과 일치하는 것도 확인했다.
+
+## 사용자 최신 결정
+
+- Claude처럼 Codex도 메신저식 대화창을 쓰는 방향이다.
+- `/hooks`에서 처음 한 번 신뢰하는 방식을 제안했으나, 사용자는 **추가 신뢰 확인 없는 방식부터 검토**하라고 했다.
+  훅 신뢰 우회 플래그, 신뢰 DB 자동 변경, 관리 정책으로 위장하는 방식은 쓰지 않는다.
+- **exe 빌드·교체는 사용자가 다시 말할 때만 한다.** 앞서 받은 배포 허가는 이 최신 지시로 보류됐다.
+  내부 검증 exe도 새로 빌드하지 말고, 필요하면 먼저 이 제한을 사용자와 확인한다.
+- 사용자는 `/model`·`/status`를 본 뒤에도 안 깨지는지 물었다. 답변은 “아직 전체 검증 전”이었다.
+- 핸드오프 작성 후 사용자가 **Codex 작업의 커밋·푸시와 결과 보고**를 요청했다.
+  미완료 소스를 보존하는 요청이며 추가 구현·빌드·교체 요청은 아니다.
+- 캐릭터 보강은 사용자가 요청할 때만 한다.
+
+## 현재 코드와 대안의 차이
+
+**소스에는 아직 훅 기반 실험 코드가 남아 있다. `notify` 전환은 구현하지 않았다.**
+`launch.rs`는 대화형 로컬 Codex에 7개 lifecycle hook을 주입한다. 이 상태를 그대로 빌드·배포하면
+신뢰 검토가 필요한 훅 경고가 생길 수 있다. `notify` 검증 성공을 이 코드의 성공으로 취급하지 않는다.
+
+현재 구현은 로컬 Codex CLI를 PTY에서 그대로 돌리고, 정확히 확인한 대화 파일을 읽어 터미널 위에
+`ChatPane`을 얹는다. 터미널 제거·원격 TUI 중계·헤드리스 CLI 전환은 하지 않았다.
+복원은 **`codex resume --last`** 그대로다. 채팅 표시용 ID를 복원 ID로 저장하거나 최근 파일을 추측하지 않는다.
+
+### 훅 기반 실험에서 만든 부분
+
+- `codex_chat_hook.rs`: SessionStart·UserPromptSubmit·Stop·PermissionRequest·PostToolUse·Interrupt·SessionEnd.
+  훅 본문의 대화 ID·경로·작업 폴더·이벤트 이름만 읽는다. 프롬프트·답변 원문을 IPC에 복제하지 않는다.
+- CLI `codex-chat-hook` → 실행별 토큰으로 인증하는 `chiispace.codex_chat` → 메모리의 `CodexBinding.chat`.
+- `codex_chat.rs`: 현재 pane/run/id를 확인한 뒤 해당 `CODEX_HOME`의 정확한 파일만 읽는다.
+  경로 canonicalize·저장소 내부 여부·파일명 UUID·첫 session_meta ID를 확인한다. 마지막 8MiB만 읽는다.
+  ID를 이미 받은 뒤 파일을 찾는 것이며, 최신 파일로 대화를 고르는 기능은 아니다.
+- `codex-transcript.ts`: 사용자/답변 중복 제거, 환경 지침 제외, 공개 생각 요약, 도구 호출·결과 짝,
+  토큰·시간·중단·되돌리기. 암호화된 추론은 표시하지 않는다. 알 수 없거나 아직 덜 쓰인 줄은 건너뛴다.
+- 완료된 메시지 단위로 갱신한다. **Claude와 같은 글자 단위 스트리밍은 아직 아니다.**
+- `pane_agent.rs`: `chiispace-cli → node → codex` 같은 알려진 실행기 사슬을 인식한다.
+  기존 엔진은 continue 실행기 아래의 Codex를 놓쳐, 복원된 대화 정보가 있어도 대화창을 숨기고 있었다.
+- `pty_submit`: 기대한 에이전트·실행 토큰·대화 ID와 승인 대기 상태를 확인한다.
+  전송 판단에는 캐시 대신 새 프로세스 조회를 쓴다. 이 마지막 보강은 실제 앱 재검증이 남았다.
+- Claude의 스트림과 서브에이전트 진행 표시는 유지한다. Codex는 Claude의 `chat:live`·`chat:sub`에 연결하지 않는다.
+
+### 신뢰 확인 없는 `notify` 후보: 격리 검증 통과
+
+공식 `notify`는 `agent-turn-complete` 때 외부 프로그램에 JSON을 전달하며 `thread-id`를 포함한다.
+[공식 알림 문서](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications),
+[훅 신뢰 규칙](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)을 확인했다.
+
+설치된 Codex **0.154.0**과 기존 배포 exe로 검증했다. 별도 `CODEX_HOME`·앱 상태·프로젝트·로컬 가짜 Responses
+서버를 썼다. `/hooks` 조작이나 신뢰 우회 없이 다음 3개 턴의 알림을 받았다.
+
+1. 새 대화 첫 답변 뒤 정확한 대화 ID 수신.
+2. `/new` 뒤 답변에서 다른 대화 ID 수신.
+3. 앱 재시작의 네이티브 이어가기 뒤 답변에서 2번과 같은 ID 수신.
+
+증거는 로컬 임시 파일이다. 지워질 수 있으므로 제품 회귀 테스트로 옮겨야 한다.
+
+- 스크립트: `C:/Users/kshkj/AppData/Local/Temp/chiispace-notify-check.mjs`
+- 결과: `C:/Users/kshkj/AppData/Local/Temp/chiispace-notify-check-F1kmwk/notices.jsonl`
+- 알림 기록에는 이벤트 종류·대화 ID·폴더·필드 이름만 저장했다. 사용자 대화나 인증을 가져오지 않았다.
+
+제약과 미검증:
+
+- 시작·재시작 직후에는 알림이 없다. **첫 답변이 끝나야 연결할 ID가 온다.**
+- 승인 요청·작업 시작·중단 이벤트를 주는 방식이 아니다. 기존 훅의 busy/waiting을 그대로 대신할 수 없다.
+- 기존 사용자 `notify`와 CLI/프로필 설정을 보존하는 제품 연결 방식은 아직 구현·검증하지 않았다.
+  알림 JSON에는 입력·답변도 들어오므로 원문 로그나 추가 영구 저장을 만들지 않는다.
+- 이 실험은 ID 수신 가능성 검증이다. `notify`로 실제 대화창 표시·전송·메뉴 복귀까지 된 것은 아니다.
+- 앞서 MCP 초기 연결과 TUI 기록 파일도 조사했지만, 설치된 버전에서 신뢰할 만한 시작 ID 전달 경로를
+  확보하지 못했다. 이를 확인된 대안으로 안내하지 않는다.
+
+## `/model`·`/status` 상태를 정확히 구분
+
+현재 Codex 분기는 메뉴 명령을 PTY에 보낸 뒤 터미널로 전환한다. `/model`·`/status`는
+**사용자가 머리줄의 ‘대화로’를 눌러 돌아오는 방식**이다. Claude의 파일 크기 변화 기반 자동 복귀를
+Codex에 그대로 적용하지 않았다. `/new`·`/clear`는 새 대화 ID 도착을 이용하는 별도 흐름이다.
+
+| 항목 | 확인 상태 |
+|---|---|
+| `/model` 열기 → Esc 취소 → ‘대화로’ → 입력바 포커스 | 훅 기반 격리 앱에서 확인 |
+| 모델을 실제로 바꾼 뒤 후속 질문·응답·선택 모델 유지 | 미검증 |
+| `/status` 표시 뒤 복귀·후속 입력·응답 | 대화창과 합친 흐름은 미검증 |
+| 메뉴가 열린 상태에서 조기 복귀·승인 질문·연속 메뉴 | 미검증 |
+| `notify` 전환 뒤 위 흐름 전체 | 전환 자체가 미구현 |
+
+예전 Codex 스크롤 검증의 `/status` 6회 통과는 대화창 복귀 검증을 대신하지 않는다.
+
+## 테스트 기록과 남은 실패
+
+- `473de39` 위에서 Codex 커밋 준비 시 `npm test` **91 통과·16 건너뜀·실패 0**, `npx tsc --noEmit` 통과를 재확인했다.
+  이번에는 실제 앱 테스트·Rust 검증을 재실행하지 않았으며 exe 빌드·교체도 하지 않았다.
+- 9월 28일 중간 스냅샷 `npm test`: **91 통과, 16 건너뜀, 실패 0**.
+  Codex 파서 4개와 도구 요약 검증을 포함한다. 뒤에 들어온 모든 Claude 수정까지 검증한 수치는 아니다.
+- 중간 스냅샷 Rust: **lib 33개 + CLI 11개 통과**. 일부 Claude 서브에이전트 테스트 포함.
+  이후 추가한 전송 시 새 프로세스 조회·대화 ID/승인 상태 가드까지 재검증한 수치는 아니다.
+- TypeScript·Vite와 내부 release 앱·CLI 빌드는 사용자 빌드 보류 지시 전에 통과했다.
+  마지막 내부 파일 시각은 앱 9/28 01:29:41, CLI 01:29:42. 이후 수정과 일치한다고 가정하지 않는다.
+- `scripts/codex-chat.test.mjs`는 **전체 통과 기록이 아직 없다**.
+  두 칸 대화 격리, 한글 여러 줄 전송, `/new`, `/model` 취소·복귀, 재시작 후 기존 대화 표시는 관찰했다.
+  마지막 실패에서 `/quit` 직후 낡은 실행 상태를 믿고 `STALE_SUBMIT_MARK`를 셸에 보냈다.
+  그 뒤 `pane_agent::fresh`와 run/session/waiting 가드를 보강했지만 실제 앱 재실행은 아직이다.
+- 실패 자료: `C:/Users/kshkj/AppData/Local/Temp/chiispace-codex-chat-8zMD8v/`.
+  `failure.json`의 `latest`에 셸로 흘러간 입력, `codex-chat.png`에 두 칸 대화창이 있다.
+  같은 실행에서 사용자 세션 해시 차이도 검출돼 finally의 검사가 원래 오류를 가렸다.
+  사용자 앱 정상 저장 등 외부 변경과 테스트 쓰기를 구분해야 하며, 데이터 보호 검사 자체를 빼지 않는다.
+- `codex-resume.test.mjs`에는 칸마다 다른 옵션의 복원 명령을 같다고 비교하는 기존 실패가 관찰됐다.
+  테스트 기대와 각 칸의 설정을 대조해야 한다. 통과를 위해 권한 옵션이나 continue 정책을 바꾸지 않는다.
+
+## 동시 작업과 파일 소유
+
+앞선 인계 때 섞여 있던 Claude의 서브에이전트 상세 대화창 변경은 **`473de39`로 커밋됐다**.
+`Chat.tsx`, `lib.rs`, `CLAUDE.md`, `WORKLOG.md`에 남은 diff가 Codex 것뿐인 것을 확인했다.
+이번에는 아래 Codex 파일을 경로별로 스테이징한다. 재개할 때는 새 변경이 없는지 다시 확인한다.
+
+- Codex 신규: `src-tauri/src/codex_chat.rs`, `codex_chat_hook.rs`, `pane_agent.rs`,
+  `ui/codex-transcript.ts`, `scripts/codex-chat.test.mjs`, `scripts/codex-transcript.test.mjs`.
+- Codex 변경: `src-tauri/src/bin/chiispace-cli.rs`, `bridge.rs`, `collab.rs`, `launch.rs`,
+  `ui/App.tsx`, `ui/session.ts`, `ui/tools.ts`, `scripts/tools.test.mjs`.
+- Codex 변경이 남은 공유 파일: `ui/Chat.tsx`, `src-tauri/src/lib.rs`, `CLAUDE.md`, `docs/WORKLOG.md`.
+  Claude의 SubagentView 연결과 `claude_subagents`·`claude_subagent_raw/size` 등록은 이미 HEAD에 있다.
+- `473de39`에 포함된 별도 Claude 작업: `ui/SubagentView.tsx`, `ui/SubAgents.tsx`, `ui/chat.css`, `ui/transcript.ts`,
+  `src-tauri/src/workspace.rs`, `scripts/chat-sub.test.mjs`, `scripts/chat-view.test.mjs`, `scripts/transcript.test.mjs`.
+  이미 커밋된 내용을 Codex 변경으로 다시 세지 않는다. 커밋됐다는 사실을 exe 배포로 확대하지 않는다.
+- 이 Codex 대화창 작업은 **소스 보존용 커밋이며 미완료·미배포**다. 최종 커밋·원격 반영 여부는 Git을 확인한다.
+  `72c6749`는 앞선 배포 문서 커밋이지 이 구현 커밋이 아니다.
+
+## 후속 구현 요청 때의 순서
+
+1. `git status`와 공유 파일 diff를 확인하고 Claude의 작업 상태를 다시 맞춘다.
+2. `notify`의 첫 답변 완료 후 연결이라는 제약을 유지할지 확인한다. 기존 알림·권한·프로필·continue를
+   보존할 설계를 정한 뒤 훅 의존을 교체한다. 신뢰 없이 쓸 수 있다고 해 놓고 훅 주입을 남기지 않는다.
+3. 승인/질문/메뉴 동안 입력이 잘못 전달되지 않게 하고, 실패한 제출은 초안을 보존한다.
+4. 모델 실제 변경, `/status`, 메뉴 취소·반복·한글 입력, 다음 응답, `/new`, 재시작, 다른 칸 격리,
+   종료 직후 전송 거부를 **선택한 최종 연결 방식으로** 검증한다. 모델 요청은 로컬 대역을 쓴다.
+5. Claude `chat-view`·`chat-live`·`chat-sub`, 입력·잔상·칸 이름·협업 회귀도 합쳐 확인한다.
+   빌드가 필요한 시점에는 사용자 보류 지시를 먼저 확인한다. 테스트 중 같은 exe를 덮어쓰지 않는다.
+6. 사용자가 배포를 다시 요청한 뒤에만 앱·CLI·세션 메타데이터를 백업하고, 앱이 닫힌 것을 확인해
+   고정 경로 `src-tauri/target/release/chiispace.exe`와 `chiispace-cli.exe`를 함께 교체한다.
+   내부 `target/input-render/release`를 사용자 실행 경로로 안내하지 않는다. 사용자 앱을 임의 종료하지 않는다.
+
+읽을 순서: 이 문서 → [CLAUDE.md](../CLAUDE.md)의 회귀 방지 규칙 →
+[README](../README.md#헤드리스-검증)의 격리 검증법. 과거 구현 이력은 [WORKLOG](WORKLOG.md)에 있다.
