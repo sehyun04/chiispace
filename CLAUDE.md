@@ -367,7 +367,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/workspace.rs` (510줄) | git · 세션 파일 · claude 대화 목록과 지난 대화 |
 | `src-tauri/src/shells.rs` (107줄) | 이 컴퓨터에 있는 셸 찾기 |
 | `ui/App.tsx` (1114줄) | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
-| `ui/Sidebar.tsx` (244줄) | 옆칸 — 탭 묶음과 칸 목록. 그리기만 하고 판단은 App 이 준다 |
+| `ui/Sidebar.tsx` | 옆칸 — 탭 묶음과 칸 목록, 새 대화 상대(연락처) 목록. 그리기만 하고 판단은 App 이 준다 |
 | `ui/roster.tsx` (149줄) | 치이카와 로스터와 얼굴 · 누가 어느 칸을 맡는가 |
 | `ui/session.ts` (162줄) | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
 | `ui/layout.ts` (213줄) | pane 배치 트리 · 끌어 옮기기 · 고르게 펴기 |

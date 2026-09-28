@@ -59,9 +59,12 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 깔고 좌표만 주기 때문이다. 단축키로 두지 않은 이유는 `Ctrl+Alt+방향키` 를 그래픽 드라이버가
 화면 회전으로 먼저 채 가는 환경이 흔해서다.
 
-**탭과 셸 고르기** — 탭마다 자기 배치·자기 폴더·자기 셸을 갖는다. 옆칸의 `새 탭` 을 누르면
-어느 셸로 열지 먼저 묻고, **이 컴퓨터에 실제로 있는 것만** 뜬다(명령 프롬프트 · Windows
-PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 것을 골랐을 때 칸이
+**새 대화와 셸 고르기** — 탭마다 자기 배치·자기 폴더·자기 셸을 갖는다. 옆칸의 `새 대화` 를
+누르면 연락처처럼 상대(Claude · Codex)가 뜨고, 고르면 지금 폴더로 새 탭이 열리며 그 에이전트가
+바로 켜진다. 셸을 연 뒤 명령을 치는 단계를 사용자에게 넘기지 않는다 — 복원 명령과 같은 길
+(Term 의 seed)로 셸이 조용해지면 친다. 켜진 뒤에는 폴링이 보고 이어가기 명령으로 저장하므로
+다음에 켜도 그 대화로 돌아온다. 목록 아래 `셸만` 은 명령 없이 셸로 열고,
+**이 컴퓨터에 실제로 있는 셸만** 뜬다(명령 프롬프트 · Windows PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 것을 골랐을 때 칸이
 뜨자마자 죽는데, 그때 화면에 남는 건 빈 칸뿐이라 왜 안 되는지 알 수가 없다.
 
 **세션 목록** — 탭 줄을 위에 따로 두지 않고 옆칸 목록에 묶음으로 넣었다. 같은 것을 두
@@ -322,6 +325,10 @@ PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로�
 Codex 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로 `node --test scripts/codex-chat.test.mjs`를 실행한다.
 별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 최초 훅 신뢰 전 터미널 유지, 신뢰 후 두 칸 격리, 한글 제출,
 `/new`, 메뉴 전환, 재시작 이어가기, 종료 직후 낡은 제출 거부를 검증한다.
+
+새 대화 목록은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`(있으면 `CHIISPACE_TEST_REAL_CODEX`)로
+`node --test scripts/contacts.test.mjs`를 실행한다. 목록을 눌러 새 탭에서 실제 claude·codex 가 켜지는지,
+그 폴더로 열리는지, 이어가기 명령으로 저장되는지, Esc 가 목록만 닫는지, 셸만 고르면 아무것도 안 치는지 본다.
 
 칸 이름은 같은 `CHIISPACE_TEST_EXE`로 `node --test scripts/pane-titles.test.mjs`를 실행한다.
 별도 세션과 실제 PTY의 제목 출력으로 헤더·옆 목록·연결 도구의 일치, 저장 후 재시작,

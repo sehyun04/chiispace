@@ -27,7 +27,7 @@ import {
 } from "./session";
 import { Term } from "./Term";
 import { ChatPane } from "./Chat";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type AgentKind } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
 import { usePaneBridge } from "./bridge";
@@ -212,10 +212,13 @@ export default function App() {
   );
 
   /** 셸을 안 주면 지금 탭과 같은 것으로 연다. 단축키(Ctrl+Shift+T)가 그 길로 오는데,
-   *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다. */
+   *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다.
+   *  에이전트를 주면 복원 명령과 같은 길(Term 의 seed)로 셸이 뜨자마자 켠다. 새 대화라
+   *  `procs` 에는 넣지 않는다 — 켜진 것을 폴링이 보면 그때부터 이어가기 명령으로 남는다. */
   const newTab = useCallback(
-    (shell?: string) => {
+    (shell?: string, agent?: AgentKind) => {
       const id = `%${nextPane.current++}`;
+      if (agent) setSeeds((s) => ({ ...s, [id]: { cmd: agent, auto: true } }));
       const root = cur?.root ?? null;
       const sh = shell ?? cur?.shell;
       setTabs((ts) => {
