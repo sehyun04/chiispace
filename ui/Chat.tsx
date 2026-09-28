@@ -10,7 +10,7 @@
  *  살아 있어서 언제든 도로 볼 수 있다.
  *
  *  어느 대화를 그릴지는 부른 쪽이 준 id 다. 이 화면은 대화를 고르지 않는다. */
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Markdown } from "./Markdown";
@@ -283,7 +283,17 @@ type ChatProps = {
   away?: boolean;
   /** 그 일이 끝났다(대화 파일이 자랐다). 부른 쪽은 대화창으로 돌아온다. */
   onBack?: () => void;
+  /** 터미널 없는 칸(ClaudeStreamPane)의 통로. 있으면 PTY 대신 여기로 보내고 터미널로 갈 일이 없다. */
+  transport?: Transport;
+  /** 대화 끝에 붙는 것 — 통로로 온 권한 묻기·질문 카드. */
+  extra?: ReactNode;
+  /** 입력바 위에 붙는 것 — 모델·권한 모드. */
+  toolbar?: ReactNode;
+  /** 아직 한 마디도 없는 새 대화. */
+  fresh?: boolean;
 };
+
+export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void };
 
 type ChatWin = { __chats?: Record<string, HTMLTextAreaElement | null> };
 
@@ -304,6 +314,7 @@ function Composer({
   run,
   session,
   waiting,
+  transport,
 }: {
   paneId: string;
   live: boolean;
@@ -316,6 +327,7 @@ function Composer({
   run?: string;
   session: string;
   waiting: boolean;
+  transport?: Transport;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -339,12 +351,23 @@ function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [text]);
 
-  const interrupt = () => void invoke("pty_write", { id: paneId, data: "\x1b" }).catch(() => {});
+  const interrupt = transport
+    ? transport.interrupt
+    : () => void invoke("pty_write", { id: paneId, data: "\x1b" }).catch(() => {});
 
   const send = () => {
     const t = text.trim();
     if (!t || !live || waiting) return;
     setText("");
+    if (transport) {
+      // 통로는 슬래시 명령도 말로 받는다. 메뉴를 띄울 터미널이 없으니 갈래를 나누지 않는다.
+      const undo = onSent(t);
+      transport.send(t).catch(() => {
+        undo();
+        setText((current) => (current ? `${t}\n${current}` : t));
+      });
+      return;
+    }
     const command = t.match(/^\/[\w-]+\b/)?.[0];
     const menu = agent === "codex"
       ? !!command && !["/compact", "/exit", "/quit", "/rename"].includes(command)
@@ -392,11 +415,13 @@ function Composer({
           </svg>
         </button>
       ) : null}
-      <button className="composer-term" onMouseDown={(e) => e.preventDefault()} onClick={() => onShowTerm?.(false)} title="터미널 보기">
-        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M3.2 4.4 L6.6 8 L3.2 11.6 M8.4 11.8 H12.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+      {!transport && (
+        <button className="composer-term" onMouseDown={(e) => e.preventDefault()} onClick={() => onShowTerm?.(false)} title="터미널 보기">
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M3.2 4.4 L6.6 8 L3.2 11.6 M8.4 11.8 H12.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -485,6 +510,10 @@ export function Chat({
   onReady,
   away = false,
   onBack,
+  transport,
+  extra,
+  toolbar,
+  fresh = false,
 }: ChatProps) {
   const transcriptArgs = () => agent === "codex" ? { paneId, run, id } : { root, id };
   const [raw, setRaw] = useState<string | null>(null);
@@ -674,7 +703,8 @@ export function Chat({
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
     setStuck(false);
-    if (!pendingTool || working || streaming) return;
+    // 통로가 있는 칸은 허락을 기다리면 그 요청이 카드로 온다. 짐작하지 않는다.
+    if (!pendingTool || working || streaming || transport) return;
     const t = window.setTimeout(() => setStuck(true), 3000);
     return () => window.clearTimeout(t);
   }, [pendingTool, working, streaming, items.length]);
@@ -682,7 +712,7 @@ export function Chat({
   useLayoutEffect(() => {
     const el = scroll.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [items, stream, sent, stuck]);
+  }, [items, stream, sent, stuck, extra]);
 
   const onScroll = () => {
     const el = scroll.current;
@@ -695,13 +725,16 @@ export function Chat({
   return (
     <div className="chat">
       <div className="chat-scroll" ref={scroll} onScroll={onScroll}>
-        {raw === null ? (
+        {raw === null && !fresh ? (
           <div className="chat-empty">대화를 여는 중</div>
         ) : empty ? (
-          <div className="chat-empty">아직 주고받은 말이 없다</div>
+          <div className="chat-empty">{fresh ? "새 대화 · 하고 싶은 말을 보내 봐" : "아직 주고받은 말이 없다"}</div>
         ) : (
           <>
             {items.map((item, i) => {
+              // 통로가 있는 칸은 답을 기다리는 질문을 통로가 카드로 준다. 대화 파일 쪽 카드는
+              // 터미널로 보내는 것이라 거기서는 갈 곳이 없다.
+              if (transport && item.kind === "ask") return null;
               // 같은 쪽 말풍선이 이어지면 얼굴과 이름을 한 번만 그린다. 매번
               // 그리면 한 사람이 여러 번 말한 것처럼 보인다.
               const prev = items[i - 1];
@@ -751,7 +784,9 @@ export function Chat({
             )}
           </>
         )}
+        {extra}
       </div>
+      {toolbar}
       {paneId && (
         <Composer
           paneId={paneId}
@@ -764,6 +799,7 @@ export function Chat({
           onSent={onSent}
           onShowTerm={(auto) => (auto ? onShowTerm?.(true) : showTerm(false))}
           beforeMenu={markAway}
+          transport={transport}
         />
       )}
     </div>

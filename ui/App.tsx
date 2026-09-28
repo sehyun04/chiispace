@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 // 웹뷰의 navigator.clipboard 가 아니라 OS 클립보드로 간다. 그쪽은 창이
@@ -27,6 +27,7 @@ import {
 } from "./session";
 import { Term } from "./Term";
 import { ChatPane } from "./Chat";
+import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { Sidebar, type AgentKind } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
@@ -60,6 +61,18 @@ const pct = (r: L.Rect) => ({
   width: `${r.w * 100}%`,
   height: `${r.h * 100}%`,
 });
+
+/** 터미널 없는 claude 칸이 붙든 대화. */
+type StreamChat = { session: string; cwd: string };
+
+/** 저장된 통로 기록. 대화 id 는 명령줄에 들어가므로 모양이 맞는 것만 받는다. */
+function savedStreams(value: unknown): Record<string, StreamChat> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([id, raw]) => {
+    const c = raw as Partial<StreamChat> | null;
+    return c && isSessionId(c.session) && typeof c.cwd === "string" ? [[id, { session: c.session, cwd: c.cwd }]] : [];
+  }));
+}
 
 export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([
@@ -105,6 +118,10 @@ export default function App() {
   const [termView, setTermView] = useState<Record<string, boolean | "auto">>({});
   /** 대화 파일에 무엇이든 적힌 칸. 그 전에는 대화창을 올려만 두고 터미널을 보인다(Chat.tsx). */
   const [chatReady, setChatReady] = useState<Record<string, boolean>>({});
+  /** 터미널 없는 claude 칸(새 대화 목록에서 연 것). 대화 id 는 앱이 정해 `--session-id` 로 준 것이라
+   *  추측이 아니다. 세션에 남아 다시 켜면 그 대화로 이어 연다(ClaudeStreamPane). */
+  const [streams, setStreams] = useState<Record<string, StreamChat>>({});
+  const [streamBusy, setStreamBusy] = useState<Record<string, boolean>>({});
   const codexChats = useRef<Record<string, string>>({});
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
@@ -213,14 +230,20 @@ export default function App() {
 
   /** 셸을 안 주면 지금 탭과 같은 것으로 연다. 단축키(Ctrl+Shift+T)가 그 길로 오는데,
    *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다.
-   *  에이전트를 주면 복원 명령과 같은 길(Term 의 seed)로 셸이 뜨자마자 켠다. 새 대화라
-   *  `procs` 에는 넣지 않는다 — 켜진 것을 폴링이 보면 그때부터 이어가기 명령으로 남는다. */
+   *  Codex 는 복원 명령과 같은 길(Term 의 seed)로 셸이 뜨자마자 켠다. 새 대화라 `procs` 에는
+   *  넣지 않는다 — 켜진 것을 폴링이 보면 그때부터 이어가기 명령으로 남는다. */
   const newTab = useCallback(
     (shell?: string, agent?: AgentKind) => {
       const id = `%${nextPane.current++}`;
-      if (agent) setSeeds((s) => ({ ...s, [id]: { cmd: agent, auto: true } }));
       const root = cur?.root ?? null;
-      const sh = shell ?? cur?.shell;
+      // Claude 는 터미널 없이 연다. 권한 묻기·질문이 데이터로 와서 대화창이 다 받는다.
+      // Codex 는 아직 그 통로가 없어 칸 셸에서 켠다.
+      if (agent === "claude") {
+        setStreams((s) => ({ ...s, [id]: { session: crypto.randomUUID(), cwd: root ?? "" } }));
+        setPaneTitles((t) => ({ ...t, [id]: "새 대화" }));
+      } else if (agent) setSeeds((s) => ({ ...s, [id]: { cmd: agent, auto: true } }));
+      // 터미널 없는 칸만 든 탭은 셸이 없다. 그 탭에서 칸을 나누면 기본 셸로 연다.
+      const sh = agent === "claude" ? undefined : (shell ?? cur?.shell);
       setTabs((ts) => {
         setActive(ts.length);
         return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id, shell: sh }];
@@ -341,11 +364,13 @@ export default function App() {
             paneTitles?: unknown;
             casting?: Record<string, string>;
             sideOpen?: boolean;
+            streams?: unknown;
           };
           if (s.fontSize) setFontSize(s.fontSize);
           if (s.names) setNames(s.names);
           setPaneTitles(savedPaneTitles(s.paneTitles, (s.tabs ?? []).flatMap(t => t.layout ? L.leaves(t.layout) : [])));
           if (s.casting) setCasting(s.casting);
+          setStreams(savedStreams(s.streams));
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
             const m = continuePlan(s.procs, s.restoreMode !== "native-continue");
@@ -399,13 +424,14 @@ export default function App() {
         paneTitles: savedPaneTitles(paneTitles, live),
         casting,
         sideOpen,
+        streams: Object.fromEntries(Object.entries(streams).filter(([id]) => live.has(id))),
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen]);
+  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streams]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -450,6 +476,37 @@ export default function App() {
       clearInterval(h);
     };
   }, []);
+
+  useEffect(() => {
+    if (!booted) return;
+    const live = new Set(tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : [])));
+    setStreams((s) => {
+      const gone = Object.keys(s).filter((id) => !live.has(id));
+      if (!gone.length) return s;
+      const next = { ...s };
+      for (const id of gone) delete next[id];
+      return next;
+    });
+  }, [tabs, booted]);
+  const onStreamTitle = useCallback((id: string, title: string) => {
+    setPaneTitles((t) => (t[id] === title ? t : { ...t, [id]: title }));
+  }, []);
+  const onStreamSession = useCallback((id: string, session: string) => {
+    if (!isSessionId(session)) return;
+    setStreams((s) => (!s[id] || s[id].session === session ? s : { ...s, [id]: { ...s[id], session } }));
+  }, []);
+  const onStreamBusy = useCallback((id: string, busy: boolean) => {
+    setStreamBusy((b) => (!!b[id] === busy ? b : { ...b, [id]: busy }));
+  }, []);
+  // 머리줄·옆칸이 보는 칸 상태. 터미널 없는 칸은 PTY 폴링에 안 잡히므로 여기서 채운다.
+  // 폴링 결과(stat) 자체에는 섞지 않는다 — 그쪽은 복원 명령·명부를 판단하는 자리다.
+  const paneView = useMemo(() => {
+    const extra: Record<string, PaneStat> = {};
+    for (const [id, c] of Object.entries(streams)) {
+      extra[id] = { id, proc: null, agent: "claude", busy: !!streamBusy[id], working: !!streamBusy[id], cwd: c.cwd };
+    }
+    return { ...stat, ...extra };
+  }, [stat, streams, streamBusy]);
 
   // 새로 생긴 칸에 사람을 붙인다. 이미 나간 사람은 피하고, 스무 명을 다 쓰면
   // 처음부터 다시 돈다. 칸이 사라져도 배정은 지우지 않는다 — 같은 칸이 되살아날
@@ -739,6 +796,10 @@ export default function App() {
    *  입력바에 쓴 말이 셸 명령으로 실행된다. 보이는 것은 대화 파일이 생긴 뒤다. */
   const chatState = (id?: string) => {
     if (!id) return { mount: false, shown: false };
+    if (streams[id]) {
+      showsChat.current[id] = true;
+      return { mount: false, shown: true };
+    }
     if (stat[id]?.agent === "codex") {
       const mount = !!stat[id]?.codex?.chat && !stat[id]?.codex?.failed && termView[id] !== true;
       const shown = mount && !!chatReady[id] && !termView[id];
@@ -828,7 +889,7 @@ export default function App() {
         active={active}
         git={git}
         dirty={dirty}
-        stat={stat}
+        stat={paneView}
         titles={titles}
         names={names}
         paneTitles={paneTitles}
@@ -896,13 +957,13 @@ export default function App() {
                         >
                           <span
                             className={
-                              isAgentWorking(stat[s.id]) ? "pip work" : "pip"
+                              isAgentWorking(paneView[s.id]) ? "pip work" : "pip"
                             }
                           >
                             <Face
                               slug={casting[s.id]}
-                              agent={!!stat[s.id]?.agent}
-                              dancing={isAgentWorking(stat[s.id])}
+                              agent={!!paneView[s.id]?.agent}
+                              dancing={isAgentWorking(paneView[s.id])}
                             />
                           </span>
                           {renaming === s.id ? (
@@ -946,11 +1007,11 @@ export default function App() {
                               }
                               onDoubleClick={() => setRenaming(s.id)}
                             >
-                              {names[s.id] || paneTitles[s.id] || label(s.id, stat, titles)}
+                              {names[s.id] || paneTitles[s.id] || label(s.id, paneView, titles)}
                             </span>
                           )}
-                          {stat[s.id]?.agent ? <span className="chip">{stat[s.id]?.agent}</span> : null}
-                          {(chatIds[s.id] && stat[s.id]?.agent === "claude") || (stat[s.id]?.agent === "codex" && stat[s.id]?.codex?.chat) ? (
+                          {paneView[s.id]?.agent ? <span className="chip">{paneView[s.id]?.agent}</span> : null}
+                          {(chatIds[s.id] && paneView[s.id]?.agent === "claude") || (paneView[s.id]?.agent === "codex" && paneView[s.id]?.codex?.chat) ? (
                             <button
                               className="view"
                               onMouseDown={(e) => e.stopPropagation()}
@@ -980,7 +1041,7 @@ export default function App() {
                             잃는다. 셸은 스피너를 판정할 길이 없으니 전경 명령이 도는
                             동안(=`busy`)이 곧 작업 중이다. */}
                         {(
-                          stat[s.id]?.agent ? isAgentWorking(stat[s.id]) : stat[s.id]?.busy
+                          paneView[s.id]?.agent ? isAgentWorking(paneView[s.id]) : paneView[s.id]?.busy
                         ) ? (
                           <div className="busy" />
                         ) : null}
@@ -988,8 +1049,8 @@ export default function App() {
                         {/* 맡은 아이를 칸 안에 세워 둔다. 헤더의 작은 얼굴만으로는
                             누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
                             터미널을 고르고 끄는 데 걸리지 않게 한다. */}
-                        {stat[s.id]?.agent && faceUrl(casting[s.id]) ? (
-                          isAgentWorking(stat[s.id]) ? (
+                        {paneView[s.id]?.agent && faceUrl(casting[s.id]) ? (
+                          isAgentWorking(paneView[s.id]) ? (
                             <DanceFace slug={casting[s.id]} className="buddy" />
                           ) : (
                             <img
@@ -1000,6 +1061,19 @@ export default function App() {
                             />
                           )
                         ) : null}
+                        {streams[s.id] ? (
+                          <ClaudeStreamPane
+                            id={s.id}
+                            cwd={streams[s.id].cwd}
+                            session={streams[s.id].session}
+                            slug={casting[s.id]}
+                            name={bySlug.get(casting[s.id])?.name}
+                            focused={ti === active && t.focus === s.id}
+                            onTitle={onStreamTitle}
+                            onBusy={onStreamBusy}
+                            onSession={onStreamSession}
+                          />
+                        ) : (
                         <Term
                           id={s.id}
                           focused={ti === active && t.focus === s.id}
@@ -1009,6 +1083,7 @@ export default function App() {
                           fontSize={fontSize}
                           seed={seeds[s.id]}
                         />
+                        )}
                         {/* 터미널 위에 덮는다. 터미널은 그 아래서 크기를 지킨 채 살아 있다. */}
                         {chatState(s.id).mount ? (
                           <ChatPane

@@ -13,6 +13,10 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ## 현재 상태 — 2026-09-28
 
+- **새 대화 목록과 터미널 없는 Claude 칸**(9월 28일, 미배포): 옆칸 `새 대화` 에서 상대를 고르면 새 탭에서 바로 켜진다.
+  Claude 는 칸 셸의 TUI 가 아니라 `claude -p` stream-json 통로(`claude_chat.rs`)로 돌고, 권한 묻기·선택지 질문·
+  중단·모델·권한 모드를 대화창 카드로 다룬다. 터미널이 아예 없다. Codex 는 아직 칸 셸에서 켠다(app-server 는 다음 일).
+  상세는 [작업 정리 18절](docs/WORKLOG.md#18-9월-28일-추가-새-대화-목록과-터미널-없는-claude-칸).
 - **다음 작업 인계:** [Codex 대화창 핸드오프](docs/HANDOFF-CODEX-CHAT.md)를 먼저 읽는다.
   Codex 대화창은 현재 훅 기반 구현으로 고정 경로에 반영됐다. 첫 실행 때 Codex `/hooks`에서 신뢰 검토가 필요하다.
   `notify`로 정확한 ID를 받는 격리 실험은 대안 검토용이며 앱 연결은 아직 훅 방식을 쓴다.
@@ -64,6 +68,10 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   써 둔 명부에서만 온다(`claude_session_of_pid`). 폐기된 옛 방식은 `projects/<폴더>` 의 대화
   파일에서 "가장 최근 것"을 골랐고, 그래서 사용자가 쓰던 대화를 칸이 뺏었다. `--session-id` 로
   새 대화를 대신 만들지도 않는다. pid 는 `procStart`·폴더·uuid 모양까지 맞춘 뒤에만 쓴다.
+  **예외는 새 대화 목록으로 연 터미널 없는 칸 하나다.** 그 칸은 정말로 새 대화를 여는 것이라 앱이 id 를 정해
+  `--session-id` 로 주고 세션(`streams`)에 적는다. 복원을 대신하는 것이 아니고, 다시 켤 때는 그 id 의
+  대화 파일이 있을 때만 `--resume` 으로 연다. 이 규칙을 PTY 칸의 복원으로 넓히지 마라.
+  `/clear` 로 claude 가 새 대화로 넘어가면 통로가 알려 준 그 id 를 따라 적는다(추측이 아니라 claude 의 답이다).
   대화창은 명부가 준 id 의 대화 파일을 **그리기만** 한다 — 파일을 뒤져 대화를 고르지 않는다.
   직접 지정한 attach·기타 수동 명령은 그대로 둔다.
 - Codex의 `codex_transport.rs`와 원격 TUI 중계는 제거했다. 로컬 CLI를 그대로 실행한다.
@@ -79,6 +87,11 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   5초마다 다시 본다 — claude 가 명부를 늦게 쓰기도 하고 `/clear` 로 대화가 바뀌기도 한다.
   **명부는 칸이 본 claude 가 아니라 그 자식이 쓸 수 있다**(셸 아래 `claude.exe` 가 실행기일 때).
   `roster_pids` 로 자손까지 본다. 테스트는 잎 claude 에만 명부를 쓴다 — 새 pid 모두에 쓰면 이 버그가 가려진다.
+- **터미널 없는 칸(`ClaudeStreamPane`)은 PTY 폴링(`stat`)에 섞지 않는다.** 머리줄·옆칸은 `paneView` 로 채워
+  보여 주기만 한다. `stat` 에 넣으면 복원 명령 누적(`procs`)·명부 조회가 그 칸을 셸 칸으로 다룬다.
+  권한 답에는 `toolUseID`(요청의 `tool_use_id`)를 꼭 싣는다 — 빠지면 claude 가 답을 못 알아듣고 영영 기다린다.
+  대화 파일 쪽의 "터미널에서 고르기" 카드는 이 칸에서 그리지 않는다(갈 터미널이 없다). 앱을 끄면 입력이 닫혀
+  claude 도 스스로 내려가고, 칸을 닫으면 `claude_chat_stop` 이 거둔다.
 - **대화창은 터미널 위에 덮기만 한다**(`ChatPane`). 터미널을 걷거나 숨기면 결정 1·2번이 깨진다.
   포커스는 `focusPane` 으로 준다 — 터미널에만 주면 덮인 xterm 이 보이지 않는 곳에서 키를 먹는다.
   **대화 파일이 없는 새 대화는 덮지 않는다.** 폴더 신뢰·API 키·bypass 경고 같은 시작 대화상자는 TUI 에만 있다.
@@ -375,6 +388,8 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/Chat.tsx` · `ui/chat.css` · `ui/Markdown.tsx` | 대화창 — 말풍선 · 입력바 · 쓰이는 중인 답 · 칸 위 덮개 |
 | `ui/SubAgents.tsx` | 서브에이전트가 지금 하는 일 — 에이전트마다 한 줄(`chat:sub`) |
 | `ui/SubagentView.tsx` | 서브에이전트 대화 전체 보기 — 진행 줄·"부름" 줄을 누르면 연다 |
+| `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·권한 모드, 통로 해석(단위 검증) |
+| `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
 | `ui/app.css` (860줄) · `ui/theme.css` (100줄) | 치이카와 테마 |

@@ -14,7 +14,7 @@ fn find(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-fn program(name: &str) -> Option<Program> {
+pub(crate) fn program(name: &str) -> Option<Program> {
     if let Some(exe) = find(&format!("{name}.exe")) {
         // 치이스페 안에서 새 창을 열어도 이전 창의 래퍼를 재귀 호출하지 않는다.
         if let Ok(bytes) = std::fs::read(exe.with_file_name("launch.json")) {

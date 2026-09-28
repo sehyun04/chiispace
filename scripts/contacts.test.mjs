@@ -13,7 +13,7 @@ const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const hash = (file) => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
-test("새 대화에서 상대를 누르면 새 탭에서 그 에이전트가 바로 켜진다", { skip: !exe || !claude, timeout: 150000 }, async () => {
+test("새 대화에서 상대를 누르면 새 탭에서 그 에이전트가 바로 켜진다 — Claude 는 터미널 없이", { skip: !exe || !claude, timeout: 150000 }, async () => {
   // 연락처에서 고르듯 누르면 끝이어야 한다 — 셸을 연 뒤 명령을 치는 단계가 사용자에게 남지 않는다.
   // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·CODEX_HOME, 가짜 키와 닫힌 루프백 주소. 모델은 부르지 않는다.
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-contacts-"));
@@ -90,6 +90,8 @@ trust_level = "trusted"
         shells: picker?.querySelectorAll('.ct-shells .sp').length ?? 0,
         tabs: side?.querySelectorAll('.tgroup').length ?? 0,
         activeTab: [...(side?.querySelectorAll('.tgroup') ?? [])].findIndex(e => e.classList.contains('on')),
+        stream: Object.fromEntries([...document.querySelectorAll('[data-pane]')].map(e => [e.dataset.pane, !!e.querySelector('.chat-over .composer') && !e.querySelector('.xterm')])),
+        tabShells: [...(side?.querySelectorAll('.tgroup') ?? [])].map(e => e.querySelector('.tg-shell')?.textContent ?? null),
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({screens, stat, dom})});
       for (const c of await r.json()) {
@@ -130,17 +132,19 @@ trust_level = "trusted"
     await pick('.ct[data-agent="claude"]');
     assert.ok(await until(() => dom().tabs === 2 && !dom().picker, 50), "새 탭이 안 열림: " + JSON.stringify(dom()));
     assert.equal(dom().activeTab, 1, "새 탭으로 안 건너감");
-    assert.ok(await until(() => stat("%1")?.agent === "claude", 300), "새 탭에서 claude 가 안 켜짐:\n" + screen("%1").slice(-800));
-    // cmd 는 제 폴더를 알려 주지 않아 칸 상태의 cwd 가 빈다. 탭의 폴더와 claude 가 띄운 폴더로 본다.
+    // Claude 는 터미널 없는 칸으로 열린다. 대화 흐름 자체는 chat-stream 검증이 본다.
+    assert.ok(await until(() => dom().stream?.["%1"], 100), "Claude 가 터미널 없는 칸으로 안 열림: " + JSON.stringify(dom()));
+    assert.equal(screen("%1"), "", "터미널 없는 칸에 터미널이 있다");
+    assert.equal(dom().tabShells[1], null, "셸 없는 탭에 셸 이름이 붙음");
+    // 지금 폴더에서 열리고, 앱이 정한 대화 id 가 세션에 남아 다시 켜면 그 대화로 돌아온다.
     assert.ok(await until(() => {
-      try { return JSON.parse(readFileSync(state, "utf8")).tabs?.[1]?.root === project.replaceAll("\\", "/"); } catch { return false; }
-    }, 50), "새 탭이 지금 폴더로 안 열림: " + readFileSync(state, "utf8"));
-    assert.ok(await until(() => screen("%1").includes(path.basename(root)), 100), "claude 가 고른 폴더에서 안 켜짐:\n" + screen("%1").slice(-800));
-    assert.doesNotMatch(screen("%1"), /인식할 수 없|is not recognized/, "명령이 셸에서 깨짐");
-    // 켜진 것을 폴링이 보면 그때부터 이어가기 명령으로 저장된다. 앱을 꺼도 그 대화로 돌아온다.
-    assert.ok(await until(() => {
-      try { return /^claude( |$)/.test(JSON.parse(readFileSync(state, "utf8")).procs?.["%1"]?.cmd ?? ""); } catch { return false; }
-    }, 100), "켜진 claude 가 세션에 남지 않음: " + readFileSync(state, "utf8"));
+      try {
+        const saved = JSON.parse(readFileSync(state, "utf8"));
+        return saved.tabs?.[1]?.root === project.replaceAll("\\", "/")
+          && /^[0-9a-f-]{36}$/.test(saved.streams?.["%1"]?.session ?? "")
+          && saved.streams["%1"].cwd === saved.tabs[1].root;
+      } catch { return false; }
+    }, 50), "새 대화가 지금 폴더·대화 id 로 안 남음: " + readFileSync(state, "utf8"));
     assert.equal(stat("%0")?.agent ?? null, null, "원래 칸이 영향을 받음");
 
     let next = 2;

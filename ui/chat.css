@@ -850,3 +850,180 @@ button.note.launch::after {
   line-height: 1.6;
   color: var(--ink);
 }
+
+/* ── 터미널 없는 칸(ClaudeStreamPane) ──
+   권한 묻기·질문이 통로로 오므로 대화 끝에 카드로 선다. 모양은 "기다리는 것이 있다" 카드(.ask)를
+   그대로 잇고, 누르는 자리만 더한다. 대비는 가장 밝은 카드 바탕(#fffdf8)에 대고 쟀다. */
+.stream-body {
+  background: var(--paper);
+}
+.ask .perm-input {
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--mono-font);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.ask-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ask-row .ask-go {
+  margin-top: 0;
+}
+.ask-go:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ask-alt,
+.ask-no {
+  border: 0;
+  border-radius: 9px;
+  padding: 5px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ask-alt {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.ask-alt:hover {
+  background: var(--line);
+}
+/* 거절은 테두리만. 허락과 나란히 있어도 먼저 눈에 드는 쪽이 허락이어야 한다. */
+.ask-no {
+  background: none;
+  color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.ask-no:hover {
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--outline) inset;
+}
+.ask.choose {
+  box-shadow: 0 0 0 2px var(--sky) inset;
+}
+.ask-q + .ask-q {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.ask-chip {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.ask-opts {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+.ask-opt {
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ask-opt:hover {
+  box-shadow: 0 0 0 1.5px var(--outline) inset;
+}
+.ask-opt.on {
+  background: var(--me);
+  box-shadow: none;
+  color: #fff;
+}
+.ask-opt-label {
+  font-weight: 700;
+}
+.ask-opt-desc {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+.ask-opt.on .ask-opt-desc {
+  color: #fff;
+}
+.ask-typed {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+}
+.ask-typed:focus {
+  box-shadow: 0 0 0 1.5px var(--outline) inset;
+}
+.ask-typed::placeholder {
+  color: var(--ink-3);
+}
+.stream-exit {
+  box-shadow: 0 0 0 2px var(--bad) inset;
+}
+
+/* 모델·권한 모드. TUI 의 상태줄 자리라 입력바 바로 위에 얇게 둔다. */
+.stream-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 5px 12px 0;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.stream-bar + .composer {
+  border-top: 0;
+}
+.stream-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.stream-bar select {
+  border: 0;
+  border-radius: 7px;
+  padding: 2px 6px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.stream-bar select:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

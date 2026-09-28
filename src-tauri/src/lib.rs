@@ -18,6 +18,7 @@ mod codex_chat;
 mod codex_chat_hook;
 mod pane_agent;
 mod proxy;
+mod claude_chat;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -348,6 +349,7 @@ pub fn run() {
             app.manage(Panes::default());
             app.manage(AgentTurns::default());
             app.manage(collab::Collab::default());
+            app.manage(claude_chat::ClaudeChats::default());
             // 첫 칸이 뜨기 전에 주소가 정해져 있어야 한다. 이미 뜬 셸의 환경은 바꿀 수 없다.
             app.manage(proxy::start(app.handle()));
             bridge::start(app.handle())?;
@@ -386,6 +388,9 @@ pub fn run() {
             workspace::claude_subagents,
             workspace::claude_subagent_raw,
             workspace::claude_subagent_size,
+            claude_chat::claude_chat_start,
+            claude_chat::claude_chat_send,
+            claude_chat::claude_chat_stop,
             codex_chat::codex_transcript_raw,
             codex_chat::codex_transcript_size,
             workspace::state_save,
