@@ -184,7 +184,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 ## 4. 커밋과 배포 상태
 
 - 실행 경로 고정: `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-- 마지막 배포: 2026-09-29 22:51, 새 Codex 칸의 첫 턴 제목 오류 수정판 앱·CLI를 함께 반영했다.
+- 마지막 배포: 2026-09-29 23:01, 통합 HEAD(`e01dcc4`)에서 앱·CLI를 다시 빌드해 함께 반영했다.
+  원격의 추가 변경이나 미커밋 작업은 없었다. 고정 경로에서 Codex 실제 앱 검증까지 통과했다.
+  실행 중인 사용자 앱은 종료하지 않았으므로 다음 실행부터 새 파일이 적용된다.
+  그 앞 배포는 2026-09-29 22:51, 새 Codex 칸의 첫 턴 제목 오류 수정판 앱·CLI를 함께 반영했다.
   내부 빌드와 고정 경로의 두 exe 해시가 일치하고, 고정 경로에서 `codex-stream-view` 실제 앱 검증을 통과했다.
   사용자 앱이 실행 중이어서 종료하지 않았다. 실행 중이던 앱 파일은 `chiispace.exe.old-20260929-225124`로
   같은 폴더에 보존했고 새 코드는 다음 실행부터 적용된다. 원인은 19절에 기록했다.
@@ -209,7 +212,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
   체크아웃되어 exe 에 박힌 바이트가 캐시와 달라졌고, 앱이 켜자마자 `ConPTY cache mismatch` 로 죽었다.
   배포 전 검증 10개가 전부 실패해서 잡았다. `.gitattributes` 로 그 파일의 변환을 껐다.
   `target/agent-bridge/release/`는 내부 빌드·검증용이지 사용자 실행 위치가 아니다.
-- 직전 배포본 백업: `src-tauri/target/release/backups/before-codex-title-20260929-225124/`.
+- 직전 배포본 백업: `src-tauri/target/release/backups/before-codex-head-20260929-230132/`.
+  22:51 배포판의 앱·CLI와 교체 직전 세션 두 곳을 함께 보관했다. 실행 중이던 앱 파일은
+  `src-tauri/target/release/chiispace.exe.old-20260929-230132`에 별도로 보존했다.
+  그 앞은 `before-codex-title-20260929-225124/`.
   20:16 배포판의 앱·CLI와 교체 직전 세션 두 곳을 함께 보관했다. 세션 원본은 수정하지 않았다.
   그 앞은 `before-codex-stream-20260929-201543/`.
   19:02 배포판의 앱·CLI와 교체 직전 `com.sehyun.chiispace`·구형 `com.sehyun.kasaspace` 세션을 함께 보관했다.
@@ -230,8 +236,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 
 | 파일 | SHA-256 |
 |---|---|
-| `chiispace.exe` | `69CB851B1A824A5E13EFCD9EFBFAEB1725506DCB84ABBDED6C5AED76B853546F` |
-| `chiispace-cli.exe` | `4534B31826A7DBD894BBFC16F8E9EFB577C46BB05FB79EB08E31F1B7B7244227` |
+| `chiispace.exe` | `347AB8F7B8DB407DBBF0DB88FC20359A81EF16862F09820EFD4AA88D334102EB` |
+| `chiispace-cli.exe` | `50E0C65F9016E8C2507DD42180CEE0119C800D44DD50015F4AEE0A2EC9BEEDB5` |
 
 20:16 교체 직후 사용자 세션 SHA-256: `80681E83DB3AE226E2908C4CF5C75DC98DBAA9F5117FC966480034BEA3287109`(검증 전과 같다).
 앱이 계속 떠 있어 사용자가 칸을 쓰는 대로 이 값은 바뀐다 — 배포가 세션을 건드리지 않았다는 근거는
@@ -925,6 +931,11 @@ Codex 실제 검증 테스트의 UI 문구가 설치된 Codex 0.157.1에서 바�
 테스트를 통과했다. 격리 상태의 실제 Codex 회귀를 내부 빌드와 고정 경로 수정판에서 각각 통과했다
 (`chiispace-codex-stream-Z0vwU5`, `chiispace-codex-stream-kteU4J`). 22:51 교체 때 사용자 앱은 실행
 중이어서 임의 종료하지 않았고, 그 창에는 다음 실행부터 수정판이 적용된다. 사용자 실사용 재확인은 별개다.
+사용자가 남은 작업을 합쳐 다시 굽도록 요청했다. 원격에 새 변경이 없고 로컬 두 커밋이 이미 Claude 변경 위에
+올라간 것을 확인했다. 통합 HEAD에서 TypeScript·Vite, Rust release 앱·CLI 빌드, JS 108개와 Rust 48개
+테스트를 통과했다. 격리 상태의 Codex 실제 앱 회귀는 내부 빌드와 교체 후 고정 경로에서 각각 통과했다
+(`chiispace-codex-stream-uN47PK`, `chiispace-codex-stream-hGUKMp`). 23:01 백업·교체 뒤에도 사용자 앱
+PID 43888은 실행 중이었고 세션 원본은 수정하지 않았다. 앱을 다시 켜야 새 코드가 로드된다.
 칸 사이 협업·Codex 서브에이전트 상세 화면·이미지/로그인 UI·TUI 전용 메뉴는 이번에 구현하지 않았다.
 유료 실모델·사용자 실사용, 모든 승인 변형과 `/compact`의 실제 동작을 검증했다고 확대하지 않는다.
 다음 작업은 [Codex 핸드오프](HANDOFF-CODEX-CHAT.md) 상단의 최신 인계를 따른다.

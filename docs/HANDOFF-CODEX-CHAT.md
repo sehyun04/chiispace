@@ -7,6 +7,8 @@
 사용자가 요청해 9월 29일 20:16에 고정 경로 앱·CLI를 교체했다. 실사용 중 새 대화의 첫 턴에서
 빈 rollout에 제목을 쓰려다 `failed to set thread name` 오류가 난다는 신고가 들어왔다.
 22:51에 수정판 앱·CLI를 같은 경로에 교체했다. 실행 중인 사용자 창은 그대로 두었으므로 다음 실행부터 적용된다.
+23:01에는 미반영 원격 변경이 없는 것을 확인하고 통합 HEAD(`e01dcc4`)로 앱·CLI를 다시 빌드·교체했다.
+고정 경로에서 Codex 실제 앱 검증을 통과했고, 실행 중인 창은 계속 그대로 두었다.
 그 뒤의 교체도 사용자 요청 때 진행한다.
 
 ### 구현과 복원 경계
@@ -54,6 +56,11 @@
   고정 경로 수정판으로도 같은 테스트를 통과했다(`chiispace-codex-stream-kteU4J`).
   교체 전 파일과 세션 두 곳은 `src-tauri/target/release/backups/before-codex-title-20260929-225124/`에 보관했다.
   사용자 창은 종료하지 않았고 기존 앱 파일은 고정 경로의 `chiispace.exe.old-20260929-225124`로 보존했다.
+- 통합 HEAD 재빌드에서도 `npm test` 108 통과·19 건너뜀, Rust lib 37개·CLI 11개 통과했다.
+  Codex 실제 앱 회귀는 내부 빌드(`chiispace-codex-stream-uN47PK`)와 고정 경로 교체본
+  (`chiispace-codex-stream-hGUKMp`)에서 각각 통과했다. 최신 백업은
+  `src-tauri/target/release/backups/before-codex-head-20260929-230132/`이며 실행 중이던 앱 파일은
+  `src-tauri/target/release/chiispace.exe.old-20260929-230132`로 보존했다.
 
 ### 다음 작업과 미검증
 
