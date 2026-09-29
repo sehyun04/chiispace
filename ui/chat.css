@@ -1013,7 +1013,8 @@ button.note.launch::after {
   align-items: center;
   gap: 5px;
 }
-.stream-bar select {
+.stream-bar select,
+.stream-bar button {
   border: 0;
   border-radius: 7px;
   padding: 2px 6px;
@@ -1023,7 +1024,18 @@ button.note.launch::after {
   font-size: 11px;
   cursor: pointer;
 }
-.stream-bar select:disabled {
+.stream-bar select:disabled,
+.stream-bar button:disabled {
   cursor: default;
   opacity: 0.6;
+}
+.stream-bar button[aria-expanded="true"] {
+  box-shadow: 0 0 0 1px var(--outline) inset;
+}
+.codex-status {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
 }

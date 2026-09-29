@@ -34,6 +34,9 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/lib.rs` | PTY ↔ 웹뷰 다리, 칸 상태, 헤드리스 검증 손잡이 |
 | `src-tauri/src/pty_stream.rs` | 출력 지연 재연결과 실제 셸 종료 구분 |
 | `src-tauri/src/codex_session.rs` | Codex 실행 폴더·복원 옵션 검증과 구형 메타데이터 전환 |
+| `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server·요청 격리·프로세스 수명 |
+| `ui/CodexStreamPane.tsx`, `ui/codex-stream.ts` | Codex 대화·승인·질문·설정과 스트림 해석 |
+| `ui/stream-session.ts` | 터미널 없는 Claude·Codex 칸의 저장 구분·빈 대화 복원 경계 |
 | `src-tauri/src/workspace.rs` | git · 세션 파일 · claude 대화 목록과 이름 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
@@ -68,8 +71,14 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   선택지 · 직접 쓰기), 입력바 위에서 모델과 권한 모드를 바꾼다. 터미널로 넘어갈 일이 없으니 터미널을 두지
   않는다. 말풍선·쓰이는 중인 답·서브에이전트는 PTY 칸과 같은 대화창과 같은 프록시로 그린다.
   대화 id 는 앱이 정해 `--session-id` 로 주고 세션에 적어, 다시 켜면 `--resume` 으로 그 대화를 이어 연다.
-- **Codex 는 칸 셸에서 켠다.** 복원 명령과 같은 길(Term 의 seed)로 셸이 조용해지면 친다. 켜진 뒤에는
-  폴링이 보고 이어가기 명령으로 저장한다.
+- **Codex도 터미널 없이 연다.** 설치된 CLI의 로컬 `app-server`를 칸마다 독립 실행한다. 새 훅을 주입하거나
+  `/hooks` 신뢰를 요구하지 않는다. 답변은 실시간으로 흐르고 승인·질문은 카드로, 모델·추론·승인은 입력바 위에서
+  고른다. `/model`은 모델 선택으로, `/status`·`/permissions`는 상태 표시로 연결된다.
+  `/new`·`/clear`·`/rename`·`/compact`도 지원한다. 나머지 명령은 안내하고 입력 초안을 보존한다.
+  서버가 발급한 ID를 저장해 `thread/resume`으로 이어 연다. 한 번도 전송하지 않아 CLI가 이력을 만들지 않은 칸은
+  그 사실이 확인된 경우에만 새 빈 대화로 연다. 기존 대화 복원 실패를 새 대화로 대신하지 않는다.
+
+위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 셸·PTY 칸은 그대로다.
 
 터미널 없는 칸은 아직 칸 사이 협업(다른 칸이 글을 넣거나 화면을 엿보는 것)을 받지 않는다. 목록 아래 `셸만` 은 명령 없이 셸로 열고,
 **이 컴퓨터에 실제로 있는 셸만** 뜬다(명령 프롬프트 · Windows PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 것을 골랐을 때 칸이
@@ -81,13 +90,13 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 
 **세션 복원** — 탭·배치·폴더·글자 크기, 그리고 그 칸이 돌리던 것까지 되살린다.
 
-- Claude는 `claude --continue`, Codex는 `codex resume --last`로 **그 폴더의 최근 대화**를 이어 연다.
+- **셸에서 실행한 칸:** Claude는 PID 명부의 ID가 있으면 `claude --resume <id>`, 없으면 `claude --continue`.
+  Codex는 `codex resume --last`로 **그 폴더의 최근 대화**를 이어 연다.
   칸별 ID를 추측하거나 없는 ID를 새 대화로 대신 만들지 않는다. 이전 버전의 저장 명령은 처음 한 번 전환한다.
   Codex 명령은 OpenAI Docs의 [resume 옵션](https://learn.chatgpt.com/docs/cli/reference#codex-resume)과
   설치된 CLI 도움말을 기준으로 한다.
-- 같은 폴더에 같은 에이전트가 여러 칸이면 **첫 칸만 이어가고 나머지는 대화 선택 목록**을 연다
-  (`claude --resume`, `codex resume`). 전부 같은 대화로 자동 연결하지 않기 위해서다.
-  다른 폴더·다른 에이전트는 각각 이어간다. 원래 칸의 정확한 대화 ID 복원을 보장하지는 않는다.
+- 같은 폴더에 여러 칸이 있어도 저장된 이어가기 명령을 그대로 쓴다. 둘째 칸부터 선택 목록으로 돌리지 않는다.
+  **새 대화 목록으로 만든 터미널 없는 칸**은 위의 `streams`에 저장된 정확한 ID로 각각 복원한다.
 - Claude 대화 파일 탐색·자동 background attach·지난 대화 프리로드는 하지 않는다.
   이어갈 대화와 히스토리 표시는 CLI에 맡긴다. 사용자가 직접 저장한 attach 등 별도 명령은 보존한다.
   다른 창이 대화를 사용 중인 경우 등은 CLI가 안내하며, 앱은 임의로 다른 대화를 대신 고르지 않는다.
@@ -104,7 +113,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   출력 전송이 밀려 구독이 끊겨도 칸을 닫지 않고 엔진의 화면·스크롤백으로 다시 연결한다.
   실제 셸 종료는 별도로 확인한다. 재연결은 엔진에 남아 있는 이력 범위이며 모든 원시 출력의 보관은 아니다.
   기존 앱에서 실행 중인 Codex에는 소급 적용되지 않는다.
-- Codex는 로컬 CLI 그대로 실행한다. 자체 App Server·원격 TUI 중계·대화 ID별 잠금은 제거했다.
+- PTY의 Codex는 로컬 CLI 그대로 실행한다. 이전 원격 TUI 중계·대화 ID별 잠금은 제거했다.
+  새 대화 칸의 로컬 stdio app-server 연결과는 다른 경로다.
   치이스페 래퍼는 상태 폴더(`CODEX_HOME`)·작업 폴더·명시적인 모델·프로필·샌드박스·승인 옵션만 저장한다.
   옵션 해석은 Codex에 맡기며 권한을 임의로 바꾸지 않는다. 상대 `-C`는 실제 작업 폴더로 정규화한다.
   내부 `codex-continue` 명령은 이 정보를 안전하게 전달하는 용도이며 대화 ID는 넘기지 않는다.
@@ -316,8 +326,9 @@ PowerShell의 입력·삭제 후 갈색 잔상은 같은 `CHIISPACE_TEST_EXE`로
 PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로그램의 명시적 색 보존을 확인한다.
 `CHIISPACE_TEST_SCREENSHOT=1`이면 각 단계의 자체 테스트 창도 캡처한다. 사용자 창에는 입력하지 않는다.
 바이트 경계·불완전 출력·선택 반전 보존은 `scripts/powershell-render.test.mjs`의 단위 검증이다.
-9월 28일 02:22:33에 Codex 대화창을 포함한 최신 빌드를 고정 경로 exe에 반영했다. 첫 Codex 실행 때 `/hooks` 신뢰 검토가 필요하며,
-실제 모델 변경·`/status` 후 연속 대화는 아직 별도 검증 범위다. 배포 상태는 작업 정리 4·17절을 따른다.
+9월 29일 고정 경로에 반영한 새 Codex 대화 칸은 `/hooks` 신뢰가 필요 없다. 기존 PTY Codex 칸은
+훅 기반이라 첫 실행 때 신뢰 검토가 필요하다. 새 칸의 모델 변경·`/status` 후 연속 대화는 격리 테스트로 확인했다.
+배포 상태는 작업 정리 4·19절을 따른다.
 
 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
 실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
@@ -340,9 +351,17 @@ Anthropic 서버를 두고 실제 claude 를 `-p` stream-json 통로로 띄워, 
 칸을 닫으면 claude 도 내려가는지 본다. `CHIISPACE_TEST_SCREENSHOT=1` 이면 카드가 뜬 자리를 자체 창에서 찍는다.
 통로 해석은 `scripts/claude-stream.test.mjs` 의 단위 검증이다.
 
+터미널 없는 Codex 칸은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로
+`node --test scripts/codex-stream-view.test.mjs`를 실행한다. 설치된 Codex와 격리 `CODEX_HOME`·로컬 Responses 서버로
+두 칸 격리·한글 여러 줄·실시간 답변·실행 허락과 취소·선택지·중단·모델 변경·`/status` 후 대화·이름과 ID 복원·
+`/new`·미전송 빈 칸 재시작·실패한 초안 복구·프로세스 종료를 확인한다. 질문 프로토콜을 시험하기 위해 격리 설정에만
+`default_mode_request_user_input`을 켠다. 제품은 이 기능이나 샌드박스를 강제로 바꾸지 않는다.
+`CHIISPACE_TEST_CODEX_PATH=inherited`로 npm/Node 경로도 확인하며, `CHIISPACE_TEST_SCREENSHOT=1`은 테스트 창만 캡처한다.
+상태 해석·복원 경계 단위 테스트는 `scripts/codex-stream.test.mjs`다. 유료 모델·사용자 인증을 가져오지 않는다.
+
 새 대화 목록은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`(있으면 `CHIISPACE_TEST_REAL_CODEX`)로
 `node --test scripts/contacts.test.mjs`를 실행한다. 목록을 눌러 새 탭에서 실제 claude·codex 가 켜지는지,
-그 폴더로 열리는지, 이어가기 명령으로 저장되는지, Esc 가 목록만 닫는지, 셸만 고르면 아무것도 안 치는지 본다.
+그 폴더의 터미널 없는 칸과 대화 ID로 저장되는지, Esc 가 목록만 닫는지, 셸만 고르면 아무것도 안 치는지 본다.
 
 칸 이름은 같은 `CHIISPACE_TEST_EXE`로 `node --test scripts/pane-titles.test.mjs`를 실행한다.
 별도 세션과 실제 PTY의 제목 출력으로 헤더·옆 목록·연결 도구의 일치, 저장 후 재시작,

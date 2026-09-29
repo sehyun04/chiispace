@@ -291,9 +291,11 @@ type ChatProps = {
   toolbar?: ReactNode;
   /** 아직 한 마디도 없는 새 대화. */
   fresh?: boolean;
+  /** app-server는 파일을 거치지 않고 이력과 현재 메시지를 같은 항목으로 준다. */
+  content?: Item[];
 };
 
-export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void };
+export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void; isCommand?: (text: string) => boolean };
 
 type ChatWin = { __chats?: Record<string, HTMLTextAreaElement | null> };
 
@@ -360,8 +362,8 @@ function Composer({
     if (!t || !live || waiting) return;
     setText("");
     if (transport) {
-      // 통로는 슬래시 명령도 말로 받는다. 메뉴를 띄울 터미널이 없으니 갈래를 나누지 않는다.
-      const undo = onSent(t);
+      // 로컬 메뉴 명령은 모델에 보낸 말풍선으로 남기지 않는다.
+      const undo = transport.isCommand?.(t) ? () => {} : onSent(t);
       transport.send(t).catch(() => {
         undo();
         setText((current) => (current ? `${t}\n${current}` : t));
@@ -393,7 +395,7 @@ function Composer({
         rows={1}
         value={text}
         disabled={!live || waiting}
-        placeholder={waiting ? "터미널에서 실행 허락을 확인해 줘" : live ? "보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈 · 빈 칸에서 Esc 는 중단" : `${agent} 가 떠 있지 않다`}
+        placeholder={waiting ? transport ? "위의 승인·질문 카드에 답해 줘" : "터미널에서 실행 허락을 확인해 줘" : live ? "보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈 · 빈 칸에서 Esc 는 중단" : `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // 조합 중인 Enter 는 글자를 확정하는 키지 보내는 키가 아니다.
@@ -514,7 +516,9 @@ export function Chat({
   extra,
   toolbar,
   fresh = false,
+  content,
 }: ChatProps) {
+  const direct = content !== undefined;
   const transcriptArgs = () => agent === "codex" ? { paneId, run, id } : { root, id };
   const [raw, setRaw] = useState<string | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -544,6 +548,7 @@ export function Chat({
   }, [away]);
 
   useEffect(() => {
+    if (direct) return;
     if ((!root && agent === "claude") || !id) return;
     let alive = true;
     setRaw(null);
@@ -590,7 +595,7 @@ export function Chat({
       window.clearInterval(timer);
       loadRef.current = () => {};
     };
-  }, [root, id, refreshMs, agent, paneId, run]);
+  }, [root, id, refreshMs, agent, paneId, run, direct]);
 
   useEffect(() => { loadRef.current(); }, [revision]);
 
@@ -663,6 +668,7 @@ export function Chat({
   }, [stream?.done, stream?.req, stream?.error]);
 
   const { items, durs, toks } = useMemo(() => {
+    if (content !== undefined) return { items: content, durs: new Map<string, number>(), toks: new Map<string, number>() };
     if (!raw) return { items: [] as Item[], durs: new Map<string, number>(), toks: new Map<string, number>() };
     if (agent === "codex") return codexTranscript(raw);
     const events = parseJsonl(raw);
@@ -671,7 +677,7 @@ export function Chat({
       durs: turnDurations(events),
       toks: turnTokens(events),
     };
-  }, [raw, agent]);
+  }, [raw, agent, content]);
 
   // ── 보낸 말: 파일에 적히기 전에도 바로 보인다 ──
   const mineTexts = useMemo(
@@ -679,6 +685,7 @@ export function Chat({
     [items],
   );
   const [sent, setSent] = useState<Sent[]>([]);
+  useEffect(() => { setSent([]); }, [id]);
   useEffect(() => {
     setSent((s) => {
       const keep = s.filter(
@@ -725,7 +732,7 @@ export function Chat({
   return (
     <div className="chat">
       <div className="chat-scroll" ref={scroll} onScroll={onScroll}>
-        {raw === null && !fresh ? (
+        {raw === null && !fresh && !direct ? (
           <div className="chat-empty">대화를 여는 중</div>
         ) : empty ? (
           <div className="chat-empty">{fresh ? "새 대화 · 하고 싶은 말을 보내 봐" : "아직 주고받은 말이 없다"}</div>
@@ -771,9 +778,9 @@ export function Chat({
             {stream && <LiveRows live={stream} slug={slug} name={name} showFace={!lastIsAgent} />}
             {agent === "claude" && <SubAgents session={id} />}
             {agent === "codex" && working && !waiting && (
-              <div className="note" role="status">Codex 작업 중 · 완료된 메시지부터 표시돼</div>
+              <div className="note" role="status">{direct ? "Codex 작업 중" : "Codex 작업 중 · 완료된 메시지부터 표시돼"}</div>
             )}
-            {(waiting || (stuck && !stream)) && (
+            {!transport && (waiting || (stuck && !stream)) && (
               <div className="ask">
                 <div className="ask-title">터미널에서 기다리는 것이 있다</div>
                 <div className="q">{waiting ? "Codex가 실행 허락을 기다리고 있어." : `${agent} 가 ${shortToolName(pendingTool ?? undefined)} 실행 허락을 기다리는 것 같다.`}</div>

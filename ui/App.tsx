@@ -28,6 +28,8 @@ import {
 import { Term } from "./Term";
 import { ChatPane } from "./Chat";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
+import { CodexStreamPane } from "./CodexStreamPane";
+import { savedStreams, type StreamChat } from "./stream-session";
 import { Sidebar, type AgentKind } from "./Sidebar";
 import { EMPTY_GIT, type GitInfo } from "./git";
 import * as L from "./layout";
@@ -61,18 +63,6 @@ const pct = (r: L.Rect) => ({
   width: `${r.w * 100}%`,
   height: `${r.h * 100}%`,
 });
-
-/** 터미널 없는 claude 칸이 붙든 대화. */
-type StreamChat = { session: string; cwd: string };
-
-/** 저장된 통로 기록. 대화 id 는 명령줄에 들어가므로 모양이 맞는 것만 받는다. */
-function savedStreams(value: unknown): Record<string, StreamChat> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).flatMap(([id, raw]) => {
-    const c = raw as Partial<StreamChat> | null;
-    return c && isSessionId(c.session) && typeof c.cwd === "string" ? [[id, { session: c.session, cwd: c.cwd }]] : [];
-  }));
-}
 
 export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([
@@ -118,8 +108,7 @@ export default function App() {
   const [termView, setTermView] = useState<Record<string, boolean | "auto">>({});
   /** 대화 파일에 무엇이든 적힌 칸. 그 전에는 대화창을 올려만 두고 터미널을 보인다(Chat.tsx). */
   const [chatReady, setChatReady] = useState<Record<string, boolean>>({});
-  /** 터미널 없는 claude 칸(새 대화 목록에서 연 것). 대화 id 는 앱이 정해 `--session-id` 로 준 것이라
-   *  추측이 아니다. 세션에 남아 다시 켜면 그 대화로 이어 연다(ClaudeStreamPane). */
+  /** 새 대화의 명시적인 ID만 저장한다. Claude는 앱이 정한 UUID, Codex는 서버의 응답을 쓴다. */
   const [streams, setStreams] = useState<Record<string, StreamChat>>({});
   const [streamBusy, setStreamBusy] = useState<Record<string, boolean>>({});
   const codexChats = useRef<Record<string, string>>({});
@@ -229,21 +218,18 @@ export default function App() {
   );
 
   /** 셸을 안 주면 지금 탭과 같은 것으로 연다. 단축키(Ctrl+Shift+T)가 그 길로 오는데,
-   *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다.
-   *  Codex 는 복원 명령과 같은 길(Term 의 seed)로 셸이 뜨자마자 켠다. 새 대화라 `procs` 에는
-   *  넣지 않는다 — 켜진 것을 폴링이 보면 그때부터 이어가기 명령으로 남는다. */
+   *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다. */
   const newTab = useCallback(
     (shell?: string, agent?: AgentKind) => {
       const id = `%${nextPane.current++}`;
       const root = cur?.root ?? null;
-      // Claude 는 터미널 없이 연다. 권한 묻기·질문이 데이터로 와서 대화창이 다 받는다.
-      // Codex 는 아직 그 통로가 없어 칸 셸에서 켠다.
-      if (agent === "claude") {
-        setStreams((s) => ({ ...s, [id]: { session: crypto.randomUUID(), cwd: root ?? "" } }));
+      // Codex의 ID는 새 대화를 연 서버가 발급한다. 첫 응답이 오기 전에도 칸은 저장한다.
+      if (agent) {
+        setStreams((s) => ({ ...s, [id]: { agent, session: agent === "claude" ? crypto.randomUUID() : "", cwd: root ?? "" } }));
         setPaneTitles((t) => ({ ...t, [id]: "새 대화" }));
-      } else if (agent) setSeeds((s) => ({ ...s, [id]: { cmd: agent, auto: true } }));
+      }
       // 터미널 없는 칸만 든 탭은 셸이 없다. 그 탭에서 칸을 나누면 기본 셸로 연다.
-      const sh = agent === "claude" ? undefined : (shell ?? cur?.shell);
+      const sh = agent ? undefined : (shell ?? cur?.shell);
       setTabs((ts) => {
         setActive(ts.length);
         return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id, shell: sh }];
@@ -498,12 +484,15 @@ export default function App() {
   const onStreamBusy = useCallback((id: string, busy: boolean) => {
     setStreamBusy((b) => (!!b[id] === busy ? b : { ...b, [id]: busy }));
   }, []);
+  const onCodexChange = useCallback((id: string, patch: Partial<Extract<StreamChat, { agent: "codex" }>>) => {
+    setStreams(s => s[id]?.agent === "codex" ? { ...s, [id]: { ...s[id], ...patch, agent: "codex" } } : s);
+  }, []);
   // 머리줄·옆칸이 보는 칸 상태. 터미널 없는 칸은 PTY 폴링에 안 잡히므로 여기서 채운다.
   // 폴링 결과(stat) 자체에는 섞지 않는다 — 그쪽은 복원 명령·명부를 판단하는 자리다.
   const paneView = useMemo(() => {
     const extra: Record<string, PaneStat> = {};
     for (const [id, c] of Object.entries(streams)) {
-      extra[id] = { id, proc: null, agent: "claude", busy: !!streamBusy[id], working: !!streamBusy[id], cwd: c.cwd };
+      extra[id] = { id, proc: null, agent: c.agent, busy: !!streamBusy[id], working: !!streamBusy[id], cwd: c.cwd };
     }
     return { ...stat, ...extra };
   }, [stat, streams, streamBusy]);
@@ -1061,7 +1050,12 @@ export default function App() {
                             />
                           )
                         ) : null}
-                        {streams[s.id] ? (
+                        {streams[s.id]?.agent === "codex" ? (
+                          <CodexStreamPane id={s.id} chat={streams[s.id] as Extract<StreamChat, { agent: "codex" }>}
+                            slug={casting[s.id]} name={bySlug.get(casting[s.id])?.name}
+                            focused={ti === active && t.focus === s.id}
+                            onTitle={onStreamTitle} onBusy={onStreamBusy} onChange={onCodexChange} />
+                        ) : streams[s.id] ? (
                           <ClaudeStreamPane
                             id={s.id}
                             cwd={streams[s.id].cwd}

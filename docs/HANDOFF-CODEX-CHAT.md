@@ -1,5 +1,63 @@
 # Codex 대화창 다음 핸드오프
 
+## 현재 인계 — 2026-09-29, 터미널 없는 새 Codex 칸
+
+사용자는 `916fd15`(새 대화 상대 목록)·`ded7b19`(터미널 없는 Claude 칸)를 확인하고 Codex도 같은 흐름으로
+구현하라고 했다. 구현 착수 때 HEAD는 `ded7b19`였고, 그 뒤 Claude 배포 기록 `068f18e` 위에서 이 변경을 합쳤다.
+사용자가 요청해 9월 29일 20:16에 고정 경로 앱·CLI를 교체했다. 다음 교체도 사용자 요청 때 진행한다.
+
+### 구현과 복원 경계
+
+- `App.tsx`의 새 대화 → Codex는 셸·xterm 없이 `CodexStreamPane`으로 열린다. 기존 Claude stream 기록은
+  `agent`가 없으면 Claude로 읽는다. 기존 PTY의 훅·`codex resume --last`·ConPTY 경로는 그대로다.
+- `src-tauri/src/codex_stream.rs`: 설치된 Codex의 `app-server --listen stdio://`를 칸마다 띄운다.
+  요청은 허용 목록과 칸·실행 세대·대화 ID로 제한한다. 승인 답은 서버가 발급한 미해결 요청에만 보낸다.
+  앱이 종료되면 Windows Job Object가 npm 실행기의 자식까지 거둔다. 새로운 훅 주입·신뢰 우회·인증 복제는 없다.
+- `ui/codex-stream.ts`: 서버의 이력과 실시간 알림을 같은 항목으로 합쳐 답변 중복을 막는다.
+  다른 대화·턴의 메시지는 섞지 않고 완료된 턴의 늦은 시작 응답으로 busy가 다시 켜지지 않게 한다.
+  도구 결과·중단·공개 생각 요약만 그리며 암호화된 추론 원문은 표시하지 않는다.
+- `ui/CodexStreamPane.tsx`: 승인·선택지/직접 입력 카드, 중단, 모델·추론·승인 선택, 상태 표시.
+  `/model`, `/status`, `/permissions`, `/new`, `/clear`, `/rename`, `/compact`를 연결했다.
+  지원하지 않는 명령이나 전송 실패는 오류를 보이고 초안을 되살린다. 모델·상태 메뉴가 터미널로 전환하지 않는다.
+- `ui/stream-session.ts`: 서버 발급 ID로 `thread/resume`한다. 첫 말을 보내지 않은 대화는 CLI가 이력을
+  만들지 않는 경계를 실제 앱에서 발견했다. `unstarted`가 참이어도 먼저 기존 ID 복원을 시도하고, 그 ID에 대해
+  정확히 `no rollout found`가 왔을 때만 새 빈 대화를 연다. 첫 전송 전에 표시를 끈다.
+  인증·설정 오류, 시간 초과, 이미 전송한 대화의 복원 실패를 새 대화로 덮지 않는다.
+- 기존 설정에서 받은 샌드박스·승인 정책을 유지한다. 선택한 모델·추론·승인은 그 칸의 다음 요청에 반영하며
+  전역 config 파일을 고치지 않는다. 칸 사이 협업은 Claude의 새 칸과 마찬가지로 아직 연결하지 않았다.
+
+### 검증 완료
+
+- `npm test`: 108 통과, 실제 앱 조건부 검증 19개 건너뜀, 실패 0.
+- TypeScript·Vite, 내부 release 앱·CLI 빌드, Rust lib 37개 + CLI 11개 통과.
+- 설치된 Codex 0.157.1 + 격리 `CODEX_HOME` + 로컬 Responses 서버로
+  `scripts/codex-stream-view.test.mjs` 통과. 네이티브 exe와 기본 PATH의 npm/Node 경로를 각각 검증했다.
+  두 칸 격리·한글 여러 줄·실시간 답·실제 승인 실행/취소 미실행·질문 답변·중단·모델 변경 후 `/status`와 후속
+  응답·모델/이름/ID 재시작 복원·`/new`·빈 칸 재시작·실패 초안 복구·칸/앱 종료의 프로세스 회수를 확인했다.
+- 같은 최종 내부 빌드의 `chat-view`, `chat-live`, `chat-sub`, `chat-stream`, `contacts` 5개 통과.
+  사용자 세션·Codex 설정/훅 파일 해시 유지. 유료 모델·사용자 인증·대화 파일을 가져오지 않았다.
+- 승인·상태·복원 화면 캡처 확인. 증거: 임시 폴더 `chiispace-codex-stream-A4svp0`(네이티브, 캡처 포함),
+  `chiispace-codex-stream-xpDuSu`(기본 PATH), 부모는 `C:/Users/kshkj/AppData/Local/Temp`.
+  임시 파일보다 커밋할 회귀 테스트를 기준으로 삼는다.
+- 고정 경로로 교체한 뒤 같은 Codex 실제 앱 검증이 다시 통과했다(`chiispace-codex-stream-MuHCsO`).
+  앱·CLI 해시는 WORKLOG 4절과 내부 빌드가 일치한다. 교체 전 앱·CLI와 세션 두 곳은
+  `src-tauri/target/release/backups/before-codex-stream-20260929-201543/`에 보관했다.
+
+### 다음 작업과 미검증
+
+- 현재 사용자용 파일은 `src-tauri/target/release/chiispace.exe`와 `chiispace-cli.exe`다.
+  다음 교체 때도 최신 변경·실행 여부·백업을 확인한다. 검증용 경로를 새 실행 위치로 안내하지 않는다.
+- 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력·로그인 UI, TUI 전용 메뉴는 이번 범위 밖이다.
+- 선택지 검증은 격리 config에서 `default_mode_request_user_input`을 켰다. 제품은 이 개발 중 기능을 강제로 켜지 않고,
+  CLI가 실제로 요청을 보내면 처리한다. 모든 버전·모드에서 모델이 질문 도구를 쓸 수 있다고 보장하지 않는다.
+- 유료 실모델·사용자 실사용, 모든 승인 변형·추가 권한 요청·`/compact`의 실제 서버 동작은 별도 검증 범위다.
+- 기존 PTY Codex의 훅·메뉴 문제는 아래 과거 인계 범위로 남는다. 새 칸 검증 성공을 기존 PTY 해결로 확대하지 않는다.
+- 캐릭터 보강은 요청 전까지 착수하지 않는다.
+
+## 아래는 이전 훅 기반 배포판의 기록
+
+아래의 “현재”와 “다음”은 9월 28일 훅 기반 판을 가리킨다. 새 대화 칸의 구현 지시는 위 9월 29일 인계가 우선한다.
+
 기준: 2026-09-28. Claude의 `473de39` 위에 Codex 소스를 별도 보존했고, 사용자 요청으로 `a10454a` 기준 앱·CLI를
 02:22:33에 고정 경로에 반영했다. 이 문서는 훅 기반 구현의 검증 범위와 남은 작업을 인계한다.
 Codex 대화창의 기본 흐름은 실제 앱에서 회귀 검증했지만, 실제 모델 변경·`/status` 후 연속 대화는 아직 미검증이다.

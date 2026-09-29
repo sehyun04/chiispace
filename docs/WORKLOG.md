@@ -184,7 +184,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 ## 4. 커밋과 배포 상태
 
 - 실행 경로 고정: `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-- 마지막 배포 코드: `ded7b19`. 2026-09-29 19:02:20에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+- 마지막 배포: 2026-09-29 20:16, 터미널 없는 Codex 새 대화 변경을 포함한 소스로 앱·CLI를 함께 반영했다.
+  내부 빌드를 새로 만들고 고정 경로의 두 exe와 SHA-256이 일치하는 것을 확인했다. 앱은 꺼져 있었다.
+  교체한 고정 경로 exe에서 `codex-stream-view` 실제 앱 검증을 다시 통과했다.
+  그 앞 배포 코드: `ded7b19`. 2026-09-29 19:02:20에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
   새 대화 목록(`916fd15`)과 터미널 없는 Claude 칸(`ded7b19`, 18절)이 들어갔다. 그때 푸시된 Codex 커밋은 다 들어 있고,
   작업본에만 있던 Codex 의 미커밋 작업(터미널 없는 Codex 칸)은 넣지 않았다 — 커밋 그대로의 워크트리에서 구웠다.
   그 exe 로 레포 검증 117개 중 115개 통과(실제 Claude·Codex 포함). 실패 2개(codex-resume·codex-scroll)는 이 작업이 없는
@@ -202,14 +205,16 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
   체크아웃되어 exe 에 박힌 바이트가 캐시와 달라졌고, 앱이 켜자마자 `ConPTY cache mismatch` 로 죽었다.
   배포 전 검증 10개가 전부 실패해서 잡았다. `.gitattributes` 로 그 파일의 변환을 껐다.
   `target/agent-bridge/release/`는 내부 빌드·검증용이지 사용자 실행 위치가 아니다.
-- 직전 배포본 백업: `src-tauri/target/release/backups/before-contacts-stream-20260929-190220/`.
+- 직전 배포본 백업: `src-tauri/target/release/backups/before-codex-stream-20260929-201543/`.
+  19:02 배포판의 앱·CLI와 교체 직전 `com.sehyun.chiispace`·구형 `com.sehyun.kasaspace` 세션을 함께 보관했다.
+  그 앞은 `before-contacts-stream-20260929-190220/`.
   그 앞은 `before-codex-chat-20260928-022233/`, `before-subagents-20260927-201700/`, `before-menu-return-20260925-224249/`, `before-roster-launcher-20260923-204605/`, `before-chat-view-20260923-200653/`(그때는 앱이 떠 있어 exe 를 `*.old-…` 로 옮겨 냈다), `before-per-pane-session-20260923-013704/`, `before-continue-guard-20260923-005355/`,
   그 앞은 `before-delegation-title-20260923-001617/`.
   9월 22일의 앱·CLI와 교체 시점의 `session-before.json`을 보관했다. 백업 해시를 확인한 뒤 교체했다.
-  **이번에는 사용자 앱이 실행 중이었다.** 임의 종료·재시작하지 않고, 실행 중인 두 exe 를
+  **9월 23일 당시에는 사용자 앱이 실행 중이었다.** 임의 종료·재시작하지 않고, 실행 중인 두 exe 를
   `*.old-20260923-001809` 로 옮겨 낸 뒤 같은 자리에 새 파일을 놓았다. 떠 있던 앱과 CLI 4개는
   그대로 살아 있고 새 코드는 다음에 앱을 켤 때부터 적용된다. 사용자 세션 원본은 수정하지 않았다.
-- 배포 번들은 사용자 워킹트리가 아니라 `HEAD` + 이번 수정만 올린 임시 git 워크트리에서 구웠다.
+- 9월 23일 배포 번들은 사용자 워킹트리가 아니라 `HEAD` + 그때 수정만 올린 임시 git 워크트리에서 구웠다.
   다른 세션이 `ui/Term.tsx` 와 `ui/powershell-render.ts` 를 작업 중이어서, 평소처럼 워킹트리를
   그대로 빌드하면 검증하지 않은 남의 변경이 사용자 앱에 섞여 들어간다.
 - 이전 백업 `before-pane-titles-20260922-224021/`,
@@ -219,8 +224,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 
 | 파일 | SHA-256 |
 |---|---|
-| `chiispace.exe` | `EF7B7BCA571405DD6502AA7F23CA33548046BBA446E7A0D6E821C20A64EF93E3` |
-| `chiispace-cli.exe` | `5AD3CA4B546159F327B715BF6ABB27E58A04EE7A83F1B2BF30EBD4F51A6D684C` |
+| `chiispace.exe` | `637299C314B6CDDC7385DBAD42172817D0D72B62D1CE1F72D94DF5316F2E99EB` |
+| `chiispace-cli.exe` | `38017C1DFC5640EECD7D6D8308E6FA19CC9FBD047FA009B4BD9250366C1A2708` |
 
 교체 직후 사용자 세션 SHA-256: `80681E83DB3AE226E2908C4CF5C75DC98DBAA9F5117FC966480034BEA3287109`(검증 전과 같다).
 앱이 계속 떠 있어 사용자가 칸을 쓰는 대로 이 값은 바뀐다 — 배포가 세션을 건드리지 않았다는 근거는
@@ -869,10 +874,49 @@ Codex 실제 검증 테스트의 UI 문구가 설치된 Codex 0.157.1에서 바�
 없다(모델·권한 모드만 카드 줄에 있다). Codex 는 `codex app-server` 로 같은 일을 하면 훅 신뢰 확인도 함께 없어진다 — 다음 일이다.
 9월 29일 19:02:20 `ded7b19` 로 고정 경로에 반영했다(4절). 사용자 실사용 확인은 아직이다.
 
+## 19. 9월 29일 추가: Codex도 터미널 없는 새 대화 흐름 적용
+
+사용자가 `916fd15`·`ded7b19`의 흐름을 Codex에도 그대로 적용하라고 요청했다. 새 대화 → Codex가 더 이상
+셸에 명령을 넣지 않고 `CodexStreamPane`과 로컬 `codex app-server --listen stdio://`로 열린다.
+[OpenAI 공식 app-server 문서](https://learn.chatgpt.com/docs/app-server)와 설치된 0.157.1의 생성 스키마를 확인하고
+프로토콜을 연결했다. 원격 TUI 중계를 되살린 것이 아니며 기존 PTY 칸은 바꾸지 않았다.
+
+- `codex_stream.rs`가 칸별 stdio 프로세스, 요청 허용 목록, 실행 세대·대화 ID·승인 요청 ID 일치를 관리한다.
+  Windows Job Object로 앱 종료 때 npm 실행기의 자식까지 내린다. 새 훅을 주입하거나 신뢰 DB를 수정하지 않는다.
+- `codex-stream.ts`는 이력과 실시간 답 조각을 하나의 말풍선으로 합치고, 도구 결과·공개 생각 요약·중단을 그린다.
+  완료 알림보다 늦게 온 `turn/start` 응답이 busy를 다시 켜지 않도록 완료 턴을 기억한다.
+- 입력바 위의 모델·추론·승인·상태, 승인 카드와 선택지·직접 답변, 중단을 붙였다. `/model`·`/status`·`/permissions`는
+  대화창 안에서 처리하므로 TUI 메뉴 복귀가 필요 없다. `/new`·`/clear`·`/rename`·`/compact`도 연결했다.
+  잘못된 명령·전송 실패는 오류를 보이고 초안을 되살린다. 기존 샌드박스를 임의로 넓히거나 전역 설정에 쓰지 않는다.
+- `streams`에 에이전트 구분과 서버가 준 ID·선택 설정을 저장한다. 구형 Claude 기록도 읽는다.
+  초기 테스트에서 미전송 빈 칸은 Codex가 rollout을 만들지 않아 재시작에 실패했다.
+  명시 ID 복원을 먼저 시도하고, `unstarted`와 그 ID의 정확한 이력 없음 오류가 함께 있을 때만 새 빈 칸으로 연다.
+  전송한 대화·인증 오류·시간 초과는 이 예외에 넣지 않는다. 첫 전송 전에 미전송 표시를 끈다.
+
+검증:
+
+- `npm test` 108 통과·19 건너뜀·실패 0, TypeScript·Vite 빌드 통과. 새 상태/복원 단위 검증 9개 포함.
+- 내부 Rust release 앱·CLI 빌드와 lib 37개·CLI 11개 테스트 통과. 기존 dead-code·번들 크기 경고만 남았다.
+- 실제 Codex 0.157.1, 격리 상태 폴더, 로컬 Responses 대역으로 네이티브와 기본 PATH의 npm/Node를 각각 검증했다.
+  터미널/훅 없이 두 칸 대화, 여러 줄 한글, 실시간 답·중복 제거, 허락하면 실제 폴더 생성·취소하면 미생성,
+  질문 답변, 중단 후 입력, 모델 변경·`/status` 후 응답, 이름/ID/선택 모델 복원, 새 대화·미전송 칸 복원,
+  실패 초안 복구, 해당 칸 프로세스만 종료, 앱 종료 시 프로세스 회수까지 통과했다.
+  질문 시험에만 격리 config의 `default_mode_request_user_input`을 켰다. 제품 설정은 강제하지 않는다.
+- 최종 내부 빌드에서 Claude `chat-view`·`chat-live`·`chat-sub`·`chat-stream`과 `contacts` 5개 통과.
+  사용자 세션·Codex 설정/훅 파일 해시 유지. OS 키 입력·실모델 호출 없이 검증했고 승인·상태·복원 캡처도 확인했다.
+- 최초 실패 두 건은 테스트 기대 수정(제목은 첫 줄만 사용, CLI가 제공한 승인 선택은 허락·취소)이었고,
+  미전송 칸 실패 한 건은 제품 복원 로직을 수정했다. 최종 네이티브/기본 PATH 테스트는 모두 통과했다.
+
+사용자 요청으로 9월 29일 20:16에 고정 경로 앱·CLI를 교체했다. 이전 앱·CLI와 세션 두 곳을 백업했고
+고정 경로 실제 Codex 검증까지 통과했다. 커밋·푸시 상태는 Git에서 별도로 확인한다.
+칸 사이 협업·Codex 서브에이전트 상세 화면·이미지/로그인 UI·TUI 전용 메뉴는 이번에 구현하지 않았다.
+유료 실모델·사용자 실사용, 모든 승인 변형과 `/compact`의 실제 동작을 검증했다고 확대하지 않는다.
+다음 작업은 [Codex 핸드오프](HANDOFF-CODEX-CHAT.md) 상단의 최신 인계를 따른다.
+
 ## 문서별 역할
 
 - 이 문서: 지금까지 무엇을 만들고 고쳤으며 어디까지 검증했는지 보는 누적 작업 정리.
 - [README](../README.md): 현재 기능·사용법·구조·빌드·검증 실행법.
 - [CLAUDE.md](../CLAUDE.md): 다음 작업자가 먼저 읽는 현재 상태·안전 규칙·회귀 방지 결정.
-- [Codex 대화창 핸드오프](HANDOFF-CODEX-CHAT.md): 9월 28일 미완료 구현·대안 검토·검증 경계·사용자 보류 지시와 다음 순서.
+- [Codex 대화창 핸드오프](HANDOFF-CODEX-CHAT.md): 최신 새 Codex 칸 구현·검증·배포 범위와 이전 훅 인계.
 - [핸드오프 이력](HANDOFF-ARCHIVE.md): 당시 진단·시행착오·원복 기록의 원문 보관. 현재 작업 지시는 아님.

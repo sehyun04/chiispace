@@ -13,7 +13,7 @@ const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const hash = (file) => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
-test("새 대화에서 상대를 누르면 새 탭에서 그 에이전트가 바로 켜진다 — Claude 는 터미널 없이", { skip: !exe || !claude, timeout: 150000 }, async () => {
+test("새 대화에서 상대를 누르면 새 탭에서 Claude·Codex가 터미널 없이 켜진다", { skip: !exe || !claude, timeout: 150000 }, async () => {
   // 연락처에서 고르듯 누르면 끝이어야 한다 — 셸을 연 뒤 명령을 치는 단계가 사용자에게 남지 않는다.
   // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·CODEX_HOME, 가짜 키와 닫힌 루프백 주소. 모델은 부르지 않는다.
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-contacts-"));
@@ -151,7 +151,13 @@ trust_level = "trusted"
     if (codex) {
       await pick('.ct[data-agent="codex"]');
       assert.ok(await until(() => dom().tabs === 3, 50), "Codex 탭이 안 열림");
-      assert.ok(await until(() => stat("%2")?.agent === "codex", 300), "새 탭에서 codex 가 안 켜짐:\n" + screen("%2").slice(-800));
+      assert.ok(await until(() => dom().stream?.["%2"], 100), "Codex가 터미널 없는 칸으로 안 열림");
+      assert.equal(screen("%2"), "");
+      assert.equal(dom().tabShells[2], null);
+      assert.ok(await until(() => {
+        const c = JSON.parse(readFileSync(state, "utf8")).streams?.["%2"];
+        return c?.agent === "codex" && !!c.session;
+      }, 300), "Codex 서버가 발급한 대화 ID가 저장되지 않음");
       next = 3;
     }
 
