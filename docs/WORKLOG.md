@@ -184,7 +184,12 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 ## 4. 커밋과 배포 상태
 
 - 실행 경로 고정: `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-- 마지막 배포 코드 기준: `a10454a`. 2026-09-28 02:22:33에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+- 마지막 배포 코드: `ded7b19`. 2026-09-29 19:02:20에 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+  새 대화 목록(`916fd15`)과 터미널 없는 Claude 칸(`ded7b19`, 18절)이 들어갔다. 그때 푸시된 Codex 커밋은 다 들어 있고,
+  작업본에만 있던 Codex 의 미커밋 작업(터미널 없는 Codex 칸)은 넣지 않았다 — 커밋 그대로의 워크트리에서 구웠다.
+  그 exe 로 레포 검증 117개 중 115개 통과(실제 Claude·Codex 포함). 실패 2개(codex-resume·codex-scroll)는 이 작업이 없는
+  `a10454a` 배포판으로도 똑같이 실패하는 기존 실패다. Rust 47개 통과.
+  그 앞 배포는 `a10454a` 기준(9월 28일 02:22:33, 서브에이전트 대화 보기·Codex 훅 기반 대화창).
   서브에이전트 대화 보기와 Codex 훅 기반 대화창이 들어갔다. 첫 Codex 실행 때 `/hooks` 신뢰 검토가 필요하다.
   `npm test`는 91개 통과·16개 건너뜀·실패 0, Rust는 lib 33개·CLI 11개 통과였고, 실제 Codex·Claude 회귀도 별도로 통과했다.
   그 앞 배포는 `38e304e`(9월 27일 20:17:00, 서브에이전트 진행 표시와 PowerShell 갈색 잔상 보정 `9908836`),
@@ -197,8 +202,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
   체크아웃되어 exe 에 박힌 바이트가 캐시와 달라졌고, 앱이 켜자마자 `ConPTY cache mismatch` 로 죽었다.
   배포 전 검증 10개가 전부 실패해서 잡았다. `.gitattributes` 로 그 파일의 변환을 껐다.
   `target/agent-bridge/release/`는 내부 빌드·검증용이지 사용자 실행 위치가 아니다.
-- 직전 배포본 백업: `src-tauri/target/release/backups/before-codex-chat-20260928-022233/`.
-  그 앞은 `before-subagents-20260927-201700/`, `before-menu-return-20260925-224249/`, `before-roster-launcher-20260923-204605/`, `before-chat-view-20260923-200653/`(그때는 앱이 떠 있어 exe 를 `*.old-…` 로 옮겨 냈다), `before-per-pane-session-20260923-013704/`, `before-continue-guard-20260923-005355/`,
+- 직전 배포본 백업: `src-tauri/target/release/backups/before-contacts-stream-20260929-190220/`.
+  그 앞은 `before-codex-chat-20260928-022233/`, `before-subagents-20260927-201700/`, `before-menu-return-20260925-224249/`, `before-roster-launcher-20260923-204605/`, `before-chat-view-20260923-200653/`(그때는 앱이 떠 있어 exe 를 `*.old-…` 로 옮겨 냈다), `before-per-pane-session-20260923-013704/`, `before-continue-guard-20260923-005355/`,
   그 앞은 `before-delegation-title-20260923-001617/`.
   9월 22일의 앱·CLI와 교체 시점의 `session-before.json`을 보관했다. 백업 해시를 확인한 뒤 교체했다.
   **이번에는 사용자 앱이 실행 중이었다.** 임의 종료·재시작하지 않고, 실행 중인 두 exe 를
@@ -214,10 +219,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 
 | 파일 | SHA-256 |
 |---|---|
-| `chiispace.exe` | `033B9DFF4961D3C7C5A5BA8A0CCE3F9B4215D8FA507E909E693C98C973D1FFE1` |
-| `chiispace-cli.exe` | `E321AEDFC25E973DBE82298FEAAD8787B7D80C1A29F51CF605BCD57B1CC5570D` |
+| `chiispace.exe` | `EF7B7BCA571405DD6502AA7F23CA33548046BBA446E7A0D6E821C20A64EF93E3` |
+| `chiispace-cli.exe` | `5AD3CA4B546159F327B715BF6ABB27E58A04EE7A83F1B2BF30EBD4F51A6D684C` |
 
-교체 직후 사용자 세션 SHA-256: `15801D382F392358916680D9F839CF3F2EF62D6A1809E48758BF02BFB6B67047`(검증 전과 같다).
+교체 직후 사용자 세션 SHA-256: `80681E83DB3AE226E2908C4CF5C75DC98DBAA9F5117FC966480034BEA3287109`(검증 전과 같다).
 앱이 계속 떠 있어 사용자가 칸을 쓰는 대로 이 값은 바뀐다 — 배포가 세션을 건드리지 않았다는 근거는
 이 해시가 아니라, 교체한 것이 exe 두 개뿐이고 검증이 `CHIISPACE_STATE` 임시 파일만 썼다는 사실이다.
 사용자가 새 앱을 열면 앱이 정상 저장 과정에서 이름을 보존한다. 테스트에서 직접 세션을 고치지 않는다.
@@ -862,7 +867,7 @@ Codex 실제 검증 테스트의 UI 문구가 설치된 Codex 0.157.1에서 바�
 
 남은 것: 터미널 없는 칸은 칸 사이 협업(다른 칸이 글을 넣거나 엿보기)을 아직 받지 않는다. `/config` 같은 TUI 메뉴는
 없다(모델·권한 모드만 카드 줄에 있다). Codex 는 `codex app-server` 로 같은 일을 하면 훅 신뢰 확인도 함께 없어진다 — 다음 일이다.
-사용자 실사용 확인 전이며 exe 는 굽지 않았다.
+9월 29일 19:02:20 `ded7b19` 로 고정 경로에 반영했다(4절). 사용자 실사용 확인은 아직이다.
 
 ## 문서별 역할
 
