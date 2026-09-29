@@ -124,7 +124,8 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
         if (command === "/compact") { await request("thread/compact/start", { threadId: latest.current.thread }); return; }
         if (command === "/rename") {
           if (!args.length) throw new Error("/rename 뒤에 대화 이름을 적어 줘");
-          await request("thread/name/set", { threadId: latest.current.thread, name: args.join(" ") });
+          // 첫 턴 전에는 Codex의 rollout이 비어 있어 서버 메타데이터 갱신이 실패할 수 있다.
+          titled.current = true;
           onTitle(id, args.join(" ")); return;
         }
         if (command.startsWith("/")) throw new Error("이 명령은 지원하지 않아. 모델·권한·상태는 입력바 위에서 고를 수 있어.");
@@ -140,7 +141,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
         if (result.turn && !latest.current.turn) put(reduceCodex(latest.current, { method: "turn/started", params: { threadId: current.thread, turn: result.turn } }));
         if (!titled.current) {
           const title = titleFrom(text);
-          if (title) { titled.current = true; onTitle(id, title); await request("thread/name/set", { threadId: current.thread, name: title }).catch(report); }
+          if (title) { titled.current = true; onTitle(id, title); }
         }
       } catch (e) { report(e); throw e; }
       finally { sending.current = false; setDispatching(false); }

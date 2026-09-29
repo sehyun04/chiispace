@@ -21,7 +21,9 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   `codex app-server --listen stdio://`로 터미널·추가 훅 주입 없이 연다. 실시간 답변, 승인·질문 카드,
   중단, 모델·추론·승인 설정, `/status`, `/new`와 명시 ID 복원을 지원한다. 기존 PTY 칸은 전환하지 않았다.
   단위 108개, Rust 48개, Codex 실제 앱과 Claude·연락처 회귀 5개 통과. 고정 경로에서도 Codex 실제 앱 검증 통과.
-  사용자 실사용 확인은 남았다. 세부 경계는 WORKLOG 19절을 본다.
+  사용자 실사용에서 첫 턴 직후 빈 rollout에 `thread/name/set`을 보내는 오류를 확인해 이름을 앱 세션에만 저장하도록 수정했다.
+  수정판 앱·CLI를 고정 경로에 교체했지만 실행 중인 창은 닫지 않았다. 그 창에는 다음 실행부터 적용된다.
+  수정판의 사용자 실사용 재확인은 남았다. 세부 경계는 WORKLOG 19절을 본다.
 - **다음 작업 인계:** [Codex 대화창 핸드오프](docs/HANDOFF-CODEX-CHAT.md)를 먼저 읽는다.
   **기존 PTY Codex 칸만** 훅 기반이다. 이 경로에서는 첫 Codex `/hooks` 신뢰 검토가 필요하다.
   새 대화 목록의 Codex 칸에는 훅 주입이 없다. `notify` 실험은 기존 PTY 경로의 대안 검토용이다.
@@ -56,8 +58,10 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   터미널 제목으로 내보낸다. 그 이름은 자동 이름으로 받지 않는다 — `/rename` 으로 붙인 이름이
   쪽지 한 통에 밀려났다. 상세와 남은 경계는 [작업 정리 12절](docs/WORKLOG.md#12-9월-23일-추가-위임-알림이-칸-이름을-덮던-문제)에 있다.
 - **실행 위치 고정:** `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-  9월 29일 20:16에 새 Codex 칸을 포함한 소스로 앱·CLI를 함께 교체했다(앱은 꺼져 있었다).
-  직전 배포판(`ded7b19`, 19:02)과 세션 두 곳은 `before-codex-stream-20260929-201543/`에 백업했다.
+  9월 29일 22:51에 Codex 첫 턴의 제목 오류 수정판 앱·CLI를 함께 교체했다. 직전 앱·CLI와 세션 두 곳은
+  `before-codex-title-20260929-225124/`에 백업했다. 사용자 앱은 실행 중이어서 임의 종료하지 않았고,
+  기존 앱 파일은 `chiispace.exe.old-20260929-225124`로 보존했다. 새 코드는 다음 실행부터 적용된다.
+  그 앞 20:16 배포판은 `before-codex-stream-20260929-201543/`에 백업했다.
   새 대화 목록·터미널 없는 Claude·Codex 칸이 이 판에 있다. 그 앞 배포는 `a10454a` 기준(9월 28일 02:22:33).
   서브에이전트 진행 표시·대화 보기와 PowerShell 갈색 잔상 보정(`9908836`)이 이 판에 있다.
   Codex 칸 대화창(`01c806a` 훅 기반 구현)이 들어 있다. 앱·CLI SHA-256은 WORKLOG 4절 최신 기록을 따른다.
@@ -85,6 +89,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   Claude로 읽는다. `unstarted`가 참이어도 먼저 저장 ID의 복원을 시도한다. 그 ID에 대해 정확히
   `no rollout found`를 받고 한 번도 전송하지 않은 칸일 때만 새 빈 대화로 연다. 첫 전송 전에 이 표시를 끈다.
   전송한 대화의 복원 실패·인증 오류·시간 초과를 새 대화로 덮지 않는다. PTY의 `resume --last`와 별개다.
+- **새 Codex 칸의 이름은 앱의 `paneTitles`에 저장한다.** `turn/start` 응답 직후의 rollout은 아직 비어 있을 수 있다.
+  자동 이름과 `/rename`에서 `thread/name/set`을 보내지 않는다. 수동 이름은 첫 메시지의 자동 이름보다 우선한다.
   승인 답에는 칸·실행 세대·요청 ID·대화 ID를 맞추며, CLI가 제공한 선택지만 보낸다.
 - Codex의 `codex_transport.rs`와 원격 TUI 중계는 제거했다. 로컬 CLI를 그대로 실행한다.
   래퍼는 MCP 연결·`--no-alt-screen`과 상태 폴더·작업 폴더·허용된 옵션 전달만 맡는다.

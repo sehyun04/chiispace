@@ -4,7 +4,10 @@
 
 사용자는 `916fd15`(새 대화 상대 목록)·`ded7b19`(터미널 없는 Claude 칸)를 확인하고 Codex도 같은 흐름으로
 구현하라고 했다. 구현 착수 때 HEAD는 `ded7b19`였고, 그 뒤 Claude 배포 기록 `068f18e` 위에서 이 변경을 합쳤다.
-사용자가 요청해 9월 29일 20:16에 고정 경로 앱·CLI를 교체했다. 다음 교체도 사용자 요청 때 진행한다.
+사용자가 요청해 9월 29일 20:16에 고정 경로 앱·CLI를 교체했다. 실사용 중 새 대화의 첫 턴에서
+빈 rollout에 제목을 쓰려다 `failed to set thread name` 오류가 난다는 신고가 들어왔다.
+22:51에 수정판 앱·CLI를 같은 경로에 교체했다. 실행 중인 사용자 창은 그대로 두었으므로 다음 실행부터 적용된다.
+그 뒤의 교체도 사용자 요청 때 진행한다.
 
 ### 구현과 복원 경계
 
@@ -19,6 +22,9 @@
 - `ui/CodexStreamPane.tsx`: 승인·선택지/직접 입력 카드, 중단, 모델·추론·승인 선택, 상태 표시.
   `/model`, `/status`, `/permissions`, `/new`, `/clear`, `/rename`, `/compact`를 연결했다.
   지원하지 않는 명령이나 전송 실패는 오류를 보이고 초안을 되살린다. 모델·상태 메뉴가 터미널로 전환하지 않는다.
+  첫 턴의 `turn/start` 응답 직후에는 rollout이 아직 비어 있을 수 있어 자동 이름·`/rename` 모두
+  `thread/name/set`을 호출하지 않는다. 이름은 앱의 `paneTitles`에 저장하고 수동 이름을 우선한다.
+  서버 요청 허용 목록에서도 `thread/name/set`을 뺐다.
 - `ui/stream-session.ts`: 서버 발급 ID로 `thread/resume`한다. 첫 말을 보내지 않은 대화는 CLI가 이력을
   만들지 않는 경계를 실제 앱에서 발견했다. `unstarted`가 참이어도 먼저 기존 ID 복원을 시도하고, 그 ID에 대해
   정확히 `no rollout found`가 왔을 때만 새 빈 대화를 연다. 첫 전송 전에 표시를 끈다.
@@ -42,10 +48,17 @@
 - 고정 경로로 교체한 뒤 같은 Codex 실제 앱 검증이 다시 통과했다(`chiispace-codex-stream-MuHCsO`).
   앱·CLI 해시는 WORKLOG 4절과 내부 빌드가 일치한다. 교체 전 앱·CLI와 세션 두 곳은
   `src-tauri/target/release/backups/before-codex-stream-20260929-201543/`에 보관했다.
+- 제목 오류 수정 뒤 `npm test` 108 통과·19 건너뜀, TypeScript·Vite, Rust release 앱·CLI 빌드와
+  lib 37개·CLI 11개 테스트를 통과했다. 새 대화·`/new`·빈 대화 복원의 첫 턴에서 오류가 없는지,
+  `/rename`한 빈 칸을 다시 켜도 이름이 유지되는지 실제 Codex 회귀로 확인했다.
+  고정 경로 수정판으로도 같은 테스트를 통과했다(`chiispace-codex-stream-kteU4J`).
+  교체 전 파일과 세션 두 곳은 `src-tauri/target/release/backups/before-codex-title-20260929-225124/`에 보관했다.
+  사용자 창은 종료하지 않았고 기존 앱 파일은 고정 경로의 `chiispace.exe.old-20260929-225124`로 보존했다.
 
 ### 다음 작업과 미검증
 
 - 현재 사용자용 파일은 `src-tauri/target/release/chiispace.exe`와 `chiispace-cli.exe`다.
+  현재 열린 사용자 창에는 교체 전 코드가 남아 있다. 사용자가 다음에 앱을 켤 때 수정판이 적용된다.
   다음 교체 때도 최신 변경·실행 여부·백업을 확인한다. 검증용 경로를 새 실행 위치로 안내하지 않는다.
 - 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력·로그인 UI, TUI 전용 메뉴는 이번 범위 밖이다.
 - 선택지 검증은 격리 config에서 `default_mode_request_user_input`을 켰다. 제품은 이 개발 중 기능을 강제로 켜지 않고,

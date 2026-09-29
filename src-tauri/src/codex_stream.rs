@@ -58,7 +58,7 @@ fn write(proc: &mut Proc, value: &Value) -> Result<(), String> {
     proc.stdin.write_all(&bytes).and_then(|_| proc.stdin.flush()).map_err(|e| format!("Codex에 보내지 못했다: {e}"))
 }
 fn permitted(method: &str) -> bool {
-    matches!(method, "initialize" | "thread/start" | "thread/resume" | "thread/read" | "thread/name/set"
+    matches!(method, "initialize" | "thread/start" | "thread/resume" | "thread/read"
         | "thread/compact/start" | "turn/start" | "turn/steer" | "turn/interrupt"
         | "model/list" | "account/read" | "account/rateLimits/read")
 }
@@ -214,7 +214,7 @@ mod tests {
     use super::*;
     #[test]
     fn chat_transport_cannot_execute_arbitrary_processes_or_write_config() {
-        for method in ["process/spawn", "command/exec", "config/value/write", "account/login/start"] { assert!(!permitted(method)); }
+        for method in ["process/spawn", "command/exec", "config/value/write", "account/login/start", "thread/name/set"] { assert!(!permitted(method)); }
         for method in ["thread/start", "thread/resume", "turn/start", "turn/interrupt", "model/list"] { assert!(permitted(method)); }
     }
 }

@@ -147,6 +147,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await until(() => pane().input && !pane().disabled, "Codex 연결");
     assert.equal(pane().xterm, false); assert.equal(pane().termButton, false);
     await reply("CS_FIRST");
+    assert.deepEqual(pane().error, [], "첫 턴의 이름 저장 오류");
     assert.deepEqual(pane().mine, ["CS_FIRST 한글\n다음 줄"]);
     assert.deepEqual(pane().theirs, ["CS_FIRST_REPLY"]);
     assert.ok(observations.some(o => o.panes?.["%1"]?.theirs.includes("CS_FIRST_")), "실시간 조각 누락");
@@ -202,6 +203,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     commands.push({ id: "%2", send: "/new" });
     await until(() => saved().streams?.["%2"]?.session !== second && !pane("%2").mine?.length, "새 대화 전환");
     await reply("CS_NEW", "%2");
+    assert.deepEqual(pane("%2").error, [], "새 대화 첫 턴의 이름 저장 오류");
     assert.ok(!JSON.stringify(requests.find(r => r.mark === "CS_NEW").input).includes("CS_SECOND"));
     const remaining = childPids(app); assert.equal(remaining.length, 2);
     commands.push({ id: "%2", close: true });
@@ -214,14 +216,22 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await until(() => pane("%3").input && !pane("%3").disabled, "한 번도 말하지 않은 새 칸 복원");
     await until(() => saved().streams?.["%3"]?.session !== empty, "미전송 칸은 새 빈 대화로 열기");
     assert.equal(pane("%3").mine.length, 0);
+    commands.push({ id: "%3", send: "/rename 수동 이름" });
+    await until(() => pane("%3").title === "수동 이름", "빈 대화의 이름 바꾸기");
+    assert.deepEqual(pane("%3").error, []);
     await reply("CS_EMPTY", "%3");
-    assert.equal(pane("%3").title, "CS_EMPTY 한글");
+    assert.equal(pane("%3").title, "수동 이름");
+    assert.deepEqual(pane("%3").error, [], "복원한 빈 대화 첫 턴의 이름 저장 오류");
     commands.push({ id: "%3", send: "/unsupported-command" });
     await until(() => pane("%3").value === "/unsupported-command" && pane("%3").error.length > 0, "실패한 입력 초안 복구");
     assert.ok(!pane("%3").sending.length);
     await reply("CS_RECOVER", "%3");
     assert.equal(pane("%3").error.length, 0);
     shot(app, "resumed");
+    const renamedThread = saved().streams["%3"].session;
+    await close(app); app = await launch();
+    await until(() => pane("%3").title === "수동 이름" && !pane("%3").disabled, "수동 이름 재시작 복원");
+    assert.equal(saved().streams["%3"].session, renamedThread);
     assert.equal(existsSync(path.join(home, "hooks.json")), false, "추가 훅 신뢰 요구");
     console.log("터미널·훅 없이 두 칸 대화, 실승인·거절·질문·중단·모델·상태·복원·종료 확인");
   } catch (e) {
