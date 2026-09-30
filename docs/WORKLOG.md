@@ -184,7 +184,13 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 ## 4. 커밋과 배포 상태
 
 - 실행 경로 고정: `src-tauri/target/release/chiispace.exe`와 같은 폴더의 `chiispace-cli.exe`.
-- 마지막 배포: 2026-09-29 23:01, 통합 HEAD(`e01dcc4`)에서 앱·CLI를 다시 빌드해 함께 반영했다.
+- 마지막 배포: 2026-09-30 18:42:28, `a97f81d`(두 칸 입력바 위 줄 통일, 20절)로 앱·CLI를 함께 반영했다(앱은 꺼져 있었다).
+  그때 푸시된 Codex 커밋까지 다 든 HEAD 다. 그 exe 로 레포 검증 128개 중 122개 통과, Rust 48개 통과.
+  실패 6개 중 Codex 3개(codex-chat·codex-resume·codex-scroll)는 앞 배포판에서도 실패하던 기존 실패다. 나머지 3개
+  (PTY Claude 칸의 chat-live·chat-sub·chat-view)는 claude 가 2.1.285 로 자동 업데이트된 뒤 생겼다 — 어제 전부
+  통과하던 `ded7b19` 판 exe 로도 똑같이 실패한다. 격리 claude 가 가짜 키로 "Not logged in" 이 되고, 격리 설정 폴더에도
+  명부를 쓰기 시작해 검증의 전제가 바뀌었다. 실제 로그인(Pro)의 제출 경로가 깨졌다는 증거는 아직 없다 — 사용자 확인 필요.
+  그 앞 배포: 2026-09-29 23:01, 통합 HEAD(`e01dcc4`)에서 앱·CLI를 다시 빌드해 함께 반영했다.
   원격의 추가 변경이나 미커밋 작업은 없었다. 고정 경로에서 Codex 실제 앱 검증까지 통과했다.
   실행 중인 사용자 앱은 종료하지 않았으므로 다음 실행부터 새 파일이 적용된다.
   그 앞 배포는 2026-09-29 22:51, 새 Codex 칸의 첫 턴 제목 오류 수정판 앱·CLI를 함께 반영했다.
@@ -212,7 +218,8 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
   체크아웃되어 exe 에 박힌 바이트가 캐시와 달라졌고, 앱이 켜자마자 `ConPTY cache mismatch` 로 죽었다.
   배포 전 검증 10개가 전부 실패해서 잡았다. `.gitattributes` 로 그 파일의 변환을 껐다.
   `target/agent-bridge/release/`는 내부 빌드·검증용이지 사용자 실행 위치가 아니다.
-- 직전 배포본 백업: `src-tauri/target/release/backups/before-codex-head-20260929-230132/`.
+- 직전 배포본 백업: `src-tauri/target/release/backups/before-stream-bar-20260930-184228/`(앱·CLI·세션).
+  그 앞은 `before-codex-head-20260929-230132/`.
   22:51 배포판의 앱·CLI와 교체 직전 세션 두 곳을 함께 보관했다. 실행 중이던 앱 파일은
   `src-tauri/target/release/chiispace.exe.old-20260929-230132`에 별도로 보존했다.
   그 앞은 `before-codex-title-20260929-225124/`.
@@ -236,8 +243,10 @@ Alt 조합의 칸 이동도 철회하고 드래그 방식으로 바꿨다. 과�
 
 | 파일 | SHA-256 |
 |---|---|
-| `chiispace.exe` | `347AB8F7B8DB407DBBF0DB88FC20359A81EF16862F09820EFD4AA88D334102EB` |
-| `chiispace-cli.exe` | `50E0C65F9016E8C2507DD42180CEE0119C800D44DD50015F4AEE0A2EC9BEEDB5` |
+| `chiispace.exe` | `40074947A149A9CBF02E6E0E3D96FDF8FAF52D135FE98D03C0E9C026F96366CF` |
+| `chiispace-cli.exe` | `1BA451C16B13DBDCEFB596EAEA3E7EFAB9518FE449067F3CE4E02B88888C3692` |
+
+9월 30일 18:42 교체 직후 사용자 세션 SHA-256: `FA1026DB8D0072D22BB16F3E6EA6002CB3B8B6796A511ADCDB918EC3D610FC4C`(검증 전과 같다).
 
 20:16 교체 직후 사용자 세션 SHA-256: `80681E83DB3AE226E2908C4CF5C75DC98DBAA9F5117FC966480034BEA3287109`(검증 전과 같다).
 앱이 계속 떠 있어 사용자가 칸을 쓰는 대로 이 값은 바뀐다 — 배포가 세션을 건드리지 않았다는 근거는
