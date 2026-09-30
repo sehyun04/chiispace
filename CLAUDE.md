@@ -115,6 +115,9 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   권한 답에는 `toolUseID`(요청의 `tool_use_id`)를 꼭 싣는다 — 빠지면 claude 가 답을 못 알아듣고 영영 기다린다.
   대화 파일 쪽의 "터미널에서 고르기" 카드는 이 칸에서 그리지 않는다(갈 터미널이 없다). 앱을 끄면 입력이 닫혀
   claude 도 스스로 내려가고, 칸을 닫으면 `claude_chat_stop` 이 거둔다.
+- **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · [상태] [새 대화]
+  순서와 상태 표 항목을 거기서 정한다. 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
+  Claude 추론 수준은 `apply_flag_settings`(이 세션에만 거는 층)로 건다 — 사용자 설정 파일을 고치지 않는다.
 - **기존 PTY 칸의 대화창은 터미널 위에 덮기만 한다**(`ChatPane`). 터미널을 걷거나 숨기면 결정 1·2번이 깨진다.
   포커스는 `focusPane` 으로 준다 — 터미널에만 주면 덮인 xterm 이 보이지 않는 곳에서 키를 먹는다.
   **대화 파일이 없는 새 대화는 덮지 않는다.** 폴더 신뢰·API 키·bypass 경고 같은 시작 대화상자는 TUI 에만 있다.
@@ -411,7 +414,8 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/Chat.tsx` · `ui/chat.css` · `ui/Markdown.tsx` | 대화창 — 말풍선 · 입력바 · 쓰이는 중인 답 · 칸 위 덮개 |
 | `ui/SubAgents.tsx` | 서브에이전트가 지금 하는 일 — 에이전트마다 한 줄(`chat:sub`) |
 | `ui/SubagentView.tsx` | 서브에이전트 대화 전체 보기 — 진행 줄·"부름" 줄을 누르면 연다 |
-| `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·권한 모드, 통로 해석(단위 검증) |
+| `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·추론·권한 모드, 통로 해석(단위 검증) |
+| `ui/StreamBar.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·상태·새 대화 |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |

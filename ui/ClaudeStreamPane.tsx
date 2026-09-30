@@ -13,17 +13,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
+import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { shortToolName, toolSummary } from "./tools";
 import {
   answerLine,
   answeredStream,
   allowLine,
+  appliedEffort,
+  contextLine,
+  controlLine,
+  currentModel,
   denyLine,
+  effortChoices,
+  effortRequest,
   initialStream,
   initLine,
   interruptLine,
-  modeLine,
-  modelLine,
   reduceStream,
   sentStream,
   suggestionLabel,
@@ -32,6 +37,8 @@ import {
   type Prompt,
   type StreamState,
 } from "./claude-stream";
+
+type Reply = { ok: boolean; body: unknown; error?: string };
 
 type LineEvent = { id: string; line: string };
 type ExitEvent = { id: string; code: number | null; error: string };
@@ -67,8 +74,30 @@ export function ClaudeStreamPane({
   // 다시 켜기를 누르면 바뀐다. 이 값이 바뀌면 통로를 새로 연다.
   const [boot, setBoot] = useState(0);
   const titled = useRef(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [context, setContext] = useState<string>();
+  // 답을 기다리는 요청(설정·문맥 조회, 모델 바꾸기 …). 답이 오면 request_id 로 짝짓는다.
+  const pending = useRef(new Map<string, (r: Reply) => void>());
 
   const send = (msg: unknown) => invoke("claude_chat_send", { id, line: JSON.stringify(msg) });
+  const control = (request: Record<string, unknown>) =>
+    new Promise<unknown>((resolve, reject) => {
+      const line = controlLine(request);
+      const timer = window.setTimeout(() => {
+        pending.current.delete(line.request_id);
+        reject(new Error("claude 가 답하지 않았다"));
+      }, 15000);
+      pending.current.set(line.request_id, (r) => {
+        window.clearTimeout(timer);
+        if (r.ok) resolve(r.body);
+        else reject(new Error(r.error ?? "claude 가 거절했다"));
+      });
+      send(line).catch((e) => {
+        window.clearTimeout(timer);
+        pending.current.delete(line.request_id);
+        reject(e);
+      });
+    });
 
   useEffect(() => {
     let live = true;
@@ -82,6 +111,12 @@ export function ClaudeStreamPane({
         msg = JSON.parse(e.payload.line);
       } catch {
         return;
+      }
+      const m = msg as { type?: string; response?: { request_id?: string; subtype?: string; response?: unknown; error?: string } };
+      const waiting = m.type === "control_response" && m.response?.request_id ? pending.current.get(m.response.request_id) : undefined;
+      if (waiting && m.response?.request_id) {
+        pending.current.delete(m.response.request_id);
+        waiting({ ok: m.response.subtype === "success", body: m.response.response, error: m.response.error });
       }
       setSt((s) => reduceStream(s, msg));
     });
@@ -105,6 +140,10 @@ export function ClaudeStreamPane({
         if (!live) return;
         setAlive(true);
         await send(initLine());
+        // 지금 걸린 추론 수준은 초기화 답에 없다. 설정을 한 번 물어 줄에 채운다.
+        void control({ subtype: "get_settings" })
+          .then((b) => live && setSt((s) => ({ ...s, effort: appliedEffort(b) ?? s.effort })))
+          .catch(() => {});
       } catch (err) {
         if (live) setSt((s) => ({ ...s, exited: { code: null, error: String(err) } }));
       }
@@ -137,6 +176,8 @@ export function ClaudeStreamPane({
 
   const transport = useMemo<Transport>(
     () => ({
+      // `/clear` 같은 명령은 대화 파일에 명령 줄로 적힌다. "보내는 중" 말풍선으로 남기면 짝이 안 맞아 오래 남는다.
+      isCommand: (text) => /^\/[\w-]+/.test(text.trim()),
       send: async (text) => {
         await send(userLine(text));
         setSt(sentStream);
@@ -156,6 +197,78 @@ export function ClaudeStreamPane({
     setSt((s) => answeredStream(s, p.requestId));
     void send(msg).catch(() => {});
   };
+
+  // 줄에서 바꾼 것은 claude 가 받았다고 답한 뒤에 반영한다. 못 받았으면 대화 끝에 까닭을 남긴다.
+  const setting = (request: Record<string, unknown>, apply: (s: StreamState) => StreamState) =>
+    void control(request).then(
+      () => setSt(apply),
+      (e) => setSt((s) => ({ ...s, error: `설정을 못 바꿨다: ${e instanceof Error ? e.message : e}` })),
+    );
+  const toggleStatus = () => {
+    const open = !statusOpen;
+    setStatusOpen(open);
+    if (open && alive) void control({ subtype: "get_context_usage" }).then((b) => setContext(contextLine(b)), () => {});
+  };
+  const model = currentModel(st);
+  const efforts = effortChoices(model);
+  const modeName = MODES.find(([v]) => v === (st.mode ?? "default"))?.[1] ?? st.mode ?? "매번 묻기";
+  const toolbar = (
+    <StreamBar
+      model={{
+        label: "모델",
+        aria: "Claude 모델",
+        value: model?.value ?? "",
+        title: model?.description ?? st.model,
+        disabled: !alive,
+        choices: [
+          ...(model ? [] : [{ value: "", label: st.model ?? "기본" }]),
+          ...st.models.map((m) => ({ value: m.value, label: m.displayName ?? m.value, title: m.description })),
+        ],
+        onChange: (v) => setting({ subtype: "set_model", model: v }, (s) => ({ ...s, model: v })),
+      }}
+      effort={
+        efforts.length
+          ? {
+              label: "추론",
+              aria: "Claude 추론",
+              value: st.effort && efforts.includes(st.effort) ? st.effort : "",
+              disabled: !alive,
+              choices: [
+                ...(st.effort && efforts.includes(st.effort) ? [] : [{ value: "", label: st.effort ? effortLabel(st.effort) : "기본" }]),
+                ...efforts.map((v) => ({ value: v, label: effortLabel(v) })),
+              ],
+              onChange: (v) => setting(effortRequest(v), (s) => ({ ...s, effort: v })),
+            }
+          : undefined
+      }
+      permission={{
+        label: "권한",
+        aria: "Claude 권한",
+        value: st.mode ?? "default",
+        disabled: !alive,
+        choices: MODES.map(([value, label]) => ({ value, label })),
+        onChange: (v) => setting({ subtype: "set_permission_mode", mode: v }, (s) => ({ ...s, mode: v })),
+      }}
+      statusOpen={statusOpen}
+      onStatus={toggleStatus}
+      onNew={() =>
+        void transport.send("/clear").then(() => {
+          // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
+          titled.current = false;
+          onTitle(id, "새 대화");
+        }, () => {})
+      }
+      busy={!alive || st.busy}
+      status={[
+        ["모델", modelLabel(model?.displayName, st.model ?? model?.resolvedModel)],
+        ["추론", st.effort ? effortLabel(st.effort) : "기본"],
+        ["권한", modeName],
+        ["폴더", folderLabel(cwd)],
+        ["사용 토큰", context ?? "집계 전"],
+        ["대화", st.session ?? session],
+      ]}
+    />
+  );
 
   const extra = (
     <>
@@ -195,67 +308,13 @@ export function ClaudeStreamPane({
         fresh={fresh}
         transport={transport}
         extra={extra}
-        toolbar={
-          <StreamBar
-            state={st}
-            onModel={(m) => void send(modelLine(m)).then(() => setSt((s) => ({ ...s, model: m })), () => {})}
-            onMode={(m) => void send(modeLine(m)).then(() => setSt((s) => ({ ...s, mode: m })), () => {})}
-            disabled={!alive}
-          />
-        }
+        toolbar={toolbar}
       />
     </>
   );
 }
 
-/** 모델과 권한 모드. TUI 의 `/model`·Shift+Tab 자리다. 목록은 claude 가 초기화 때 준 그대로다. */
-function StreamBar({
-  state,
-  onModel,
-  onMode,
-  disabled,
-}: {
-  state: StreamState;
-  onModel: (model: string) => void;
-  onMode: (mode: string) => void;
-  disabled: boolean;
-}) {
-  // 첫 턴 전에는 쓰는 모델을 아직 모른다(system init 은 첫 말과 함께 온다). 그동안은 기본값이다.
-  const current = state.model
-    ? state.models.find((m) => m.value === state.model || m.resolvedModel === state.model)
-    : state.models.find((m) => m.value === "default");
-  return (
-    <div className="stream-bar">
-      <label>
-        <span>모델</span>
-        <select
-          value={current?.value ?? ""}
-          disabled={disabled || !state.models.length}
-          onChange={(e) => onModel(e.target.value)}
-          title={current?.description ?? state.model ?? ""}
-        >
-          {!current && <option value="">{state.model ?? "기본"}</option>}
-          {state.models.map((m) => (
-            <option key={m.value} value={m.value} title={m.description}>
-              {m.displayName ?? m.value}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <span>권한</span>
-        <select value={state.mode ?? "default"} disabled={disabled} onChange={(e) => onMode(e.target.value)}>
-          {MODES.map(([v, t]) => (
-            <option key={v} value={v}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-  );
-}
-
+/** 권한 모드. TUI 의 Shift+Tab 자리다. */
 const MODES: [string, string][] = [
   ["default", "매번 묻기"],
   ["acceptEdits", "편집은 묻지 않기"],

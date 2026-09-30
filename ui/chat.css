@@ -1032,10 +1032,43 @@ button.note.launch::after {
 .stream-bar button[aria-expanded="true"] {
   box-shadow: 0 0 0 1px var(--outline) inset;
 }
-.codex-status {
+/* 선택 상자 묶음은 넘치면 줄을 바꾸고, 단추 묶음은 오른쪽 위에 붙어 함께 다닌다. 폭이 다른 두 칸에서
+   단추가 제각각 줄을 넘기면 같은 부품인데도 다르게 보인다. */
+.stream-bar {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.stream-bar-fields {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.stream-bar-acts {
   flex: none;
+  display: flex;
+  gap: 4px;
+}
+/* 상태 표. Claude·Codex 가 같은 항목을 같은 순서로 보인다(StreamBar). */
+.stream-status {
+  flex: none;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
   margin: 0;
   padding: 6px 12px;
-  overflow-wrap: anywhere;
+  background: var(--paper);
   font-size: 11px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.stream-status > div {
+  display: contents;
+}
+.stream-status > div > span:first-child {
+  color: var(--ink-2);
+}
+.stream-status + .composer {
+  border-top: 0;
 }

@@ -57,10 +57,10 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
       const message = { id: "msg_" + randomUUID().slice(0, 8), type: "message", role: "assistant", model: j.model ?? "m", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5, output_tokens: 1 } };
       if (!j.stream) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...message, content: [{ type: "text", text: "제목" }], stop_reason: "end_turn" })); return; }
       // claude 는 사용자 말 뒤에 부가 블록을 덧붙여 보낸다. 가장 늦게 나온 표시로 가른다.
-      const marks = ["STREAM_HELLO", "STREAM_BASH", "STREAM_DENY", "STREAM_ASK", "STREAM_SLOW", "STREAM_MODEL", "STREAM_AGAIN", "STREAM_CLEARED"];
+      const marks = ["STREAM_HELLO", "STREAM_BASH", "STREAM_DENY", "STREAM_ASK", "STREAM_SLOW", "STREAM_MODEL", "STREAM_AGAIN", "STREAM_CLEARED", "STREAM_EFFORT"];
       const [mark, at] = marks.map(k => [k, all.lastIndexOf(k)]).sort((x, y) => y[1] - x[1])[0];
       const afterTool = all.lastIndexOf("tool_result") > at;
-      if (at >= 0) requests.push({ mark, afterTool, model: j.model, n: (j.messages ?? []).length, hello: all.includes("STREAM_HELLO") });
+      if (at >= 0) requests.push({ mark, afterTool, model: j.model, n: (j.messages ?? []).length, hello: all.includes("STREAM_HELLO"), effort: j.output_config?.effort });
       res.writeHead(200, { "content-type": "text/event-stream" });
       sse(res, "message_start", { message });
       const text = async (parts, hold) => {
@@ -124,6 +124,11 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
         models: [...(over?.querySelectorAll('.stream-bar select:first-of-type option') ?? [])].map(o => o.value),
         model: over?.querySelector('.stream-bar select')?.value ?? null,
         title: slot?.querySelector('.pane-head .title')?.textContent ?? null,
+        bar: [...(over?.querySelectorAll('.stream-bar label > span') ?? [])].map(e => e.textContent),
+        buttons: [...(over?.querySelectorAll('.stream-bar button') ?? [])].map(e => e.textContent),
+        effort: over?.querySelector('select[aria-label="Claude 추론"]')?.value ?? null,
+        efforts: [...(over?.querySelectorAll('select[aria-label="Claude 추론"] option') ?? [])].map(o => o.value),
+        status: over?.querySelector('.stream-status')?.textContent ?? null,
         chip: slot?.querySelector('.pane-head .chip')?.textContent ?? null,
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
@@ -140,6 +145,11 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
           if (sel) { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, c.model); sel.dispatchEvent(new Event('change', { bubbles: true })); }
         }
         if (c.close) slot?.querySelector('.pane-head .x')?.click();
+        if (c.effort) {
+          const sel = over?.querySelector('select[aria-label="Claude 추론"]');
+          if (sel) { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, c.effort); sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
+        if (c.button) [...(over?.querySelectorAll('.stream-bar button') ?? [])].find(b => b.textContent === c.button)?.click();
       }
     } finally { pending = false; }
   }, 100); return 'isolated stream test'; })()`;
@@ -235,6 +245,23 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.ok(await until(() => requests.some(r => r.mark === "STREAM_MODEL"), 300), "모델 바꾼 뒤 요청이 없음");
     assert.match(requests.find(r => r.mark === "STREAM_MODEL").model, /sonnet/, "모델이 안 바뀜: " + JSON.stringify(requests.slice(-3)));
     assert.ok(await until(() => dom().theirs.some(t => t.includes("STREAM_MODEL_REPLY")), 300));
+
+    // 입력바 위 줄은 Codex 칸과 같은 부품이다: 모델 · 추론 · 권한 · [상태] [새 대화].
+    assert.deepEqual(dom().bar, ["모델", "추론", "권한"], "줄 항목이 다름: " + JSON.stringify(dom().bar));
+    assert.deepEqual(dom().buttons, ["상태", "새 대화"], "줄 단추가 다름: " + JSON.stringify(dom().buttons));
+    // 추론 수준을 바꾸면 다음 요청부터 그 수준으로 간다(이 세션에만 거는 설정).
+    assert.ok(dom().efforts.includes("low"), "추론 수준 목록이 없음: " + JSON.stringify(dom().efforts));
+    commands.push({ effort: "low" });
+    assert.ok(await until(() => dom().effort === "low", 100), "추론 수준이 안 바뀜");
+    commands.push({ send: "STREAM_EFFORT 낮게" });
+    assert.ok(await until(() => requests.some(r => r.mark === "STREAM_EFFORT"), 300), "추론 바꾼 뒤 요청이 없음");
+    assert.equal(requests.find(r => r.mark === "STREAM_EFFORT").effort, "low", "추론 수준이 요청에 안 실림");
+    // 상태를 펴면 같은 항목의 표가 뜬다. 사용 토큰은 claude 에게 물어 채운다.
+    commands.push({ button: "상태" });
+    assert.ok(await until(() => /모델.*추론.*권한.*폴더.*사용 토큰.*대화/.test(dom().status ?? "") && dom().status.includes(sid) && !dom().status.includes("집계 전"), 100),
+      "상태 표가 안 뜨거나 비었음: " + dom().status);
+    commands.push({ button: "상태" });
+    assert.ok(await until(() => dom().status === null, 50), "상태 표가 안 접힘");
   } finally {
     await close(app);
   }
@@ -253,13 +280,15 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.ok(await until(() => dom().theirs.some(t => t.includes("STREAM_AGAIN_REPLY")), 300));
     assert.equal(saved().streams?.["%1"]?.session, sid, "이어 열었는데 대화 id 가 바뀜");
 
-    // /clear 하면 claude 가 새 대화로 넘어간다. 칸은 그 대화를 따라가고, 다음에 켜도 그 대화로 연다.
-    commands.push({ send: "/clear" });
+    // 줄의 "새 대화"는 /clear 와 같다 — claude 가 새 대화로 넘어가고, 칸은 그 대화를 따라가며 이름도 새로 시작한다.
+    commands.push({ button: "새 대화" });
     assert.ok(await until(() => { const s = saved().streams?.["%1"]?.session; return s && s !== sid; }, 200), "/clear 뒤 새 대화를 안 따라감: " + JSON.stringify(saved().streams));
     assert.ok(await until(() => !dom().mine.some(t => t.includes("STREAM_HELLO")), 100), "/clear 뒤에도 지난 대화를 그림");
+    assert.ok(await until(() => dom().title === "새 대화", 50), "새 대화 뒤 칸 이름이 안 바뀜: " + dom().title);
     commands.push({ send: "STREAM_CLEARED 새로" });
     assert.ok(await until(() => dom().theirs.some(t => t.includes("STREAM_CLEARED_REPLY")), 300), "/clear 뒤 대화가 안 됨: " + JSON.stringify(dom()));
     assert.equal(requests.find(r => r.mark === "STREAM_CLEARED").hello, false, "/clear 뒤에도 지난 말이 실림");
+    assert.ok(await until(() => dom().title === "STREAM_CLEARED 새로", 50), "새 대화의 첫 말이 이름이 안 됨: " + dom().title);
 
     // 8. 칸을 닫으면 그 claude 도 내려간다.
     assert.ok(streamProcs(sid) > 0, "도는 claude 를 못 찾음");

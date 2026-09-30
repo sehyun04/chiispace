@@ -34,7 +34,21 @@ export type Prompt =
       questions: Question[];
     };
 
-export type ModelChoice = { value: string; displayName?: string; description?: string; resolvedModel?: string };
+export type ModelChoice = {
+  value: string;
+  displayName?: string;
+  description?: string;
+  resolvedModel?: string;
+  supportedEffortLevels?: string[];
+};
+
+/** 설정(`effortLevel`)으로 걸 수 있는 추론 수준. 모델이 `max` 를 받아도 설정 값으로는 받지 않는다. */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh"];
+export const effortChoices = (m?: ModelChoice) => (m?.supportedEffortLevels ?? []).filter((v) => EFFORT_LEVELS.includes(v));
+
+/** 지금 쓰는 모델의 항목. 첫 턴 전에는 쓰는 모델을 모르므로(system init 은 첫 말과 함께 온다) 기본값이다. */
+export const currentModel = (s: StreamState) =>
+  s.model ? s.models.find((m) => m.value === s.model || m.resolvedModel === s.model) : s.models.find((m) => m.value === "default");
 
 export type StreamState = {
   /** 초기화에 답이 왔다. 모델 목록은 그때 온다. */
@@ -48,6 +62,8 @@ export type StreamState = {
   mode?: string;
   /** claude 가 지금 쓰는 대화 id. `/clear` 하면 새 대화로 넘어가며 바뀐다. */
   session?: string;
+  /** 지금 걸린 추론 수준(설정 조회의 `applied.effort`). */
+  effort?: string;
   /** 모델 오류처럼 턴이 실패한 까닭. 중단은 실패가 아니다. */
   error?: string;
   exited?: { code: number | null; error: string };
@@ -85,7 +101,10 @@ export function reduceStream(s: StreamState, msg: unknown): StreamState {
       const models = (Array.isArray(body.models) ? body.models : []).flatMap((raw) => {
         const v = obj(raw);
         const value = str(v.value);
-        return value ? [{ value, displayName: str(v.displayName), description: str(v.description), resolvedModel: str(v.resolvedModel) }] : [];
+        const efforts = Array.isArray(v.supportedEffortLevels) ? v.supportedEffortLevels.filter((e): e is string => typeof e === "string") : undefined;
+        return value
+          ? [{ value, displayName: str(v.displayName), description: str(v.description), resolvedModel: str(v.resolvedModel), supportedEffortLevels: efforts }]
+          : [];
       });
       return { ...s, ready: true, models, mode: str(body.current_permission_mode) ?? s.mode };
     }
@@ -153,6 +172,26 @@ export const userLine = (text: string) => ({
 export const interruptLine = () => ({ type: "control_request", request_id: nextId(), request: { subtype: "interrupt" } });
 export const modelLine = (model: string) => ({ type: "control_request", request_id: nextId(), request: { subtype: "set_model", model } });
 export const modeLine = (mode: string) => ({ type: "control_request", request_id: nextId(), request: { subtype: "set_permission_mode", mode } });
+/** 답을 받아야 하는 요청. 부른 쪽이 `request_id` 로 답(control_response)을 짝짓는다. */
+export const controlLine = (request: Record<string, unknown>) => ({ type: "control_request", request_id: nextId(), request });
+/** 추론 수준은 이 세션에만 거는 설정 층(flag settings)으로 건다. 사용자 설정 파일은 건드리지 않는다. */
+export const effortRequest = (effortLevel: string) => ({ subtype: "apply_flag_settings", settings: { effortLevel } });
+
+/** 설정 조회 답에서 지금 걸린 추론 수준. */
+export function appliedEffort(body: unknown): string | undefined {
+  const b = obj(body);
+  return str(obj(b.applied).effort) ?? str(obj(b.effective).effortLevel);
+}
+
+/** 문맥 조회 답을 사람이 읽을 한 줄로. */
+export function contextLine(body: unknown): string | undefined {
+  const b = obj(body);
+  if (typeof b.totalTokens !== "number") return undefined;
+  const n = (v: number) => v.toLocaleString("en-US");
+  const max = typeof b.maxTokens === "number" ? ` / ${n(b.maxTokens)}` : "";
+  const pct = typeof b.percentage === "number" ? ` (${b.percentage}%)` : "";
+  return `${n(b.totalTokens)}${max}${pct}`;
+}
 
 /** 허락. claude 는 어느 호출에 대한 답인지 `toolUseID` 로 맞춘다 — 빠지면 답을 못 알아듣고 계속 기다린다. */
 export function allowLine(p: Prompt, extra: { input?: Obj; always?: Suggestion } = {}) {

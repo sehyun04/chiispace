@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   initialStream, reduceStream, sentStream, answeredStream, INIT_ID,
   allowLine, denyLine, answerLine, suggestionLabel, titleFrom, userLine,
+  currentModel, effortChoices, effortRequest, appliedEffort, contextLine,
 } from "../ui/claude-stream.ts";
 
 const run = (...msgs) => msgs.reduce((s, m) => reduceStream(s, m), initialStream);
@@ -87,6 +88,25 @@ test("/clear 로 새 대화가 되면 그 id 를 따라간다", () => {
   // 결과에도 실린다. 모델 이름은 새 init 이 안 주면 그대로 둔다.
   assert.equal(reduceStream(s, { type: "result", subtype: "success", session_id: "c" }).session, "c");
   assert.equal(s.model, "m");
+});
+
+test("추론 수준은 모델이 받는 것 중 설정으로 걸 수 있는 것만 고르고, 조회 답을 읽는다", () => {
+  const s = run({ type: "control_response", response: { subtype: "success", request_id: INIT_ID, response: { models: [
+    { value: "default", resolvedModel: "claude-opus-5-5", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
+    { value: "haiku", resolvedModel: "claude-haiku-4-5" },
+  ] } } });
+  // 첫 턴 전에는 기본 모델, 첫 턴 뒤에는 실제 이름으로 찾는다.
+  assert.equal(currentModel(s).value, "default");
+  assert.deepEqual(effortChoices(currentModel(s)), ["low", "medium", "high", "xhigh"]);
+  const haiku = reduceStream(s, { type: "system", subtype: "init", model: "claude-haiku-4-5" });
+  assert.equal(currentModel(haiku).value, "haiku");
+  assert.deepEqual(effortChoices(currentModel(haiku)), []);
+  assert.deepEqual(effortRequest("low"), { subtype: "apply_flag_settings", settings: { effortLevel: "low" } });
+  assert.equal(appliedEffort({ applied: { effort: "high" }, effective: { effortLevel: "low" } }), "high");
+  assert.equal(appliedEffort({ effective: { effortLevel: "low" } }), "low");
+  assert.equal(appliedEffort(null), undefined);
+  assert.equal(contextLine({ totalTokens: 33644, maxTokens: 1000000, percentage: 3 }), "33,644 / 1,000,000 (3%)");
+  assert.equal(contextLine({}), undefined);
 });
 
 test("모르는 말이 와도 깨지지 않는다", () => {

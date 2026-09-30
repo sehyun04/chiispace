@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
+import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { titleFrom } from "./claude-stream";
 import { approvalOptions, blockingPrompt, codexItems, initialCodex, questionAnswer, reduceCodex, resumedCodex, type CodexStream, type Data, type Request } from "./codex-stream";
 import { missingUnstarted, type StreamChat } from "./stream-session";
@@ -162,29 +163,41 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
   const selected = models.find(m => m.model === settings.model || m.id === settings.model);
   const disabled = !ready || state.busy || dispatching;
   const rendered = codexItems(state.entries);
-  const toolbar = <>
-    <div className="stream-bar">
-      <label><span>모델</span><select ref={modelSelect} aria-label="Codex 모델" disabled={disabled || !models.length} value={settings.model ?? ""}
-        onChange={e => { const m = models.find(m => m.model === e.target.value); configure({ model: e.target.value, effort: m?.defaultReasoningEffort }); }}>
-        {!selected && <option value={settings.model ?? ""}>{settings.model ?? "기본"}</option>}
-        {models.map(m => <option key={m.id} value={m.model}>{m.displayName ?? m.model}</option>)}
-      </select></label>
-      {!!selected?.supportedReasoningEfforts?.length && <label><span>추론</span><select aria-label="Codex 추론" disabled={disabled} value={settings.effort ?? selected.defaultReasoningEffort}
-        onChange={e => configure({ effort: e.target.value })}>{selected.supportedReasoningEfforts.map((e: Data) => <option key={e.reasoningEffort} value={e.reasoningEffort}>{e.reasoningEffort}</option>)}</select></label>}
-      <label><span>승인</span><select aria-label="Codex 승인" disabled={disabled} value={typeof settings.approvalPolicy === "string" ? settings.approvalPolicy : "custom"} onChange={e => configure({ approvalPolicy: e.target.value })}>
-        {typeof settings.approvalPolicy !== "string" && <option value="custom">기존 설정</option>}
-        <option value="untrusted">신뢰한 명령만 자동</option><option value="on-request">요청 시 묻기</option><option value="on-failure">실패 시 묻기</option><option value="never">승인 요청 안 함</option>
-      </select></label>
-      <button type="button" aria-expanded={status} onClick={() => setStatus(v => !v)}>상태</button>
-      <button type="button" disabled={disabled} onClick={() => { void transport.send("/new").catch(() => {}); }}>새 대화</button>
-    </div>
-    {status && <div className="note codex-status" role="status">
-      <div>모델: {settings.model ?? "연결 중"} · 추론: {settings.effort ?? "기본"}</div>
-      <div>샌드박스: {settings.sandbox?.type ?? "기존 설정"} · 승인: {typeof settings.approvalPolicy === "string" ? settings.approvalPolicy : "기존 설정"}</div>
-      <div>폴더: {chat.cwd} · 사용 토큰: {state.tokens ?? "집계 전"}</div>
-      <div>대화: {state.thread || "연결 중"}</div>
-    </div>}
-  </>;
+  // 입력바 위 줄은 Claude 칸과 같은 부품(StreamBar)이다. 항목·순서·상태 표가 두 칸에서 같아야 한다.
+  const policy = typeof settings.approvalPolicy === "string" ? settings.approvalPolicy : "custom";
+  const policyName = APPROVALS.find(([v]) => v === policy)?.[1] ?? "기존 설정";
+  const efforts: string[] = (selected?.supportedReasoningEfforts ?? []).map((e: Data) => e.reasoningEffort);
+  const effort = settings.effort ?? selected?.defaultReasoningEffort;
+  const toolbar = <StreamBar
+    model={{
+      label: "모델", aria: "Codex 모델", selectRef: modelSelect, value: settings.model ?? "", disabled,
+      choices: [...(selected ? [] : [{ value: settings.model ?? "", label: settings.model ?? "기본" }]), ...models.map(m => ({ value: m.model, label: m.displayName ?? m.model }))],
+      onChange: v => { const m = models.find(m => m.model === v); configure({ model: v, effort: m?.defaultReasoningEffort }); },
+    }}
+    effort={efforts.length ? {
+      label: "추론", aria: "Codex 추론", value: effort ?? "", disabled,
+      choices: efforts.map(v => ({ value: v, label: effortLabel(v) })),
+      onChange: v => configure({ effort: v }),
+    } : undefined}
+    permission={{
+      label: "권한", aria: "Codex 승인", value: policy, disabled,
+      choices: [...(policy === "custom" ? [{ value: "custom", label: "기존 설정" }] : []), ...APPROVALS.map(([value, label]) => ({ value, label }))],
+      onChange: v => configure({ approvalPolicy: v }),
+    }}
+    statusOpen={status}
+    onStatus={() => setStatus(v => !v)}
+    onNew={() => { void transport.send("/new").catch(() => {}); }}
+    busy={disabled}
+    statusClass="codex-status"
+    status={[
+      ["모델", modelLabel(selected?.displayName, settings.model)],
+      ["추론", effort ? effortLabel(effort) : "기본"],
+      ["권한", `${policyName} · 샌드박스 ${settings.sandbox?.type ?? "기존 설정"}`],
+      ["폴더", folderLabel(chat.cwd)],
+      ["사용 토큰", state.tokens ?? "집계 전"],
+      ["대화", state.thread || "연결 중"],
+    ]}
+  />;
   return <>
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}
@@ -203,6 +216,14 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
       </>} />
   </>;
 }
+
+/** Codex 승인 정책. 줄에서는 Claude 의 권한 모드와 같은 "권한" 자리에 선다. */
+const APPROVALS: [string, string][] = [
+  ["untrusted", "신뢰한 명령만 자동"],
+  ["on-request", "요청 시 묻기"],
+  ["on-failure", "실패 시 묻기"],
+  ["never", "승인 요청 안 함"],
+];
 
 function RequestCard({ prompt: p, item, disabled, answer }: { prompt: Request; item?: Data; disabled: boolean; answer: (result?: Data, error?: string) => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
