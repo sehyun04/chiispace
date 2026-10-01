@@ -28,7 +28,9 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     { ...common, type: "assistant", uuid: randomUUID(), parentUuid: userId, message: { id: "msg_0", type: "message", role: "assistant", model: "claude-sonnet-4-6", content: [{ type: "text", text: "SUB_READY_MARK" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } },
   ].map(v => JSON.stringify(v)).join("\n") + "\n");
   // claude 는 승인한 키를 끝 20글자로 기억한다. 전체만 두면 승인으로 치지 않고 "Not logged in" 이 된다.
-  const settings = { hasCompletedOnboarding: true, theme: "light", projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
+  // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
+  // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막아 대화창에서 보낸 말이 제출되지 않는다.
+  const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
   for (const config of [path.join(home, ".claude.json"), home + ".json"]) writeFileSync(config, JSON.stringify(settings));
   // 서브에이전트를 부르는 데 허락을 묻지 않게 한다. 서브에이전트는 글만 쓰고 도구는 안 쓴다.
   // 권한 모드를 적어 둔다. API 키 과금의 격리 claude 는 auto 모드로 뜨는데, 그때 프록시 뒤에서는

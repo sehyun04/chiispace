@@ -113,6 +113,7 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   5초마다 다시 본다 — claude 가 명부를 늦게 쓰기도 하고 `/clear` 로 대화가 바뀌기도 한다.
   **명부는 칸이 본 claude 가 아니라 그 자식이 쓸 수 있다**(셸 아래 `claude.exe` 가 실행기일 때).
   `roster_pids` 로 자손까지 본다. 테스트는 잎 claude 에만 명부를 쓴다 — 새 pid 모두에 쓰면 이 버그가 가려진다.
+  claude 2.1.285 부터는 격리 claude 도 제 명부를 쓴다(30초 넘게 다시 쓰지 않아 검증이 덮어써 흉내 낼 수 있다).
 - **터미널 없는 칸(`ClaudeStreamPane`·`CodexStreamPane`)은 PTY 폴링(`stat`)에 섞지 않는다.** 머리줄·옆칸은 `paneView` 로 채워
   보여 주기만 한다. `stat` 에 넣으면 복원 명령 누적(`procs`)·명부 조회가 그 칸을 셸 칸으로 다룬다.
   권한 답에는 `toolUseID`(요청의 `tool_use_id`)를 꼭 싣는다 — 빠지면 claude 가 답을 못 알아듣고 영영 기다린다.

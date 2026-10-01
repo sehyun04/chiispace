@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import os from "node:os";
@@ -31,7 +31,9 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
     { ...common, type: "user", uuid: randomUUID(), parentUuid: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content: "CHAT_TOOL" }] }, toolUseResult: { stdout: "CHAT_TOOL" } },
     asst([{ type: "text", text: "CHAT_VIEW_MARK" }]),
   ].map(v => JSON.stringify(v)).join("\n") + "\n");
-  const settings = { hasCompletedOnboarding: true, theme: "light", projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key"], rejected: [] } };
+  // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
+  // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막아 대화창에서 보낸 말이 제출되지 않는다.
+  const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
   for (const config of [path.join(home, ".claude.json"), home + ".json"]) writeFileSync(config, JSON.stringify(settings));
   writeFileSync(path.join(home, "settings.json"), JSON.stringify({ permissions: { defaultMode: "plan" } }));
   const state = path.join(root, "session.json");
@@ -47,7 +49,13 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
   const commands = [];
   const server = http.createServer((req, res) => {
     // 모델 요청은 받지 않는다. 입력이 제출됐는지는 원문에 적힌 것으로 본다.
-    if (req.url !== probe) { res.writeHead(503).end(); return; }
+    // 다시 시도하지 않는 오류로 끝낸다. 2.1.285 부터 claude 는 503 을 10번까지 다시 시도해서, 그동안
+    // 바쁜 claude 에 보낸 메뉴 명령이 대기열로 들어가 열리지 않는다.
+    if (req.url !== probe) {
+      res.writeHead(400, { "content-type": "application/json" })
+        .end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "chiispace test: no model" } }));
+      return;
+    }
     res.setHeader("Access-Control-Allow-Origin", "*");
     let body = "";
     req.on("data", c => body += c);
@@ -125,12 +133,19 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
       await delay(100);
     }
     assert.match(screen(), /CHAT_VIEW_MARK/, "저장된 대화가 터미널에 뜨지 않음");
-    // 대화 id 를 모르는 동안은 덮지 않는다. 앱이 대화를 골라 그리지 않는다는 뜻이다.
-    assert.equal(dom().over, false, "명부를 읽기 전에 대화창이 떴다");
 
     let pids = [];
     for (let i = 0; i < 60 && !pids.length; i++) { const now = claudePids(); const fresh = [...now.keys()].filter(v => !claudeBefore.has(v)); pids = fresh.filter(p => !fresh.some(q => now.get(q) === p)); if (!pids.length) await delay(500); }
     assert.ok(pids.length, "새로 뜬 claude 가 없음");
+    // 2.1.285 부터 격리 claude 도 제 명부를 쓴다. 그러면 앱은 그 명부의 대화(이어 연 것)로 덮는 것이 맞다.
+    // 옛 판은 명부를 안 써서, 앱이 대화를 골라 그리지 않는다는 것을 "덮지 않음"으로 본다.
+    const own = pids.map(p => path.join(home, "sessions", p + ".json")).find(f => existsSync(f));
+    if (own) {
+      assert.equal(JSON.parse(readFileSync(own, "utf8")).sessionId, sid, "claude 가 쓴 명부가 이어 연 대화가 아님");
+      assert.ok(await until(() => dom().over && dom().theirs?.some(t => t.includes("CHAT_VIEW_MARK")), 100), "claude 가 쓴 명부로 대화창이 안 뜸: " + JSON.stringify(dom()));
+    } else {
+      assert.equal(dom().over, false, "명부를 읽기 전에 대화창이 떴다");
+    }
     mkdirSync(path.join(home, "sessions"), { recursive: true });
     const roster = (id) => {
       for (const pid of pids) writeFileSync(path.join(home, "sessions", pid + ".json"), JSON.stringify({ pid, sessionId: id, cwd: project, kind: "interactive" }));
