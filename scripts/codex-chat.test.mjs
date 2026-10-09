@@ -87,14 +87,14 @@ test("Codex 훅 신뢰·칸별 대화창·입력·새 대화·네이티브 이�
             mine: [...(over?.querySelectorAll('.msg.mine:not(.sending) .bubble') ?? [])].map(e => e.textContent),
             theirs: [...(over?.querySelectorAll('.msg:not(.mine):not(.live) .bubble') ?? [])].map(e => e.textContent),
             status: over?.querySelector('[role="status"]')?.textContent,
-            value: input?.value, toggle: slot?.querySelector('.pane-head .view')?.textContent,
+            value: input?.value, toggle: slot?.querySelector('.pane-head .view.toggle')?.textContent,
             guard: window.__chatGuard?.[id] }];
         }));
         const r = await fetch(${JSON.stringify(base + probe)}, {method:'POST', body:JSON.stringify(all)});
         for (const c of await r.json()) {
           const slot = document.querySelector('[data-pane="' + c.id + '"]');
           if (c.term !== undefined) window.__terms[c.id]?.input(c.term);
-          if (c.toggle) slot?.querySelector('.pane-head .view')?.click();
+          if (c.toggle) slot?.querySelector('.pane-head .view.toggle')?.click();
           if (c.guard) {
             window.__chatGuard ??= {};
             try {

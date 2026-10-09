@@ -19,6 +19,8 @@ import {
   restoreCmd,
   isSessionId,
   continuePlan,
+  savedKeep,
+  streamCandidates,
   paneTitle,
   savedPaneTitles,
   type PaneStat,
@@ -111,6 +113,8 @@ export default function App() {
   /** 새 대화의 명시적인 ID만 저장한다. Claude는 앱이 정한 UUID, Codex는 서버의 응답을 쓴다. */
   const [streams, setStreams] = useState<Record<string, StreamChat>>({});
   const [streamBusy, setStreamBusy] = useState<Record<string, boolean>>({});
+  /** 사용자가 "터미널로 열기"로 되돌려 둔 칸. 켤 때 터미널 없는 칸으로 옮기지 않는다. */
+  const [keepTerm, setKeepTerm] = useState<Record<string, true>>({});
   const codexChats = useRef<Record<string, string>>({});
   useEffect(() => {
     for (const [id, p] of Object.entries(stat)) {
@@ -351,6 +355,7 @@ export default function App() {
             casting?: Record<string, string>;
             sideOpen?: boolean;
             streams?: unknown;
+            keepTerminal?: unknown;
           };
           if (s.fontSize) setFontSize(s.fontSize);
           if (s.names) setNames(s.names);
@@ -360,6 +365,20 @@ export default function App() {
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
             const m = continuePlan(s.procs, s.restoreMode !== "native-continue");
+            // 대화 id 가 확실한 Claude 칸은 터미널 없는 칸으로 연다. 그 대화 파일이 그 폴더에 실제로 있을 때만 —
+            // 다른 폴더에서 열었던 대화라 못 찾으면 새 대화로 덮게 되므로 예전처럼 터미널로 연다.
+            const keep = savedKeep(s.keepTerminal);
+            setKeepTerm(keep);
+            const rootOf = (id: string) => s.tabs?.find((t) => t.layout && L.leaves(t.layout).includes(id))?.root;
+            const moved: Record<string, StreamChat> = {};
+            for (const c of streamCandidates(m, keep, rootOf)) {
+              const size = await invoke<number>("claude_transcript_size", { root: c.cwd, id: c.session }).catch(() => 0);
+              if (size > 0) {
+                moved[c.id] = { agent: "claude", session: c.session, cwd: c.cwd };
+                delete m[c.id];
+              }
+            }
+            if (Object.keys(moved).length) setStreams((st) => ({ ...st, ...moved }));
             setSeeds(m);
             procs.current = { ...m };
             (window as unknown as { __restore?: unknown }).__restore = { seeds: m };
@@ -411,13 +430,14 @@ export default function App() {
         casting,
         sideOpen,
         streams: Object.fromEntries(Object.entries(streams).filter(([id]) => live.has(id))),
+        keepTerminal: Object.keys(keepTerm).filter((id) => live.has(id)),
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
     return () => clearTimeout(h);
     // stat 은 800ms 마다 새로 오지만 여기 쓰이는 것은 이름뿐이라 저장이
     // 그 주기로 덩달아 돌지는 않는다 — 디바운스가 묶어 준다.
-  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streams]);
+  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streams, keepTerm]);
 
   // git 은 지금 보고 있는 탭의 폴더에 대해서만 묻는다. 안 보이는 탭까지 4초마다
   // git 을 돌리면 탭이 늘수록 그대로 비용이 는다.
@@ -480,6 +500,55 @@ export default function App() {
   const onStreamSession = useCallback((id: string, session: string) => {
     if (!isSessionId(session)) return;
     setStreams((s) => (!s[id] || s[id].session === session ? s : { ...s, [id]: { ...s[id], session } }));
+  }, []);
+  /** 터미널 없는 Claude 칸을 같은 대화의 터미널 칸으로 다시 연다. `/config` 같은 터미널 메뉴가 필요할 때의 길이다.
+   *  같은 칸 자리에서 그리는 것만 바뀐다 — 통로는 그 칸이 내려가며 거두고, 터미널은 복원 명령으로 이어 연다.
+   *  되돌린 칸은 다음에 켜도 터미널로 둔다. */
+  const streamsNow = useRef(streams);
+  streamsNow.current = streams;
+  const toTerminal = useCallback((id: string) => {
+    const c = streamsNow.current[id];
+    if (!c || c.agent !== "claude") return;
+    const seed: Seed = { cmd: `claude --resume ${c.session}`, auto: true, cwd: c.cwd || undefined, claudeSession: c.session };
+    procs.current[id] = seed;
+    setSeeds((sd) => ({ ...sd, [id]: seed }));
+    setStreams((st) => {
+      const next = { ...st };
+      delete next[id];
+      return next;
+    });
+    setKeepTerm((k) => ({ ...k, [id]: true }));
+  }, []);
+  /** 터미널 Claude 칸을 같은 대화의 터미널 없는 칸으로 다시 연다. 대화 id 는 그 칸의 claude 가 명부에 쓴 값이고,
+   *  대화 파일이 있을 때만 옮긴다. 터미널은 칸에서 내려가며 닫힌다(`pty_close` 는 칸 종료 신호를 내지 않는다). */
+  const toStream = useCallback(async (id: string, session: string, cwd: string) => {
+    const size = await invoke<number>("claude_transcript_size", { root: cwd, id: session }).catch(() => 0);
+    if (!(size > 0)) return;
+    setSeeds((sd) => {
+      const next = { ...sd };
+      delete next[id];
+      return next;
+    });
+    delete procs.current[id];
+    delete sawRun.current[id];
+    delete idleRuns.current[id];
+    delete sessionOf.current[id];
+    setChatIds((c) => {
+      const next = { ...c };
+      delete next[id];
+      return next;
+    });
+    setTermView((v) => {
+      const next = { ...v };
+      delete next[id];
+      return next;
+    });
+    setKeepTerm((k) => {
+      const next = { ...k };
+      delete next[id];
+      return next;
+    });
+    setStreams((st) => ({ ...st, [id]: { agent: "claude", session, cwd } }));
   }, []);
   const onStreamBusy = useCallback((id: string, busy: boolean) => {
     setStreamBusy((b) => (!!b[id] === busy ? b : { ...b, [id]: busy }));
@@ -1000,9 +1069,20 @@ export default function App() {
                             </span>
                           )}
                           {paneView[s.id]?.agent ? <span className="chip">{paneView[s.id]?.agent}</span> : null}
-                          {(chatIds[s.id] && paneView[s.id]?.agent === "claude") || (paneView[s.id]?.agent === "codex" && paneView[s.id]?.codex?.chat) ? (
+                          {streams[s.id]?.agent === "claude" ? (
                             <button
                               className="view"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => toTerminal(s.id)}
+                              disabled={!!streamBusy[s.id]}
+                              title="같은 대화를 터미널 칸으로 다시 연다 — /config 같은 터미널 메뉴가 필요할 때"
+                            >
+                              터미널로 열기
+                            </button>
+                          ) : null}
+                          {(chatIds[s.id] && paneView[s.id]?.agent === "claude") || (paneView[s.id]?.agent === "codex" && paneView[s.id]?.codex?.chat) ? (
+                            <button
+                              className="view toggle"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={() =>
                                 setTermView((v) => {
@@ -1014,6 +1094,17 @@ export default function App() {
                               }
                             >
                               {termView[s.id] ? "대화로" : "터미널로"}
+                            </button>
+                          ) : null}
+                          {!streams[s.id] && chatIds[s.id] && stat[s.id]?.agent === "claude" ? (
+                            <button
+                              className="view"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => void toStream(s.id, chatIds[s.id], stat[s.id]?.cwd ?? procs.current[s.id]?.cwd ?? t.root ?? "")}
+                              disabled={isAgentWorking(stat[s.id])}
+                              title="같은 대화를 터미널 없이 다시 연다"
+                            >
+                              터미널 없이
                             </button>
                           ) : null}
                           <button

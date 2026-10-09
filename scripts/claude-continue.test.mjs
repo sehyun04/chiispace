@@ -238,6 +238,9 @@ test("칸마다 제 대화로 되살아나고 서로 섞이지 않는다", { ski
   writeFileSync(state, JSON.stringify({
     tabs: [0, 1].map(i => ({ key: "t" + i, focus: "%" + i, root: project, shell, layout: { kind: "leaf", id: "%" + i } })),
     active: 0, nextPane: 2, nextTab: 2, restoreMode: "native-continue",
+    // 대화 파일이 있는 Claude 칸은 켤 때 터미널 없는 칸으로 옮겨진다(stream-restore 검증). 여기서는 터미널로 되돌려
+    // 둔 칸의 --resume 복원 경로를 본다.
+    keepTerminal: ["%0", "%1"],
     procs: Object.fromEntries(["%0", "%1"].map(id => [id, { cmd: "claude --continue", auto: true, cwd: project, claudeSession: ids[id] }])),
   }));
   const probe = `/${randomUUID()}`;

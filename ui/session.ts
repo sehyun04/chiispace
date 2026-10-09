@@ -96,6 +96,30 @@ export function continuePlan(seeds: Record<string, unknown>, migrate = false): R
   return out;
 }
 
+/** 켤 때 터미널 없는 칸으로 옮길 Claude 칸.
+ *
+ *  그 칸의 claude 가 명부에 써 둔 대화 id 가 있을 때만이다 — `--continue` 로 돌던 칸은 어느 대화인지
+ *  모르므로 그대로 둔다(추측하지 않는다). 사용자가 터미널로 되돌려 둔 칸(`keep`)도 그대로다.
+ *  대화 파일이 그 폴더에 실제로 있는지는 부른 쪽이 확인한다 — 없으면 새 대화로 덮게 된다. */
+export function streamCandidates(
+  seeds: Record<string, Seed>,
+  keep: Record<string, true>,
+  rootOf: (id: string) => string | null | undefined,
+): { id: string; session: string; cwd: string }[] {
+  return Object.entries(seeds).flatMap(([id, seed]) => {
+    const session = seed.claudeSession;
+    if (keep[id] || !isSessionId(session) || seed.auto === false || seed.cmd !== `claude --resume ${session}`) return [];
+    const cwd = seed.cwd ?? rootOf(id);
+    return cwd ? [{ id, session, cwd }] : [];
+  });
+}
+
+/** 터미널로 되돌려 둔 칸. 저장은 칸 id 목록이다. */
+export function savedKeep(value: unknown): Record<string, true> {
+  if (!Array.isArray(value)) return {};
+  return Object.fromEntries(value.filter((v): v is string => typeof v === "string" && /^%\d+$/.test(v)).map((v) => [v, true as const]));
+}
+
 /** 셸 자신은 "돌리던 명령"이 아니다. 이 이름들이 전경에 있으면 그냥 빈 프롬프트다. */
 export const SHELLS = new Set(["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "bash", "sh", "zsh", "fish"]);
 

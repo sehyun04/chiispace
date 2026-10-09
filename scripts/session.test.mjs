@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { asSeed, codexContinue, continuePlan, nativeSeed, restoreCmd, paneTitle, savedPaneTitles, label } from "../ui/session.ts";
+import { asSeed, codexContinue, continuePlan, nativeSeed, restoreCmd, paneTitle, savedPaneTitles, label, streamCandidates, savedKeep } from "../ui/session.ts";
 
 const sid = "12345678-2222-4222-8222-222222222222";
 const launch = { home: "C:\\한글 & state", cwd: "C:\\project space", args: ["--profile", "review", "--sandbox", "read-only"] };
@@ -141,4 +141,27 @@ test("저장된 대화 id는 보존하고 구형 문자열 속 id는 계속 정�
   const plan = continuePlan({ a: { cmd: "claude", claudeSession: sid }, b: { cmd: "claude", claudeSession: other } }, true);
   assert.equal(plan.a.cmd, `claude --resume ${sid}`);
   assert.equal(plan.b.cmd, `claude --resume ${other}`);
+});
+
+test("켤 때 터미널 없는 칸으로 옮기는 것은 명부의 대화 id 가 있는 Claude 칸뿐이다", () => {
+  const other = "11111111-2222-4333-8444-555555555555";
+  const plan = continuePlan({
+    known: { cmd: "claude", claudeSession: sid, cwd: "C:/project" },
+    noCwd: { cmd: "claude", claudeSession: other },
+    folderOnly: { cmd: "claude --continue", cwd: "C:/project" },
+    stopped: { cmd: "claude", claudeSession: sid, auto: false, cwd: "C:/project" },
+    kept: { cmd: "claude", claudeSession: other, cwd: "C:/project" },
+    codex: { cmd: "codex resume --last", cwd: "C:/project" },
+  }, true);
+  const roots = { noCwd: "C:/tab-root" };
+  const got = streamCandidates(plan, { kept: true }, (id) => roots[id]);
+  // --continue 로 돌던 칸은 어느 대화인지 모른다. 추측하지 않고 터미널로 둔다.
+  assert.deepEqual(got, [
+    { id: "known", session: sid, cwd: "C:/project" },
+    { id: "noCwd", session: other, cwd: "C:/tab-root" },
+  ]);
+  // 폴더를 모르면 대화 파일을 확인할 수 없으니 옮기지 않는다.
+  assert.deepEqual(streamCandidates(plan, {}, () => null).map((c) => c.id), ["known", "kept"]);
+  assert.deepEqual(savedKeep(["%1", "%x", 3, "%22"]), { "%1": true, "%22": true });
+  assert.deepEqual(savedKeep(null), {});
 });

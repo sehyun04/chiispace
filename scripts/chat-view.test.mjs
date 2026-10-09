@@ -91,7 +91,7 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
         input: !!input, inputFocused: !!input && document.activeElement === input,
         hidden: !!over && getComputedStyle(over).visibility === 'hidden',
         termFocused: !!document.activeElement?.classList.contains('xterm-helper-textarea'),
-        toggle: slot?.querySelector('.pane-head .view')?.textContent ?? null,
+        toggle: slot?.querySelector('.pane-head .view.toggle')?.textContent ?? null,
         cmds: [...(over?.querySelectorAll('.cmd span') ?? [])].map(e => e.textContent),
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
@@ -103,7 +103,7 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
           await new Promise(r => setTimeout(r, 50));
           input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
         }
-        if (c.toggle) slot?.querySelector('.pane-head .view')?.click();
+        if (c.toggle) slot?.querySelector('.pane-head .view.toggle')?.click();
       }
     } finally { pending = false; }
   }, 100); return 'isolated chat test'; })()`;
