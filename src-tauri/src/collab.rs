@@ -58,11 +58,9 @@ pub struct Queue {
 
 #[derive(Clone, Serialize)]
 pub struct CodexBinding {
-    pub run: String,
     pub session: Option<crate::codex_session::Session>,
     pub launch: Option<crate::codex_session::Launch>,
     pub failed: bool,
-    pub chat: Option<crate::codex_chat::Chat>,
 }
 
 #[derive(Default)]
@@ -285,7 +283,7 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             },
         );
         if harness == "codex" {
-            q.codex.insert(pane.into(), CodexBinding { run: token.clone(), session: resume, launch, failed: false, chat: None });
+            q.codex.insert(pane.into(), CodexBinding { session: resume, launch, failed: false });
         }
         return Ok(json!({"token": token}));
     }
@@ -313,16 +311,8 @@ pub fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
             let session: crate::codex_session::Session = serde_json::from_value(params["session"].clone())?;
             session.validate()?;
             q.codex.insert(pane.into(), CodexBinding {
-                run: token.into(), session: Some(session), launch: None, failed: false, chat: None,
+                session: Some(session), launch: None, failed: false,
             });
-            Ok(json!({}))
-        }
-        "chiispace.codex_chat" => {
-            if q.authenticate(pane, token)?.harness != "codex" { bail!("Codex 실행이 아닙니다"); }
-            let notice: crate::codex_chat_hook::Notice = serde_json::from_value(params.clone())?;
-            notice.validate()?;
-            let binding = q.codex.get_mut(pane).filter(|b| b.run == token && b.launch.is_some()).ok_or_else(|| anyhow!("로컬 Codex 실행이 아닙니다"))?;
-            crate::codex_chat::update(&mut binding.chat, notice);
             Ok(json!({}))
         }
         "chiispace.context" => {

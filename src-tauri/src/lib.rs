@@ -14,8 +14,6 @@ mod launchers;
 mod conpty;
 mod pty_stream;
 mod codex_session;
-mod codex_chat;
-mod codex_chat_hook;
 mod pane_agent;
 mod proxy;
 mod claude_chat;
@@ -151,8 +149,6 @@ fn pty_submit(
     id: String,
     text: String,
     agent: Option<String>,
-    run: Option<String>,
-    session: Option<String>,
 ) -> Result<(), String> {
     // 사용자 입력과 같은 락을 잡아, 쪽지 전달이 그 사이에 끼어들지 않게 한다.
     let mut queue = collab.0.lock().unwrap();
@@ -163,13 +159,6 @@ fn pty_submit(
     if let Some(agent) = &agent {
         if pane_agent::fresh(s).map(|(a, _)| a.as_str()) != Some(agent.as_str()) {
             return Err("에이전트가 종료되어 메시지를 보내지 않았습니다".into());
-        }
-        if agent == "codex" && !queue.codex.get(&id).is_some_and(|b| !b.failed && Some(&b.run) == run.as_ref()) {
-            return Err("Codex 실행이 바뀌어 메시지를 보내지 않았습니다".into());
-        }
-        if agent == "codex" && !queue.codex.get(&id).and_then(|b| b.chat.as_ref())
-            .is_some_and(|c| !c.waiting && Some(&c.id) == session.as_ref()) {
-            return Err("Codex 대화가 바뀌었거나 승인을 기다려 메시지를 보내지 않았습니다".into());
         }
     }
     let body = if s.full_snapshot().bracketed_paste {
@@ -397,8 +386,6 @@ pub fn run() {
             codex_stream::codex_stream_request,
             codex_stream::codex_stream_answer,
             codex_stream::codex_stream_stop,
-            codex_chat::codex_transcript_raw,
-            codex_chat::codex_transcript_size,
             workspace::state_save,
             workspace::state_load,
         ])

@@ -221,11 +221,18 @@ trust_level = "trusted"
     active = await launch(duplicateState);
     // 중복 가드를 뺐다. 같은 폴더의 둘째 칸도 선택 목록이 아니라 같은 이어가기 명령을 받는다.
     await until(() => active.seeds?.["%1"]?.cmd && !active.seeds["%1"].cmd.endsWith("--picker"));
-    assert.equal(active.seeds["%1"].cmd, active.seeds["%0"].cmd, "중복 칸만 다른 명령을 받음");
+    const launchFor = (id) => {
+      const command = active.seeds[id].cmd;
+      assert.match(command, /^chiispace-cli\.exe codex-continue [A-Za-z0-9_-]+$/);
+      return JSON.parse(Buffer.from(command.split(" ")[2], "base64url").toString("utf8"));
+    };
+    assert.equal(launchFor("%1").cwd, launchFor("%0").cwd, "중복 칸의 작업 폴더가 다름");
+    assert.deepEqual(launchFor("%1").args, duplicate.procs["%1"].codexLaunch.args, "둘째 칸의 권한·프로필이 바뀜");
+    assert.deepEqual(launchFor("%0").args, duplicate.procs["%0"].codexLaunch.args, "첫째 칸의 권한이 바뀜");
     assert.ok(!active.seeds["%1"].notice, "중복 칸에 선택 안내가 남음");
     await until(() => active.latest["%0"]?.history.includes("CHIISPACE_SESSION_NEW"));
     await close(active);
-    console.log("같은 폴더의 중복 칸도 선택 목록 없이 같은 이어가기 명령 확인");
+    console.log("같은 폴더의 중복 칸도 선택 목록 없이 이어 열고 각 칸의 옵션 보존 확인");
 
     const invalid = readState();
     invalid.procs["%1"].codexLaunch.args = ["--profile", "broken"];
@@ -240,6 +247,12 @@ trust_level = "trusted"
   } catch (error) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ state: readState(), panes: active?.latest }));
     console.error("복원 검증 실패 기록", path.join(root, "failure.json"));
+    if (process.env.CHIISPACE_TEST_SCREENSHOT === "1" && active?.app.exitCode === null) {
+      const output = path.join(root, "failure.png");
+      const shot = spawnSync("powershell.exe", ["-NoProfile", "-File", "scripts/shot.ps1", "-ProcessId", String(active.app.pid),
+        "-WaitSec", "1", "-Out", output], { windowsHide: true, encoding: "utf8" });
+      console.log("실패 화면:", shot.status === 0 ? output : shot.stderr);
+    }
     throw error;
   } finally {
     for (const client of clients.values()) await close(client).catch(() => client.app.kill());

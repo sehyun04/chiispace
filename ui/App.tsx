@@ -115,20 +115,6 @@ export default function App() {
   const [streamBusy, setStreamBusy] = useState<Record<string, boolean>>({});
   /** 사용자가 "터미널로 열기"로 되돌려 둔 칸. 켤 때 터미널 없는 칸으로 옮기지 않는다. */
   const [keepTerm, setKeepTerm] = useState<Record<string, true>>({});
-  const codexChats = useRef<Record<string, string>>({});
-  useEffect(() => {
-    for (const [id, p] of Object.entries(stat)) {
-      const chat = p.codex?.chat;
-      if (p.agent !== "codex" || !chat) continue;
-      const key = `${p.codex?.run}:${chat.id}`;
-      if (codexChats.current[id] === key) continue;
-      codexChats.current[id] = key;
-      setTermView(v => {
-        if (v[id] !== "auto") return v;
-        const next = { ...v }; delete next[id]; return next;
-      });
-    }
-  }, [stat]);
   /** claude 를 마지막으로 본 때. 800ms 폴링이 한 번 비었다고 대화창을 걷었다
    *  다시 덮으면 칸이 깜박인다. */
   const lastClaude = useRef<Record<string, number>>({});
@@ -859,10 +845,8 @@ export default function App() {
       return { mount: false, shown: true };
     }
     if (stat[id]?.agent === "codex") {
-      const mount = !!stat[id]?.codex?.chat && !stat[id]?.codex?.failed && termView[id] !== true;
-      const shown = mount && !!chatReady[id] && !termView[id];
-      showsChat.current[id] = shown;
-      return { mount, shown };
+      showsChat.current[id] = false;
+      return { mount: false, shown: false };
     }
     if (stat[id]?.agent === "claude") lastClaude.current[id] = Date.now();
     // 잠깐 터미널로 간 동안에도 대화창은 걷지 않고 숨겨 둔다. 대화 파일을 계속 재야
@@ -1080,7 +1064,7 @@ export default function App() {
                               터미널로 열기
                             </button>
                           ) : null}
-                          {(chatIds[s.id] && paneView[s.id]?.agent === "claude") || (paneView[s.id]?.agent === "codex" && paneView[s.id]?.codex?.chat) ? (
+                          {chatIds[s.id] && paneView[s.id]?.agent === "claude" ? (
                             <button
                               className="view toggle"
                               onMouseDown={(e) => e.stopPropagation()}
@@ -1172,19 +1156,16 @@ export default function App() {
                         {/* 터미널 위에 덮는다. 터미널은 그 아래서 크기를 지킨 채 살아 있다. */}
                         {chatState(s.id).mount ? (
                           <ChatPane
-                            key={stat[s.id]?.agent === "codex" ? `codex:${stat[s.id]?.codex?.run}:${stat[s.id]?.codex?.chat?.id}` : `claude:${chatIds[s.id]}`}
-                            agent={stat[s.id]?.agent === "codex" ? "codex" : "claude"}
-                            run={stat[s.id]?.agent === "codex" ? stat[s.id]?.codex?.run : undefined}
-                            waiting={stat[s.id]?.agent === "codex" && stat[s.id]?.codex?.chat?.waiting}
-                            revision={stat[s.id]?.agent === "codex" ? stat[s.id]?.codex?.chat?.revision : undefined}
+                            key={`claude:${chatIds[s.id]}`}
+                            agent="claude"
                             shown={chatState(s.id).shown}
                             root={stat[s.id]?.cwd ?? t.root ?? ""}
-                            id={stat[s.id]?.agent === "codex" ? stat[s.id]?.codex?.chat?.id ?? "" : chatIds[s.id]}
+                            id={chatIds[s.id]}
                             paneId={s.id}
                             slug={casting[s.id]}
                             name={bySlug.get(casting[s.id])?.name}
-                            live={stat[s.id]?.agent === "claude" || stat[s.id]?.agent === "codex"}
-                            working={stat[s.id]?.agent === "codex" ? stat[s.id]?.codex?.chat?.busy : isAgentWorking(stat[s.id])}
+                            live={stat[s.id]?.agent === "claude"}
+                            working={isAgentWorking(stat[s.id])}
                             onReady={(ready) =>
                               setChatReady((r) => (r[s.id] === ready ? r : { ...r, [s.id]: ready }))
                             }

@@ -156,6 +156,12 @@ trust_level = "trusted"
   } catch (error) {
     writeFileSync(path.join(root, "observations.json"), JSON.stringify(observations));
     console.error("마지막 테스트 화면", latest);
+    if (process.env.CHIISPACE_TEST_SCREENSHOT === "1" && app.exitCode === null) {
+      const output = path.join(root, "failure.png");
+      const shot = spawnSync("powershell.exe", ["-NoProfile", "-File", "scripts/shot.ps1", "-ProcessId", String(app.pid),
+        "-WaitSec", "1", "-Out", output], { windowsHide: true, encoding: "utf8" });
+      console.log("실패 화면:", shot.status === 0 ? output : shot.stderr);
+    }
     throw error;
   } finally {
     spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${app.pid} -ErrorAction SilentlyContinue).CloseMainWindow()`], { windowsHide: true });

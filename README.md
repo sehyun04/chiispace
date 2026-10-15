@@ -80,7 +80,10 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   서버가 발급한 ID를 저장해 `thread/resume`으로 이어 연다. 한 번도 전송하지 않아 CLI가 이력을 만들지 않은 칸은
   그 사실이 확인된 경우에만 새 빈 대화로 연다. 기존 대화 복원 실패를 새 대화로 대신하지 않는다.
 
-위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 셸·PTY 칸은 그대로다.
+기존 PTY Codex 칸은 터미널 그대로 쓴다. 새 대화 목록의 Codex 대화창과 별개이며,
+이 경로에는 대화창용 훅을 주입하거나 터미널 위에 대화창을 덮지 않는다.
+
+위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 PTY Codex 훅 정리는 10월 16일 반영했다.
 
 앱을 켤 때 복원되는 기존 터미널 Claude 칸도, 그 칸의 claude 가 명부에 써 둔 대화 ID 가 있고 그 대화 파일이 있으면
 터미널 없는 칸으로 연다(`--continue` 로 돌던 칸이나 파일을 못 찾는 칸은 예전처럼 터미널로). 머리줄의 `터미널로 열기` 는
@@ -306,6 +309,7 @@ exe 경로를 `CHIISPACE_TEST_REAL_CODEX`에 넣고 `node --test scripts/codex-s
 별도 `CODEX_HOME`·앱 세션·오프라인 제공자를 사용하며, 모델 요청 없이 `/status` 출력 6개가
 누락·중복 없이 쌓이는지와 실제 DOM 휠 이벤트로 상단·하단 이동이 되는지를 확인한다.
 사용자 대화·인증을 가져오지 않으며 OS 키보드나 마우스를 조작하지 않는다.
+`CHIISPACE_TEST_SCREENSHOT=1`이면 실패한 테스트의 격리 창을 임시 폴더의 `failure.png`에 찍는다.
 `CHIISPACE_TEST_CODEX_PATH=inherited`를 함께 주면 네이티브 경로를 앞세우지 않고 평소 PATH의
 실행 래퍼(npm 설치에서는 Node)를 검증한다. PowerShell 테스트는 `/quit` 이후 종료 코드 0과
 기존 셸이 남아 있는지도 확인한다. 격리에는 OpenAI Docs의
@@ -333,9 +337,9 @@ PowerShell의 입력·삭제 후 갈색 잔상은 같은 `CHIISPACE_TEST_EXE`로
 PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로그램의 명시적 색 보존을 확인한다.
 `CHIISPACE_TEST_SCREENSHOT=1`이면 각 단계의 자체 테스트 창도 캡처한다. 사용자 창에는 입력하지 않는다.
 바이트 경계·불완전 출력·선택 반전 보존은 `scripts/powershell-render.test.mjs`의 단위 검증이다.
-9월 29일 고정 경로에 반영한 새 Codex 대화 칸은 `/hooks` 신뢰가 필요 없다. 기존 PTY Codex 칸은
-훅 기반이라 첫 실행 때 신뢰 검토가 필요하다. 새 칸의 모델 변경·`/status` 후 연속 대화는 격리 테스트로 확인했다.
-배포 상태는 작업 정리 4·19절을 따른다.
+새 Codex 대화 칸은 `/hooks` 신뢰가 필요 없다. 기존 PTY Codex 칸에서도 훅 주입을 제거했고,
+10월 16일 사용자용 고정 경로 앱·CLI에 함께 반영했다.
+새 칸의 모델 변경·`/status` 후 연속 대화는 격리 테스트로 확인했다. 배포 상태는 작업 정리 4·19절을 따른다.
 
 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
 실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
@@ -352,9 +356,9 @@ claude 2.1.285 부터는 셋이 더 바뀌었다. 시작할 때 "auto 모드를 
 걷히는지 본다. 그 줄과 "부름" 줄을 눌러 서브에이전트 대화 전체가 열리는지, 그 화면의 Esc 가 claude 로 새지
 않는지도 본다. 가짜 서버도 서브에이전트를 본문이 아니라 `x-claude-code-agent-id` 헤더로 가른다.
 
-Codex 대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로 `node --test scripts/codex-chat.test.mjs`를 실행한다.
-별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 최초 훅 신뢰 전 터미널 유지, 신뢰 후 두 칸 격리, 한글 제출,
-`/new`, 메뉴 전환, 재시작 이어가기, 종료 직후 낡은 제출 거부를 검증한다.
+기존 PTY Codex 칸은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로 `node --test scripts/codex-chat.test.mjs`를 실행한다.
+별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 훅 신뢰 화면·대화창 덮개가 없는지, 두 칸 터미널 대화,
+`/new`, 네이티브 이어가기와 종료 후 셸 유지를 검증한다. 대화창 자체는 아래의 `codex-stream-view`가 맡는다.
 
 켤 때의 전환과 두 방향 옮기기는 같은 두 변수로 `node --test scripts/stream-restore.test.mjs` 를 실행한다. 대화 파일이
 있는 칸은 터미널 없이, 없는 칸은 터미널로 열리는지, 옮길 때마다 같은 대화를 쥔 claude 가 한쪽만 남는지, 터미널로
