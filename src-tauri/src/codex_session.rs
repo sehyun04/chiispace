@@ -21,6 +21,8 @@ pub struct Launch {
 }
 
 impl Launch {
+    // 이 파일은 앱과 CLI(`#[path]`)가 함께 쓴다. 실행 정보를 잡고 이어 여는 것은 CLI(`codex-continue`)만 한다.
+    #[allow(dead_code)]
     pub fn capture(args: &[String]) -> Result<Self> {
         let home = std::env::var_os("CODEX_HOME").map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("USERPROFILE").map(|p| std::path::PathBuf::from(p).join(".codex")))
@@ -51,6 +53,7 @@ impl Launch {
         validate_options(&self.home, &self.cwd, &self.args)
     }
 
+    #[allow(dead_code)]
     pub fn args(&self, picker: bool) -> Vec<String> {
         let mut args = self.args.clone();
         args.push("resume".into());

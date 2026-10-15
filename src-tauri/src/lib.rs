@@ -7,6 +7,7 @@
 
 mod shells;
 mod workspace;
+mod claude_files;
 mod bridge;
 mod collab;
 mod launch_config;
@@ -369,16 +370,12 @@ pub fn run() {
             workspace::initial_root,
             workspace::fs_pick,
             workspace::git_status,
-            workspace::claude_sessions,
-            workspace::claude_bg_sessions,
-            workspace::claude_live_sessions,
-            workspace::claude_session_of_pid,
-            workspace::claude_transcript,
-            workspace::claude_transcript_raw,
-            workspace::claude_transcript_size,
-            workspace::claude_subagents,
-            workspace::claude_subagent_raw,
-            workspace::claude_subagent_size,
+            claude_files::claude_session_of_pid,
+            claude_files::claude_transcript_raw,
+            claude_files::claude_transcript_size,
+            claude_files::claude_subagents,
+            claude_files::claude_subagent_raw,
+            claude_files::claude_subagent_size,
             claude_chat::claude_chat_start,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_stop,
