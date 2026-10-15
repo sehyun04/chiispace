@@ -37,11 +37,22 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server·요청 격리·프로세스 수명 |
 | `ui/CodexStreamPane.tsx`, `ui/codex-stream.ts` | Codex 대화·승인·질문·설정과 스트림 해석 |
 | `ui/stream-session.ts` | 터미널 없는 Claude·Codex 칸의 저장 구분·빈 대화 복원 경계 |
-| `src-tauri/src/workspace.rs` | git · 세션 파일 · claude 대화 목록과 이름 |
+| `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
+| `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 |
+| `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 |
+| `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
-| `ui/App.tsx` | 얼개 — 탭 · 배치 · 단축키 · 세션 저장/복원 |
+| `ui/App.tsx` | 얼개 — 탭 · 배치 · 세션 저장/복원을 쥐고 아래를 조립한다 |
+| `ui/Pane.tsx` | 칸 하나 — 머리줄과 터미널·터미널 없는 대화창·대화창 덮개 |
+| `ui/usePaneAgents.ts` | 터미널 칸 폴링 · 복원 명령 누적 · 명부의 대화 id |
+| `ui/useStreams.ts` | 터미널 없는 칸과, 같은 대화를 터미널 칸과 오가기 |
+| `ui/useChatOverlay.ts` | 터미널 위 대화창을 언제 덮고 포커스를 어디 주는가 |
+| `ui/useShortcuts.ts`, `ui/useDrag.ts`, `ui/useTabCleanup.ts` | 단축키 · 경계선·칸 끌기 · 칸이 사라질 때 배치 정리 |
+| `ui/saved.ts` | 세션 파일 읽기·쓰기와 켤 때 옮길 칸 고르기(순수 함수, 단위 검증) |
 | `ui/Sidebar.tsx` | 옆칸. 그리기만 하고 판단은 App 이 준다 |
 | `ui/session.ts` | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
+| `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
+| `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 |
 | `ui/roster.tsx` | 치이카와 로스터 · 누가 어느 칸을 맡는가 |
 | `ui/layout.ts` | 칸 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |
@@ -240,6 +251,11 @@ cd src-tauri; cargo build --release --features custom-protocol --bins
 # -> src-tauri/target/release/chiispace-cli.exe  (칸 연결용)
 ```
 
+사용자가 쓰는 고정 경로의 두 exe 를 바꾸는 일(배포)은 손으로 하지 않고 `node scripts/deploy.mjs` 로 한다.
+origin/master 를 커밋 그대로의 임시 워크트리에서 굽고(작업본에는 다른 세션의 미커밋 변경이 섞여 있다), 그 exe 로
+전체 검증을 돌린 뒤 앱·CLI·세션을 백업하고 바꾸고 해시를 확인해 [배포 기록](docs/DEPLOYS.md)에 한 줄을 붙인다.
+앱이 떠 있으면 멈춘다. `--dry-run` 은 굽기·검증까지만 한다.
+
 Windows 첫 빌드에서는 `scripts/prepare-conpty.ps1`이 Microsoft NuGet에서 고정 버전의
 ConPTY 패키지를 받아 SHA-256을 검사하고 `OUT_DIR`에 풀어 둔다. 이후 빌드는 검증한 캐시를
 재사용한다. DLL·호스트·MIT 고지를 exe에 포함하므로 배포 파일은 여전히 앱과 CLI 두 개다.
@@ -281,6 +297,18 @@ claude 상태줄이 브랜치·폴더 아이콘을 사설 영역 글자(`U+E0A0`
 프롬프트 상자가 부서진다는 뜻이다.
 
 ## 헤드리스 검증
+
+평소에는 `node scripts/test.mjs` 한 줄이다. 설치된 claude·Codex 경로를 찾아 아래의 환경 변수를 채우고, 무엇을
+썼는지·무엇을 건너뛰었는지·실패한 것의 첫 줄을 요약한다.
+
+```powershell
+node scripts/test.mjs                  # 단위만(앱 exe 가 없으면 실제 앱 검증은 건너뛴다)
+node scripts/test.mjs --build          # 지금 작업본을 target/test-build 에 구워 실제 앱까지
+node scripts/test.mjs --exe <경로>     # 그 exe 로 실제 앱까지
+node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검증만
+```
+
+아래는 검증마다 무엇을 보는지와, 환경 변수를 손으로 줄 때의 방법이다.
 
 세션 선택 회귀 테스트는 `npm test`, Rust 검증은
 `cargo test --manifest-path src-tauri/Cargo.toml --release --features custom-protocol`로 돌린다.
