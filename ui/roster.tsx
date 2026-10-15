@@ -4,7 +4,7 @@
  *  그림을 넣고 빼는 일은 `ui/assets/faces/` 에서만 일어나므로 이 파일은 그 폴더가
  *  무엇을 담고 있든 같은 방식으로 답한다 — 그림이 늘어도 고칠 것이 없다. */
 import roster from "./roster.json";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 export type Member = { name: string; slug: string; school: string; header_color: string };
 
@@ -146,4 +146,29 @@ export function Row({ m, lead }: { m: Member; lead?: boolean }) {
       <span className="school">{m.school}</span>
     </div>
   );
+}
+
+/** 새로 생긴 칸에 사람을 붙인다. 이미 나간 사람은 피하고, 스무 명을 다 쓰면
+ *  처음부터 다시 돈다. 칸이 사라져도 배정은 지우지 않는다 — 같은 칸이 되살아날
+ *  때 얼굴이 바뀌면 그게 더 낯설다. 배정은 세션에 남아 다시 켜도 같은 얼굴이 같은 칸에 붙는다. */
+export function useCasting(live: string[]) {
+  const [casting, setCasting] = useState<Record<string, string>>({});
+  const key = live.join(",");
+  useEffect(() => {
+    // 아직 아무도 안 맡았거나, 맡은 사람의 그림이 빠진 칸을 다시 짝지어 준다.
+    const need = live.filter((id) => !casting[id] || (anyFace && !faceUrl(casting[id])));
+    if (!need.length) return;
+    setCasting((c) => {
+      const used = new Set(Object.values(c));
+      const next = { ...c };
+      for (const id of need) {
+        const free = cast.find((m) => !used.has(m.slug)) ?? cast[used.size % cast.length];
+        next[id] = free.slug;
+        used.add(free.slug);
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, casting]);
+  return [casting, setCasting] as const;
 }
