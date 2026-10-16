@@ -391,7 +391,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `ui/app.css` · `ui/theme.css` · `ui/chat.css` | 치이카와 테마 |
-| `ui/assets/faces/` · `scripts/make-motion.py` | 얼굴 그림과 움직임 |
+| `ui/assets/faces/` · `scripts/make-motion.py` · `scripts/make-icon.py` | 얼굴 그림과 움직임 · 그 얼굴로 굽는 앱 아이콘(3인방) |
 | `scripts/test.mjs` · `scripts/deploy.mjs` | 검증 한 줄 · 고정 경로 배포 |
 
 `ui/App.tsx` 는 얼개라 여러 일이 만나기 쉽다. **거기를 만지는 일은 한 번에 하나만** 돌린다. 새 기능은 되도록 위의

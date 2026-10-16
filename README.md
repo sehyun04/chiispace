@@ -162,7 +162,8 @@ CLI가 보내는 터미널 타이틀을 쓴다. 자동 이름도 `paneTitles`로
 있고, 배정은 세션에 남아 다시 켜도 같은 얼굴이 같은 칸에 붙는다. 그림이 들어온 사람만
 세운다 — 스무 명을 다 세우면 색 동그라미가 섞여 나와 들어온 그림이 묻힌다.
 `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙고(vite 가 모아 준다),
-`scripts/make-motion.py` 가 그 한 장에서 "일하는 중" 움직임을 구워 준다.
+`scripts/make-motion.py` 가 그 한 장에서 "일하는 중" 움직임을 구워 준다. 앱 아이콘(작업 표시줄·제목줄)은
+`scripts/make-icon.py` 가 치이카와·하치와레·우사기 얼굴을 한 장에 모아 굽는다 — 얼굴을 바꾸면 다시 돌리고 exe 를 다시 굽는다.
 
 **칸 사이 연결** — `kasa-socket`을 PTY와 같은 rev로 당겨 쓴다. 각 앱은 별도 Windows
 named pipe를 열고, 칸의 셸에 `CHIISPACE_SOCKET_PATH`, `CHIISPACE_PANE_ID`,
