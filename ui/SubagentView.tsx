@@ -15,7 +15,7 @@ import { buildToolMap, parseJsonl, toItems, type Bubble, type Item } from "./tra
 /** 열어 볼 서브에이전트. 진행 줄은 에이전트 id 를, "… 부름" 줄은 부른 호출 id 를 안다. */
 export type SubTarget = { agent?: string; toolUseId?: string; label: string };
 
-/** 누르는 자리(진행 줄·"부름" 줄)가 이것으로 연다. 칸 위 덮개(ChatPane)가 채운다. */
+/** 누르는 자리(진행 줄·"부름" 줄)가 이것으로 연다. 대화창(ChatPane)이 채운다. */
 export const OpenSubContext = createContext<((t: SubTarget) => void) | null>(null);
 
 type Info = { agent: string; agentType?: string; description?: string; toolUseId?: string };

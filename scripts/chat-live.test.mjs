@@ -39,8 +39,9 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
   const shell = path.join(process.env.SystemRoot, "System32", "cmd.exe");
   writeFileSync(state, JSON.stringify({
     tabs: [{ key: "t0", focus: "%0", root: project, shell, layout: { kind: "leaf", id: "%0" } }],
-    active: 0, nextPane: 1, nextTab: 1, restoreMode: "native-continue",
-    procs: { "%0": { cmd: "claude --continue", auto: true, cwd: project } },
+    active: 0, nextPane: 1, nextTab: 1, restoreMode: "native-continue", procs: {},
+    // 대화창 칸으로 그 대화를 이어 연다. 10월 17일까지는 터미널 칸의 claude 위에 덮은 대화창으로 봤다.
+    streams: { "%0": { agent: "claude", session: sid, cwd: project } },
   }));
 
   const probe = "/" + randomUUID();
@@ -112,8 +113,6 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     try {
       const slot = document.querySelector('[data-pane="%0"]');
       const over = slot?.querySelector('.chat-over');
-      const b = window.__terms?.['%0']?.buffer.active;
-      const pane = b ? Array.from({length:b.length}, (_, y) => b.getLine(y)?.translateToString(true) ?? '') : null;
       const input = over?.querySelector('.composer textarea');
       const texts = (sel) => [...(over?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
       const dom = {
@@ -124,11 +123,10 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
         live: texts('.msg.live .bubble'),
         writing: !!over?.querySelector('.bubble.writing'),
         stop: !!over?.querySelector('.composer-stop'),
-        input: !!input,
+        input: !!input, inputDisabled: !!input?.disabled,
       };
-      const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
+      const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
-        if (c.term) window.__terms?.['%0']?.input(c.term);
         if (c.send && input) {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -139,45 +137,18 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     } finally { pending = false; }
   }, 100); return 'isolated live test'; })()`;
 
-  // pid -> 부모 pid. 칸 셸 아래 claude.exe 는 실행기이고 실제 claude 는 그 자식으로 떠서
-  // 자기 pid 로 명부를 쓴다. 명부를 쓸 자리를 현실과 같게 고르려면 부모를 알아야 한다.
-  const claudePids = () => {
-    const raw = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      "(Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | ForEach-Object { \"$($_.ProcessId):$($_.ParentProcessId)\" }) -join ','"],
-      { encoding: "utf8", windowsHide: true }).stdout.trim();
-    return new Map(raw ? raw.split(",").map(s => s.split(":").map(Number)) : []);
-  };
-  const claudeBefore = claudePids();
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
-  const screen = () => (latest.pane ?? []).join("\n");
   const dom = () => latest.dom ?? {};
   const until = async (ok, n = 300) => { for (let i = 0; i < n && !ok(); i++) await delay(100); return ok(); };
-  const ESC = String.fromCharCode(27), CR = String.fromCharCode(13);
   try {
-    let settled = false;
-    for (let i = 0; i < 900 && !screen().includes("LIVE_READY_MARK"); i++) {
-      const s = screen();
-      if (!settled && /Do you want to use this API key/.test(s)) {
-        if (/❯ No/.test(s)) commands.push({ term: ESC + "[A" });
-        else if (/❯ Yes/.test(s)) { commands.push({ term: CR }); settled = true; }
-      }
-      await delay(100);
-    }
-    assert.match(screen(), /LIVE_READY_MARK/, "저장된 대화가 뜨지 않음");
-    // 명부는 새로 뜬 claude 중 **잎**(다른 새 claude 의 부모가 아닌 것)에만 쓴다 — 실제 claude 가
-    // 그렇게 쓴다. 전에는 새 pid 모두에 써서, 앱이 실행기 pid 로 묻다 못 찾는 버그를 가렸다.
-    let pids = [];
-    for (let i = 0; i < 60 && !pids.length; i++) { const now = claudePids(); const fresh = [...now.keys()].filter(v => !claudeBefore.has(v)); pids = fresh.filter(p => !fresh.some(q => now.get(q) === p)); if (!pids.length) await delay(500); }
-    assert.ok(pids.length, "새로 뜬 claude 가 없음");
-    mkdirSync(path.join(home, "sessions"), { recursive: true });
-    for (const pid of pids) writeFileSync(path.join(home, "sessions", pid + ".json"), JSON.stringify({ pid, sessionId: sid, cwd: project, kind: "interactive" }));
-    assert.ok(await until(() => dom().theirs?.some(t => t.includes("LIVE_READY_MARK"))), "대화창이 뜨지 않음: " + JSON.stringify(dom()));
+    assert.ok(await until(() => dom().theirs?.some(t => t.includes("LIVE_READY_MARK"))), "저장된 대화가 대화창에 안 뜸: " + JSON.stringify(dom()));
+    assert.ok(await until(() => dom().input && !dom().inputDisabled), "이어 연 claude 가 안 켜짐: " + JSON.stringify(dom()));
 
     commands.push({ send: "CHAT_LIVE_ASK" });
     // 파일에 적히기 전에도 내 말이 바로 보인다.
     assert.ok(await until(() => dom().sending?.includes("CHAT_LIVE_ASK") || dom().mine?.includes("CHAT_LIVE_ASK"), 50), "보낸 말이 바로 보이지 않음");
     // 가짜 모델이 답을 붙잡고 있는 동안: 쓰이는 말풍선에 조각이 보이고, 파일 쪽 답에는 아직 없다.
-    assert.ok(await until(() => dom().live?.some(t => t.includes("CHAT_LIVE_PART")), 300), "쓰이는 중인 글이 대화창에 흐르지 않음: " + JSON.stringify({ dom: dom(), seen }) + "\n" + screen().slice(-600));
+    assert.ok(await until(() => dom().live?.some(t => t.includes("CHAT_LIVE_PART")), 300), "쓰이는 중인 글이 대화창에 흐르지 않음: " + JSON.stringify({ dom: dom(), seen }));
     assert.equal(dom().writing, true, "쓰이는 중 표시가 없음");
     assert.equal(dom().stop, true, "답이 흐르는 동안 중단 단추가 없음");
     assert.ok(!dom().theirs.some(t => t.includes("CHAT_LIVE")), "아직 파일에 없는 답이 확정된 말풍선으로 섰음");
@@ -191,7 +162,7 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     assert.equal(all.length, 1, "답이 겹쳐 보임: " + JSON.stringify(all));
     assert.equal(dom().writing, false);
     assert.equal(dom().sending.length, 0, "보내는 중 표시가 걷히지 않음");
-    // 일하는 중 판정은 출력 박동으로 하므로 조금 늦게 풀린다. 끝내 남아 있으면 안 된다.
+    // 일하는 중은 통로의 결과 줄이 와야 풀린다. 끝내 남아 있으면 안 된다.
     assert.ok(await until(() => !dom().stop, 150), "답이 끝났는데 중단 단추가 남음");
 
     assert.ok(seen.main >= 1, "본 대화 요청이 가짜 모델에 닿지 않음");

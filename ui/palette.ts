@@ -2,8 +2,7 @@
  *
  *  무엇을 띄울지는 칸이 준다. 터미널 없는 두 칸은 입력바 위 줄(StreamBar)의 모델·추론·권한을 그대로 명령으로
  *  올린다 — 고르면 그 자리에서 바뀌어 TUI 메뉴를 찾아 터미널로 갈 일이 없다. Claude 칸은 거기에 claude 가 초기화 답으로
- *  준 명령(스킬·사용자 명령 포함)을 붙인다. 그 목록이 곧 그 claude 가 받는 명령이라 앱이 따로 적어 두지 않는다.
- *  터미널 칸 덮개는 TUI 에 묻지 못하니 고정 목록을 쓴다. */
+ *  준 명령(스킬·사용자 명령 포함)을 붙인다. 그 목록이 곧 그 claude 가 받는 명령이라 앱이 따로 적어 두지 않는다. */
 
 export type PaletteChoice = { value: string; label: string; hint?: string; current?: boolean };
 
@@ -18,8 +17,6 @@ export type PaletteCommand = {
   choices?: PaletteChoice[];
   /** 앱이 직접 한다. 없으면 `/이름` 이나 `/이름 값` 을 보낼 말로 보낸다. */
   run?: (value?: string) => void;
-  /** 터미널 칸에서 TUI 메뉴를 띄워 터미널로 넘어가는 명령. 고르기 전에 알게 표시한다. */
-  terminal?: boolean;
 };
 
 export type PaletteView =
@@ -118,24 +115,4 @@ export function agentCommands(list: { name: string; description?: string; argume
 export function mergeCommands(app: PaletteCommand[], agent: PaletteCommand[]): PaletteCommand[] {
   const taken = new Set(app.flatMap(names));
   return [...app, ...agent.filter((c) => !names(c).some((n) => taken.has(n)))];
-}
-
-/** 터미널 칸 덮개의 고정 목록. 모델·추론은 인자를 붙여 보내 TUI 메뉴 없이 바로 바뀌고 대화창에 머문다. */
-export function terminalCommands(effortLabel: (v: string) => string): PaletteCommand[] {
-  return [
-    { name: "model", hint: "모델 바꾸기", choices: [["default", "기본"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]].map(([value, label]) => ({ value, label })) },
-    { name: "effort", hint: "추론 수준", choices: ["low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: effortLabel(value) })) },
-    { name: "clear", aliases: ["new", "reset"], hint: "새 대화" },
-    { name: "compact", hint: "지난 대화를 줄여 문맥 비우기", args: "[줄일 때 남길 것]" },
-    { name: "context", hint: "문맥 사용량" },
-    { name: "usage", aliases: ["cost"], hint: "사용량 · 비용" },
-    { name: "rename", hint: "대화 이름 바꾸기", args: "<이름>" },
-    { name: "resume", hint: "지난 대화 고르기", terminal: true },
-    { name: "config", hint: "설정", terminal: true },
-    { name: "mcp", hint: "MCP 서버", terminal: true },
-    { name: "permissions", hint: "허용 · 거부 규칙", terminal: true },
-    { name: "memory", hint: "메모리 파일", terminal: true },
-    { name: "status", hint: "버전 · 계정 · 연결 상태", terminal: true },
-    { name: "help", hint: "명령 도움말", terminal: true },
-  ];
 }

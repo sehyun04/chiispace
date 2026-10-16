@@ -121,7 +121,6 @@ export function Row({
   grouped,
   durMs,
   tokens,
-  onShowTerm,
 }: {
   item: Item;
   slug?: string;
@@ -130,7 +129,6 @@ export function Row({
   grouped: boolean;
   durMs?: number;
   tokens?: number;
-  onShowTerm?: (auto?: boolean) => void;
 }) {
   const openSub = useContext(OpenSubContext);
   switch (item.kind) {
@@ -214,20 +212,7 @@ export function Row({
       );
     case "interrupted":
       return <div className="note mid">여기서 중단했다</div>;
-    case "ask":
-      return (
-        <div className="ask">
-          <div className="ask-title">고를 것이 있다</div>
-          {item.questions.map((q, i) => (
-            <div className="q" key={i}>
-              {q}
-            </div>
-          ))}
-          <button className="ask-go" onClick={() => onShowTerm?.(true)}>
-            터미널에서 고르기
-          </button>
-        </div>
-      );
+    // 답을 기다리는 질문("ask")은 통로가 카드로 준다(ClaudeStreamPane). 대화 파일 쪽 것은 그리지 않는다.
     default:
       return null;
   }

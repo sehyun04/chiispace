@@ -20,11 +20,6 @@ pub fn find(pane: &PtySession) -> Option<(AgentKind, u32)> {
     in_table(&kasa_pty::process_table_shared(), pane.shell_pid()?)
 }
 
-pub fn fresh(pane: &PtySession) -> Option<(AgentKind, u32)> {
-    // 화면 폴링의 캐시는 종료 직후에도 살아 있는 것처럼 보인다. 전송은 새 조회로 판정한다.
-    in_table(&kasa_pty::process_table(), pane.shell_pid()?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

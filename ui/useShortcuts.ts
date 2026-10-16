@@ -6,12 +6,13 @@ import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } 
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as L from "./layout";
 import type { Tab } from "./saved";
-import { termOf } from "./useChatOverlay";
+import { termOf } from "./focus";
 
 export function useShortcuts(
   cur: Tab,
   tabCount: number,
-  showsChat: MutableRefObject<Record<string, boolean>>,
+  /** 대화창 칸. 키를 입력바가 받는다. */
+  chats: MutableRefObject<Record<string, unknown>>,
   act: {
     split: (dir: L.Dir) => void;
     closePane: (id: string) => void;
@@ -38,9 +39,8 @@ export function useShortcuts(
       }
       if (!e.ctrlKey || !e.shiftKey) return;
       const k = e.key.toLowerCase();
-      // 대화창에서는 복사·붙여넣기를 브라우저에 맡긴다. 가로채면 숨은 터미널의
-      // 선택을 복사하고, 붙여넣기는 입력바가 아니라 그 아래 claude 로 들어간다.
-      if ((k === "c" || k === "v") && showsChat.current[cur.focus]) return;
+      // 대화창 칸에서는 복사·붙여넣기를 브라우저에 맡긴다. 그 칸에는 가로채 건넬 터미널이 없다.
+      if ((k === "c" || k === "v") && chats.current[cur.focus]) return;
       const dirs: Record<string, "left" | "right" | "up" | "down"> = {
         arrowleft: "left",
         arrowright: "right",
@@ -79,5 +79,5 @@ export function useShortcuts(
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [cur, tabCount, split, closePane, newTab, pick, patch, showsChat, setFontSize, setSideOpen, setActive]);
+  }, [cur, tabCount, split, closePane, newTab, pick, patch, chats, setFontSize, setSideOpen, setActive]);
 }

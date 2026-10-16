@@ -2,8 +2,10 @@
  *
  *  두 칸이 따로 그리면 같은 자리에 다른 모양·다른 순서가 서고, 한쪽에만 단추가 생긴다(실제로 그랬다).
  *  무엇을 고를 수 있는지는 에이전트마다 다르므로 항목은 부른 쪽이 주고, 모양과 순서는 여기서 정한다:
- *  모델 · 추론 · 권한 · [상태] [새 대화], 상태를 펴면 그 아래에 같은 항목의 표. */
+ *  모델 · 추론 · 권한 · [폴더] [상태], 상태를 펴면 그 아래에 같은 항목의 표. 새 대화는 `/clear` 다(10월 17일 단추를 걷었다).
+ */
 import type { ReactNode, Ref } from "react";
+import { FolderChip } from "./FolderChip";
 
 export type BarChoice = { value: string; label: string; title?: string };
 export type BarField = {
@@ -44,8 +46,7 @@ export function StreamBar({
   permission,
   statusOpen,
   onStatus,
-  onNew,
-  busy,
+  folder,
   status,
   statusClass,
 }: {
@@ -55,9 +56,8 @@ export function StreamBar({
   permission: BarField;
   statusOpen: boolean;
   onStatus: () => void;
-  onNew: () => void;
-  /** 일하는 중이면 새 대화를 막는다 — 하던 턴이 끊긴다. */
-  busy: boolean;
+  /** 이 칸의 작업 폴더. 바꾸면 그 폴더의 새 대화다(FolderChip). */
+  folder: { path: string; fresh: boolean; disabled?: boolean; onPick: (path: string) => void };
   status: [string, ReactNode][];
   statusClass?: string;
 }) {
@@ -89,11 +89,9 @@ export function StreamBar({
         )}
         </div>
         <div className="stream-bar-acts">
+        <FolderChip {...folder} />
         <button type="button" className={statusOpen ? "on" : undefined} aria-expanded={statusOpen} onClick={onStatus}>
           상태
-        </button>
-        <button type="button" disabled={busy} onClick={onNew} title="이 칸에서 새 대화를 시작한다">
-          새 대화
         </button>
         </div>
       </div>

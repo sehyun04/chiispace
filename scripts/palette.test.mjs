@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentCommands, barCommands, choose, complete, mergeCommands, paletteView, terminalCommands } from "../ui/palette.ts";
+import { agentCommands, barCommands, choose, complete, mergeCommands, paletteView } from "../ui/palette.ts";
 
 const field = (value, values, calls) => ({ value, choices: values.map((v) => ({ value: v, label: v.toUpperCase() })), onChange: (v) => calls.push(v) });
 
@@ -74,13 +74,4 @@ test("앱이 하지 않는 명령은 보낸다 — 꼭 써야 하는 인자가 �
   assert.deepEqual(choose(paletteView("/context", list), 0), { kind: "send", text: "/context" });
   assert.equal(complete(paletteView("/comp", list), 0), "/compact ", "Tab 은 보내지 않고 채우기만");
   assert.equal(paletteView("/compact 남길 것", list), null, "인자를 쓰는 중에는 목록이 없다");
-});
-
-test("터미널 칸의 모델·추론은 인자를 붙여 보내 TUI 메뉴를 띄우지 않는다", () => {
-  const list = terminalCommands((v) => `L-${v}`);
-  assert.deepEqual(choose(paletteView("/model son", list), 0), { kind: "send", text: "/model sonnet" });
-  assert.deepEqual(choose(paletteView("/effort ", list), 2), { kind: "send", text: "/effort high" });
-  assert.equal(paletteView("/effort ", list).items[2].label, "L-high");
-  assert.equal(list.find((c) => c.name === "config").terminal, true, "메뉴로 넘어가는 명령은 표시한다");
-  assert.deepEqual(choose(paletteView("/config", list), 0), { kind: "send", text: "/config" });
 });

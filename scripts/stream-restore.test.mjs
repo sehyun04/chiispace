@@ -83,15 +83,16 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
           xterm: !!slot?.querySelector('.xterm'),
           stream: !!over?.querySelector('.stream-bar'),
           theirs: [...(over?.querySelectorAll('.msg:not(.mine):not(.live) .bubble') ?? [])].map(e => e.textContent),
-          buttons: [...(slot?.querySelectorAll('.pane-head .view') ?? [])].map(e => e.textContent),
-          disabled: [...(slot?.querySelectorAll('.pane-head .view') ?? [])].filter(e => e.disabled).map(e => e.textContent),
+          buttons: [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].map(e => e.textContent),
+          pressed: slot?.querySelector('.pane-head .mode button[aria-pressed="true"]')?.textContent ?? null,
+          disabled: [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].filter(e => e.disabled).map(e => e.textContent),
           screen: b ? Array.from({length:b.length}, (_, y) => b.getLine(y)?.translateToString(true) ?? '').join('\\n') : '',
         };
       }
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({panes})});
       for (const c of await r.json()) {
         const slot = document.querySelector('[data-pane="' + c.id + '"]');
-        [...(slot?.querySelectorAll('.pane-head .view') ?? [])].find(e => e.textContent === c.button)?.click();
+        [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].find(e => e.textContent === c.button)?.click();
       }
     } finally { pending = false; }
   }, 150); return 'isolated restore test'; })()`;
@@ -122,18 +123,23 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
       assert.ok(await until(() => pane("%0").stream && pane("%0").theirs.some(t => t.includes("RESTORE_MARK")), 300),
         "대화 id 가 있는 칸이 터미널 없이 안 열림: " + JSON.stringify(latest));
       assert.equal(pane("%0").xterm, false, "터미널 없는 칸에 터미널이 있다");
-      assert.deepEqual(pane("%0").buttons, ["터미널로 열기"]);
+      // 머리줄은 [터미널][대화창] 둘뿐이고 지금 방식이 눌려 있다.
+      assert.deepEqual(pane("%0").buttons, ["터미널", "대화창"]);
+      assert.equal(pane("%0").pressed, "대화창");
       assert.ok(await until(() => pane("%1").xterm, 100), "파일 없는 칸이 터미널로 안 열림");
       assert.equal(pane("%1").stream, false, "파일 없는 칸을 새 대화로 덮었다");
       assert.ok(await until(() => saved().streams?.["%0"]?.session === known && !saved().procs?.["%0"] && saved().procs?.["%1"], 50),
         "세션에 옮긴 결과가 안 남음: " + JSON.stringify(saved()));
       assert.ok(await until(() => holders().join() === "stream", 50), "이 대화를 쥔 claude 가 통로 하나가 아님: " + holders());
 
-      // 2. 터미널로 열기: 같은 대화를 터미널 칸으로. 통로 쪽 claude 는 내려간다.
-      commands.push({ id: "%0", button: "터미널로 열기" });
+      // 2. [터미널]: 같은 대화를 터미널 칸으로. 통로 쪽 claude 는 내려간다.
+      commands.push({ id: "%0", button: "터미널" });
       assert.ok(await until(() => pane("%0").xterm && /RESTORE_MARK/.test(pane("%0").screen), 300),
         "터미널로 열었는데 같은 대화가 안 뜸:\n" + pane("%0").screen?.slice(-600));
       assert.equal(pane("%0").stream, false);
+      // 터미널 칸에는 대화창을 덮지 않는다(10월 17일 덮개를 걷었다).
+      assert.equal(!!pane("%0").theirs?.length, false, "터미널 칸 위에 대화창이 덮였다");
+      assert.ok(await until(() => pane("%0").pressed === "터미널", 50), "터미널로 바꿨는데 머리줄이 안 바뀜: " + JSON.stringify(pane("%0").buttons));
       assert.ok(await until(() => holders().join() === "tui", 80), "터미널로 바꿨는데 통로 claude 가 남거나 터미널 claude 가 없음: " + holders());
       assert.ok(await until(() => saved().keepTerminal?.includes("%0") && saved().procs?.["%0"]?.claudeSession === known && !saved().streams?.["%0"], 50),
         "터미널로 둔 칸이 세션에 안 남음: " + JSON.stringify(saved()));
@@ -148,19 +154,19 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
         "되돌린 칸이 다시 켜자 터미널로 안 열림: " + JSON.stringify(latest.panes?.["%0"]?.buttons));
       assert.equal(pane("%0").stream, false, "되돌린 칸을 다시 터미널 없이 열었다");
 
-      // 4. 터미널 없이: 명부로 대화가 붙은 칸을 같은 대화의 터미널 없는 칸으로. 터미널 쪽 claude 는 내려간다.
-      assert.ok(await until(() => pane("%0").buttons?.includes("터미널 없이") && !pane("%0").disabled?.includes("터미널 없이"), 200),
-        "터미널 없이 단추가 안 뜸: " + JSON.stringify(pane("%0").buttons));
+      // 4. [대화창]: 명부로 대화가 붙은 칸을 같은 대화의 터미널 없는 칸으로. 터미널 쪽 claude 는 내려간다.
+      assert.ok(await until(() => pane("%0").pressed === "터미널" && !pane("%0").disabled?.includes("대화창"), 200),
+        "대화창 단추가 안 풀림: " + JSON.stringify(pane("%0")));
       // 막 이어 연 claude 가 화면을 다시 그리는 동안은 "일하는 중"으로 잡혀 단추가 잠깐씩 잠긴다. 바뀔 때까지 다시 누른다.
       for (let i = 0; i < 15 && !pane("%0").stream; i++) {
-        commands.push({ id: "%0", button: "터미널 없이" });
+        commands.push({ id: "%0", button: "대화창" });
         await until(() => pane("%0").stream, 20);
       }
       assert.ok(await until(() => pane("%0").stream && !pane("%0").xterm && pane("%0").theirs.some(t => t.includes("RESTORE_MARK")), 300),
-        "터미널 없이로 안 바뀜: " + JSON.stringify({ pane: pane("%0").buttons, proc: saved().procs?.["%0"], known,
+        "대화창으로 안 바뀜: " + JSON.stringify({ pane: pane("%0").buttons, proc: saved().procs?.["%0"], known,
           roster: existsSync(path.join(home, "sessions")) ? readdirSync(path.join(home, "sessions")).filter(f => f.endsWith(".json")).map(f => readFileSync(path.join(home, "sessions", f), "utf8").slice(0, 200)) : [],
           files: readdirSync(store) }));
-      assert.ok(await until(() => holders().join() === "stream", 80), "터미널 없이로 바꿨는데 터미널 claude 가 남음: " + holders());
+      assert.ok(await until(() => holders().join() === "stream", 80), "대화창으로 바꿨는데 터미널 claude 가 남음: " + holders());
       assert.ok(await until(() => !saved().keepTerminal?.includes("%0") && saved().streams?.["%0"]?.session === known, 50),
         "되돌린 표시가 안 걷힘: " + JSON.stringify(saved()));
     } finally {

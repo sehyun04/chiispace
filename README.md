@@ -43,17 +43,17 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 세션 저장/복원을 쥐고 아래를 조립한다 |
-| `ui/Pane.tsx` | 칸 하나 — 머리줄과 터미널·터미널 없는 대화창·대화창 덮개 |
+| `ui/Pane.tsx` | 칸 하나 — 머리줄([터미널][대화창])과 터미널 또는 대화창 |
 | `ui/usePaneAgents.ts` | 터미널 칸 폴링 · 복원 명령 누적 · 명부의 대화 id |
 | `ui/useStreams.ts` | 터미널 없는 칸과, 같은 대화를 터미널 칸과 오가기 |
-| `ui/useChatOverlay.ts` | 터미널 위 대화창을 언제 덮고 포커스를 어디 주는가 |
+| `ui/focus.ts` | 칸에 포커스 주기 — 대화창 칸은 입력바, 터미널 칸은 xterm |
 | `ui/useShortcuts.ts`, `ui/useDrag.ts`, `ui/useTabCleanup.ts` | 단축키 · 경계선·칸 끌기 · 칸이 사라질 때 배치 정리 |
 | `ui/saved.ts` | 세션 파일 읽기·쓰기와 켤 때 옮길 칸 고르기(순수 함수, 단위 검증) |
 | `ui/Sidebar.tsx` | 옆칸. 그리기만 하고 판단은 App 이 준다 |
 | `ui/session.ts` | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
 | `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
-| `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령, 터미널 칸 고정 목록 (React 없음, 단위 검증) |
-| `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 |
+| `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령 (React 없음, 단위 검증) |
+| `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
 | `ui/roster.tsx` | 치이카와 로스터 · 누가 어느 칸을 맡는가 |
 | `ui/layout.ts` | 칸 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |
@@ -81,7 +81,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 - **Claude 는 터미널 없이 연다.** 칸 셸의 TUI 대신 `claude -p` 의 stream-json 통로로 돌려서, 권한 묻기·
   선택지 질문이 화면 글자가 아니라 데이터로 온다. 대화창이 그것을 카드로 받고(허락 · 다시 묻지 않기 · 거절,
   선택지 · 직접 쓰기), 입력바 위에서 모델과 권한 모드를 바꾼다. 터미널로 넘어갈 일이 없으니 터미널을 두지
-  않는다. 말풍선·쓰이는 중인 답·서브에이전트는 PTY 칸과 같은 대화창과 같은 프록시로 그린다.
+  않는다. 쓰이는 중인 답·서브에이전트는 앱의 루프백 프록시가 옆에서 읽어 그린다.
   대화 id 는 앱이 정해 `--session-id` 로 주고 세션에 적어, 다시 켜면 `--resume` 으로 그 대화를 이어 연다.
 - **Codex도 터미널 없이 연다.** 설치된 CLI의 로컬 `app-server`를 칸마다 독립 실행한다. 새 훅을 주입하거나
   `/hooks` 신뢰를 요구하지 않는다. 답변은 실시간으로 흐르고 승인·질문은 카드로, 모델·추론·승인은 입력바 위에서
@@ -92,15 +92,18 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   서버가 발급한 ID를 저장해 `thread/resume`으로 이어 연다. 한 번도 전송하지 않아 CLI가 이력을 만들지 않은 칸은
   그 사실이 확인된 경우에만 새 빈 대화로 연다. 기존 대화 복원 실패를 새 대화로 대신하지 않는다.
 
-기존 PTY Codex 칸은 터미널 그대로 쓴다. 새 대화 목록의 Codex 대화창과 별개이며,
-이 경로에는 대화창용 훅을 주입하거나 터미널 위에 대화창을 덮지 않는다.
+터미널 칸은 터미널 그대로 쓴다. 10월 17일부터 터미널 위에 대화창을 덮지 않는다 — 대화로 보는 길은 대화창 칸 하나다.
 
 위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 PTY Codex 훅 정리는 10월 16일 반영했다.
 
 앱을 켤 때 복원되는 기존 터미널 Claude 칸도, 그 칸의 claude 가 명부에 써 둔 대화 ID 가 있고 그 대화 파일이 있으면
-터미널 없는 칸으로 연다(`--continue` 로 돌던 칸이나 파일을 못 찾는 칸은 예전처럼 터미널로). 머리줄의 `터미널로 열기` 는
-같은 대화를 터미널 칸으로 다시 열고 그 칸은 다음에 켜도 터미널로 남긴다 — `/config` 같은 터미널 메뉴가 필요할 때의 길이다.
-터미널 칸의 `터미널 없이` 는 반대로 옮긴다(claude 가 일하는 중에는 잠긴다).
+대화창으로 연다(`--continue` 로 돌던 칸이나 파일을 못 찾는 칸은 예전처럼 터미널로). Claude 칸 머리줄의 **[터미널][대화창]** 이
+같은 대화를 두 방식 사이에서 옮긴다. [터미널]로 옮긴 칸은 다음에 켜도 터미널로 남는다 — `/config` 같은 터미널 메뉴가 필요할
+때의 길이다. [대화창]은 claude 가 일하는 중이거나 아직 대화 id 를 알려 주지 않았으면 잠기고, 까닭을 풀이에 보인다.
+
+대화창 입력바 위 줄 오른쪽의 폴더 칩을 누르면 한 단계 위(`..`), 바로 아래 폴더들, 다른 폴더 고르기가 뜬다. 고르면 그 폴더의
+새 대화로 다시 연다(claude 는 대화를 폴더별로 적어 같은 대화를 옮겨 갈 수 없다). 주고받은 말이 있으면 한 번 묻는다.
+새 대화는 `/clear` 다.
 
 터미널 없는 칸은 아직 칸 사이 협업(다른 칸이 글을 넣거나 화면을 엿보는 것)을 받지 않는다. 목록 아래 `셸만` 은 명령 없이 셸로 열고,
 **이 컴퓨터에 실제로 있는 셸만** 뜬다(명령 프롬프트 · Windows PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 것을 골랐을 때 칸이
@@ -370,10 +373,9 @@ PSReadLine에서 영문·한글·긴 줄 삭제와 셀 배경색, 다른 프로�
 10월 16일 사용자용 고정 경로 앱·CLI에 함께 반영했다.
 새 칸의 모델 변경·`/status` 후 연속 대화는 격리 테스트로 확인했다. 배포 상태는 작업 정리 4·19절을 따른다.
 
-대화창은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-view.test.mjs scripts/chat-live.test.mjs`를
-실행한다. 앞의 것은 명부 → 대화창, 새 대화일 때 터미널 유지, 명부가 바뀌면 따라가기, 입력바의 말이 claude 에
-제출되어 대화 파일에 적히는지를 본다. 뒤의 것은 앱의 루프백 프록시 뒤에 **가짜 Anthropic 서버**를 두어,
-실제 claude 의 답이 쓰이는 동안 대화창에 흐르고 끝나면 대화 파일의 답으로 겹침 없이 넘어가는지 본다.
+쓰이는 중인 답은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`로 `node --test scripts/chat-live.test.mjs`를
+실행한다. 앱의 루프백 프록시 뒤에 **가짜 Anthropic 서버**를 두어, 대화창 칸의 실제 claude 의 답이 쓰이는 동안
+대화창에 흐르고 끝나면 대화 파일의 답으로 겹침 없이 넘어가는지 본다. 터미널 칸 위 덮개를 보던 `chat-view` 는 덮개와 함께 걷었다.
 격리 claude 는 승인한 API 키를 끝 20글자로 기억하므로 설정에 그 값도 넣는다(없으면 "Not logged in").
 claude 2.1.285 부터는 셋이 더 바뀌었다. 시작할 때 "auto 모드를 기본으로 할까" 창을 띄우므로 `hasSeenAutoDefaultNudge`
 로 미리 답해 둔다(안 하면 그 창이 TUI 를 막아 보낸 말이 제출되지 않는다). 격리 설정 폴더에도 제 명부(`sessions/<pid>.json`)를
@@ -386,17 +388,18 @@ claude 2.1.285 부터는 셋이 더 바뀌었다. 시작할 때 "auto 모드를 
 않는지도 본다. 가짜 서버도 서브에이전트를 본문이 아니라 `x-claude-code-agent-id` 헤더로 가른다.
 
 기존 PTY Codex 칸은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로 `node --test scripts/codex-chat.test.mjs`를 실행한다.
-별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 훅 신뢰 화면·대화창 덮개가 없는지, 두 칸 터미널 대화,
+별도 `CODEX_HOME`과 로컬 Responses 서버를 사용해 훅 신뢰 화면이 없는지, 두 칸 터미널 대화,
 `/new`, 네이티브 이어가기와 종료 후 셸 유지를 검증한다. 대화창 자체는 아래의 `codex-stream-view`가 맡는다.
 
 켤 때의 전환과 두 방향 옮기기는 같은 두 변수로 `node --test scripts/stream-restore.test.mjs` 를 실행한다. 대화 파일이
-있는 칸은 터미널 없이, 없는 칸은 터미널로 열리는지, 옮길 때마다 같은 대화를 쥔 claude 가 한쪽만 남는지, 터미널로
-되돌린 칸이 다시 켜도 터미널로 남는지 본다.
+있는 칸은 대화창으로, 없는 칸은 터미널로 열리는지, 머리줄 [터미널][대화창]으로 옮길 때마다 같은 대화를 쥔 claude 가
+한쪽만 남는지, 터미널 칸에 대화창이 덮이지 않는지, 터미널로 되돌린 칸이 다시 켜도 터미널로 남는지 본다.
 
 터미널 없는 Claude 칸은 같은 두 변수로 `node --test scripts/chat-stream.test.mjs` 를 실행한다. 앱 프록시 뒤에 가짜
 Anthropic 서버를 두고 실제 claude 를 `-p` stream-json 통로로 띄워, 터미널 없이 말이 오가는지, 권한 카드의 허락·거절이
 실제 실행을 가르는지, 선택지 질문의 답이 claude 에 가는지, 중단·모델 바꾸기, 다시 켰을 때 같은 대화로 이어 열리는지,
-칸을 닫으면 claude 도 내려가는지 본다. `CHIISPACE_TEST_SCREENSHOT=1` 이면 카드가 뜬 자리를 자체 창에서 찍는다.
+`/` 명령 목록, `/clear`, 폴더 칩(물어보고 그 폴더의 새 대화로 다시 열기), 칸을 닫으면 claude 도 내려가는지 본다.
+`CHIISPACE_TEST_SCREENSHOT=1` 이면 카드가 뜬 자리를 자체 창에서 찍는다.
 통로 해석은 `scripts/claude-stream.test.mjs` 의 단위 검증이다.
 
 터미널 없는 Codex 칸은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CODEX`로

@@ -11,18 +11,19 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ---
 
-## 현재 상태 — 2026-10-16
+## 현재 상태 — 2026-10-17
 
-칸은 두 종류다.
+칸은 두 방식이다. 머리줄의 **[터미널][대화창]** 으로 같은 대화를 오간다(Claude 칸).
 
-- **터미널 칸(PTY).** xterm + `kasa-pty` ConPTY 로 셸·Claude TUI·Codex CLI 를 그대로 돌린다. Claude 가 돌면 그 대화 파일을
-  그린 대화창(`ChatPane`)을 터미널 위에 덮는다. 껐다 켜면 칸마다 명부의 대화 id 로 `claude --resume <id>`, 없으면
-  `--continue`, Codex 는 `codexLaunch` 로 `resume --last` 를 자동 실행한다. 기존 PTY Codex 의 훅·덮개는 10월 16일에 걷었다
-  ([작업 정리 22절](docs/WORKLOG.md#22-10월-9일-추가-기존-pty-codex-훅과-대화창-제거)).
-- **터미널 없는 칸.** 옆칸 `새 대화` 에서 고른 상대. Claude 는 `claude -p` stream-json 통로(`claude_chat.rs`), Codex 는 로컬
-  `codex app-server --listen stdio://`(`codex_stream.rs`)로 돈다. 권한·질문은 카드, 입력바 위 줄은 `StreamBar` 하나다.
-  켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 열고, 머리줄 단추로 두 방식 사이를 오간다
+- **터미널.** xterm + `kasa-pty` ConPTY 로 셸·Claude TUI·Codex CLI 를 그대로 돌린다. 터미널 위에 대화창을 덮지 않는다
+  (덮개는 10월 17일 걷었다, [작업 정리 25절](docs/WORKLOG.md#25-10월-17일-추가-칸은-터미널대화창-둘--덮개-걷기와-폴더-칩)).
+  껐다 켜면 칸마다 명부의 대화 id 로 `claude --resume <id>`, 없으면 `--continue`, Codex 는 `codexLaunch` 로 `resume --last` 를
+  자동 실행한다.
+- **대화창(터미널 없는 칸).** 옆칸 `새 대화` 에서 고른 상대. Claude 는 `claude -p` stream-json 통로(`claude_chat.rs`), Codex 는 로컬
+  `codex app-server --listen stdio://`(`codex_stream.rs`)로 돈다. 권한·질문은 카드, 입력바 위 줄은 `StreamBar` 하나, `/` 명령 목록,
+  줄 오른쪽 폴더 칩. 켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 연다
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
+- **방향(사용자):** TUI 에만 있는 기능을 대화창으로 다 옮기면 대화창을 메인으로 한다. 새 기능은 대화창에 넣는다.
 
 - **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 16일 22:44(`4820cb7`, `/` 명령 목록판).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
@@ -81,18 +82,19 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 - **터미널 없는 칸(`ClaudeStreamPane`·`CodexStreamPane`)은 PTY 폴링(`stat`)에 섞지 않는다.** 머리줄·옆칸은 `paneView` 로 채워
   보여 주기만 한다. `stat` 에 넣으면 복원 명령 누적(`procs`)·명부 조회가 그 칸을 셸 칸으로 다룬다.
   권한 답에는 `toolUseID`(요청의 `tool_use_id`)를 꼭 싣는다 — 빠지면 claude 가 답을 못 알아듣고 영영 기다린다.
-  대화 파일 쪽의 "터미널에서 고르기" 카드는 이 칸에서 그리지 않는다(갈 터미널이 없다). 앱을 끄면 입력이 닫혀
+  대화 파일 쪽의 지난 질문은 그리지 않는다(답할 질문은 통로가 카드로 준다). 앱을 끄면 입력이 닫혀
   claude 도 스스로 내려가고, 칸을 닫으면 `claude_chat_stop` 이 거둔다.
-- **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · [상태] [새 대화]
-  순서와 상태 표 항목을 거기서 정한다. 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
+- **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · [폴더] [상태]
+  순서와 상태 표 항목을 거기서 정한다. 새 대화는 `/clear` 다(줄의 단추는 10월 17일 걷었다). 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
   Claude 추론 수준은 `apply_flag_settings`(이 세션에만 거는 층)로 건다 — 사용자 설정 파일을 고치지 않는다.
   입력바 `/` 명령의 모델·추론·권한·상태·새 대화도 이 줄의 항목에서 만든다(`barCommands`). 따로 적으면 줄과 명령이 어긋난다.
   Claude 칸의 나머지 명령은 claude 가 초기화 답(`commands`)으로 준 것만 띄운다 — 앱이 명령 목록을 적어 두지 않는다.
-- **기존 PTY Claude 칸의 대화창은 터미널 위에 덮기만 한다**(`ChatPane`). 터미널을 걷거나 숨기면 결정 1·2번이 깨진다.
-  포커스는 `focusPane` 으로 준다 — 터미널에만 주면 덮인 xterm 이 보이지 않는 곳에서 키를 먹는다.
-  **대화 파일이 없는 새 대화는 덮지 않는다.** 폴더 신뢰·API 키·bypass 경고 같은 시작 대화상자는 TUI 에만 있다.
-  메뉴 명령·선택지 카드로 간 터미널(`termView "auto"`)은 대화 파일이 자라면 돌아온다 — claude 는 메뉴를
-  닫을 때만 명령·결과를 적는다. 기준 크기는 **보내기 직전에** 잰다. 직접 고른 터미널(`true`)은 두고 돌아오지 않는다.
+- **터미널 칸 위에 대화창을 덮지 않는다**(10월 17일 덮개를 걷었다). 대화로 보는 길이 둘(덮개·대화창 칸)이면 기능 차이가
+  계속 나고, 사용자가 머리줄 단추 셋("터미널로 열기"·"대화로/터미널로"·"터미널 없이")을 구별하지 못했다. 같은 대화를
+  머리줄 [터미널][대화창]으로 옮긴다. 옮기지 못할 때(명부 id 가 아직 없음·일하는 중)는 단추를 잠그고 까닭을 풀이에 둔다.
+  포커스는 `focusPane`(`focus.ts`)이 칸 종류로 고른다 — 대화창 칸은 입력바, 터미널 칸은 xterm.
+- **폴더 칩에서 폴더를 바꾸면 그 폴더의 새 대화다.** claude 는 대화를 폴더별로 적어 같은 대화를 다른 폴더로 옮겨 이어 갈 수
+  없다. 주고받은 말이 있으면 바꾸기 전에 한 번 묻는다. 지금 대화 파일은 지우지 않는다. 칸은 폴더를 키로 다시 그려 통로를 새로 연다.
 - **프록시(`proxy.rs`)는 인증 헤더를 넘기기만 하고 기록하지 않는다.** 칸 셸에 `ANTHROPIC_BASE_URL` 과
   함께 `ENABLE_TOOL_SEARCH=true` 를 준다 — 없으면 claude 가 비공식 주소라며 도구 미뤄 싣기를 꺼서
   MCP 도구가 통째로 실린다(77개 대 14개로 확인). 압축을 청하지 않는다. `CHIISPACE_PROXY=0` 이면 끈다.
@@ -119,7 +121,9 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 ### 남은 범위
 
 - 터미널 없는 칸의 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력, 로그인·인증 UI.
-  `/config` 등 TUI 전용 메뉴는 터미널 없는 칸에서 지원하지 않는다 — 머리줄 "터미널로 열기"로 같은 대화를 터미널에서 연다.
+  `/config`·`/resume` 등 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를 터미널에서 연다.
+  이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다. 지난 대화 고르기(`/resume`)가 생기면 폴더를 바꿔
+  두고 온 대화로도 돌아갈 수 있다.
 - 실모델 자연어 위임, Claude 팀 연동, 에이전트 자동 생성·지속 작업은 별도 범위다.
 - 두 앱의 정확한 동시 기동 타임아웃은 미진단이다(검증은 한 번에 하나씩 돈다). 순차 기동 통과와 구별한다.
 - 창 분리·설정·테마 전환·터미널 검색은 미구현이다.
@@ -368,10 +372,10 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 세션 저장/복원을 쥐고 아래를 조립한다 |
-| `ui/Pane.tsx` | 칸 하나 — 머리줄, 터미널·터미널 없는 대화창·대화창 덮개 중 무엇을 그릴지 |
+| `ui/Pane.tsx` | 칸 하나 — 머리줄([터미널][대화창]), 터미널 또는 대화창 중 무엇을 그릴지 |
 | `ui/usePaneAgents.ts` | 터미널 칸 폴링(`stat`) · 복원 명령 누적(`procs`·`seeds`) · 명부의 대화 id(`chatIds`) |
 | `ui/useStreams.ts` | 터미널 없는 칸(`streams`) · 같은 대화를 터미널 칸과 오가기 · 머리줄용 `paneView` |
-| `ui/useChatOverlay.ts` | 터미널 위 대화창을 언제 덮고 보이는가(`termView`) · `focusPane` · `termOf` |
+| `ui/focus.ts` | 칸에 포커스 주기(`focusPane` — 대화창 칸은 입력바, 터미널 칸은 xterm) · `termOf` |
 | `ui/useShortcuts.ts` · `ui/useDrag.ts` · `ui/useTabCleanup.ts` | 단축키(캡처 단계) · 경계선·칸 끌기 · 칸이 사라질 때 배치 정리(부고 모으기) |
 | `ui/saved.ts` | 세션 파일 읽기·쓰기, 켤 때 옮길 칸 고르기 — 순수 함수, `saved.test.mjs` |
 | `ui/Sidebar.tsx` | 옆칸 — 탭 묶음과 칸 목록, 새 대화 상대(연락처) 목록. 그리기만 하고 판단은 App 이 준다 |
@@ -379,11 +383,11 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/session.ts` | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
 | `ui/layout.ts` | pane 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |
-| `ui/Chat.tsx` · `ui/ChatRows.tsx` · `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답·덮개 · 말풍선과 카드 · 입력바 |
+| `ui/Chat.tsx` · `ui/ChatRows.tsx` · `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
 | `ui/SubAgents.tsx` · `ui/SubagentView.tsx` | 서브에이전트 진행 줄(`chat:sub`) · 그 대화 전체 보기 |
 | `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·추론·권한 모드, 통로 해석(단위 검증) |
 | `ui/CodexStreamPane.tsx` · `ui/codex-stream.ts` | 터미널 없는 Codex 칸 — 승인·질문·설정, 스트림 해석 |
-| `ui/StreamBar.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·상태·새 대화 |
+| `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·폴더·상태 · 폴더 칩(`fs_dirs`) |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `ui/app.css` · `ui/theme.css` · `ui/chat.css` | 치이카와 테마 |

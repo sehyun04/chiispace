@@ -1,4 +1,4 @@
-/** 칸 하나 — 머리줄과, 그 칸이 무엇이냐에 따라 터미널·터미널 없는 대화창·터미널 위 대화창 덮개.
+/** 칸 하나 — 머리줄과, 그 칸이 무엇이냐에 따라 터미널 또는 대화창(터미널 없는 칸).
  *
  *  그리기만 한다. 무엇을 그릴지와 눌렀을 때 무엇을 할지는 App 이 준다 — 칸 모양을 손보는 일과
  *  얼개(배치·세션·폴링)를 손보는 일이 같은 파일에서 부딪히지 않게 하려는 것이다.
@@ -8,14 +8,8 @@ import { bySlug, DanceFace, Face, faceUrl } from "./roster";
 import { isAgentWorking, type PaneStat, type Seed } from "./session";
 import type { StreamChat } from "./stream-session";
 import { Term } from "./Term";
-import { ChatPane } from "./Chat";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { CodexStreamPane } from "./CodexStreamPane";
-import { terminalCommands } from "./palette";
-import { effortLabel } from "./StreamBar";
-
-// TUI 에 무엇이 있는지 물을 길이 없어 고정 목록이다. 칸마다 새로 만들 까닭이 없다.
-const TERMINAL_COMMANDS = terminalCommands(effortLabel);
 
 type CodexChat = Extract<StreamChat, { agent: "codex" }>;
 
@@ -28,7 +22,7 @@ export type PaneProps = {
   fontSize: number;
   /** 머리줄·옆칸이 보는 상태 — 터미널 없는 칸까지 채운 것. */
   view?: PaneStat;
-  /** PTY 폴링 그대로. 터미널 위 대화창은 이것만 본다. */
+  /** PTY 폴링 그대로. 터미널 칸의 claude 를 보는 판단은 이것만 본다. */
   stat?: PaneStat;
   slug?: string;
   /** 사용자가 붙인 이름, 자동 이름, 둘 다 없을 때의 표시. */
@@ -38,9 +32,8 @@ export type PaneProps = {
   renaming: boolean;
   stream?: StreamChat;
   streamBusy: boolean;
+  /** 명부가 알려 준 이 칸 claude 의 대화 id. 있어야 같은 대화를 대화창으로 옮길 수 있다. */
   chatId?: string;
-  termView?: boolean | "auto";
-  chat: { mount: boolean; shown: boolean };
   seed?: Seed;
   onSelect: () => void;
   onDragStart: (stage: HTMLElement) => void;
@@ -49,17 +42,14 @@ export type PaneProps = {
   onCancelRename: () => void;
   onClose: () => void;
   onToTerminal: () => void;
-  onToggleView: () => void;
   onToStream: () => void;
-  onChatReady: (ready: boolean) => void;
-  onShowTerm: (auto?: boolean) => void;
-  onBack: () => void;
   // 아래는 칸 id 를 받는 안정적인 콜백이다 — 매번 새로 만들면 그 칸들이 통로를 다시 붙인다.
   onTermTitle: (id: string, title: string) => void;
   onStreamTitle: (id: string, title: string) => void;
   onStreamBusy: (id: string, busy: boolean) => void;
   onStreamSession: (id: string, session: string) => void;
   onCodexChange: (id: string, patch: Partial<CodexChat>) => void;
+  onFolder: (id: string, agent: StreamChat["agent"], cwd: string) => void;
 };
 
 export function Pane(p: PaneProps) {
@@ -102,36 +92,20 @@ export function Pane(p: PaneProps) {
           </span>
         )}
         {view?.agent ? <span className="chip">{view.agent}</span> : null}
-        {p.stream?.agent === "claude" ? (
-          <button
-            className="view"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={p.onToTerminal}
-            disabled={p.streamBusy}
-            title="같은 대화를 터미널 칸으로 다시 연다 — /config 같은 터미널 메뉴가 필요할 때"
-          >
-            터미널로 열기
-          </button>
-        ) : null}
-        {p.chatId && view?.agent === "claude" ? (
-          <button
-            className="view toggle"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={p.onToggleView}
-          >
-            {p.termView ? "대화로" : "터미널로"}
-          </button>
-        ) : null}
-        {!p.stream && p.chatId && stat?.agent === "claude" ? (
-          <button
-            className="view"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={p.onToStream}
-            disabled={isAgentWorking(stat)}
-            title="같은 대화를 터미널 없이 다시 연다"
-          >
-            터미널 없이
-          </button>
+        {p.stream?.agent === "claude" || (!p.stream && stat?.agent === "claude") ? (
+          <ModeSwitch
+            chat={!!p.stream}
+            toTerminal={p.streamBusy ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다" : null}
+            toChat={
+              !p.chatId
+                ? "claude 가 이 대화를 아직 알려 주지 않았다 — 첫 말을 주고받으면 옮길 수 있다"
+                : isAgentWorking(stat)
+                  ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다"
+                  : null
+            }
+            onTerminal={p.onToTerminal}
+            onChat={p.onToStream}
+          />
         ) : null}
         <button
           className="x"
@@ -159,12 +133,14 @@ export function Pane(p: PaneProps) {
         )
       ) : null}
       {p.stream?.agent === "codex" ? (
-        <CodexStreamPane id={id} chat={p.stream as CodexChat}
+        // 폴더를 바꾸면 그 폴더의 새 대화다. 칸을 새로 그려 통로도 새로 연다.
+        <CodexStreamPane key={p.stream.cwd} id={id} chat={p.stream as CodexChat}
           slug={slug} name={who}
           focused={p.on}
-          onTitle={p.onStreamTitle} onBusy={p.onStreamBusy} onChange={p.onCodexChange} />
+          onTitle={p.onStreamTitle} onBusy={p.onStreamBusy} onChange={p.onCodexChange} onFolder={p.onFolder} />
       ) : p.stream ? (
         <ClaudeStreamPane
+          key={p.stream.cwd}
           id={id}
           cwd={p.stream.cwd}
           session={p.stream.session}
@@ -174,6 +150,7 @@ export function Pane(p: PaneProps) {
           onTitle={p.onStreamTitle}
           onBusy={p.onStreamBusy}
           onSession={p.onStreamSession}
+          onFolder={p.onFolder}
         />
       ) : (
         <Term
@@ -186,26 +163,6 @@ export function Pane(p: PaneProps) {
           seed={p.seed}
         />
       )}
-      {/* 터미널 위에 덮는다. 터미널은 그 아래서 크기를 지킨 채 살아 있다. */}
-      {p.chat.mount ? (
-        <ChatPane
-          key={`claude:${p.chatId}`}
-          agent="claude"
-          shown={p.chat.shown}
-          root={stat?.cwd ?? p.root ?? ""}
-          id={p.chatId!}
-          paneId={id}
-          slug={slug}
-          name={who}
-          live={stat?.agent === "claude"}
-          working={isAgentWorking(stat)}
-          onReady={p.onChatReady}
-          onShowTerm={p.onShowTerm}
-          away={p.termView === "auto"}
-          onBack={p.onBack}
-          commands={TERMINAL_COMMANDS}
-        />
-      ) : null}
     </section>
   );
 }
@@ -244,5 +201,34 @@ function RenameInput({ name, onCommit, onCancel }: {
         }
       }}
     />
+  );
+}
+
+/** 머리줄의 [터미널][대화창]. 같은 대화를 두 방식 사이에서 옮긴다 — 터미널은 TUI 그대로, 대화창은
+ *  터미널 없는 칸. 지금 방식이 눌린 쪽이다. 못 옮길 때는 그 까닭을 단추 풀이에 둔다(`null` 이면 옮길 수 있다). */
+function ModeSwitch({ chat, toTerminal, toChat, onTerminal, onChat }: {
+  chat: boolean;
+  toTerminal: string | null;
+  toChat: string | null;
+  onTerminal: () => void;
+  onChat: () => void;
+}) {
+  const side = (label: string, on: boolean, why: string | null, go: () => void, hint: string) => (
+    <button
+      aria-pressed={on}
+      className={on ? "on" : undefined}
+      disabled={!on && !!why}
+      title={on ? `지금 ${label}` : (why ?? hint)}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={on ? undefined : go}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <span className="mode" role="group" aria-label="보는 방식">
+      {side("터미널", !chat, toTerminal, onTerminal, "같은 대화를 터미널로 연다 — /config 같은 터미널 메뉴가 필요할 때")}
+      {side("대화창", chat, toChat, onChat, "같은 대화를 대화창으로 연다")}
+    </span>
   );
 }

@@ -40,8 +40,9 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
   const shell = path.join(process.env.SystemRoot, "System32", "cmd.exe");
   writeFileSync(state, JSON.stringify({
     tabs: [{ key: "t0", focus: "%0", root: project, shell, layout: { kind: "leaf", id: "%0" } }],
-    active: 0, nextPane: 1, nextTab: 1, restoreMode: "native-continue",
-    procs: { "%0": { cmd: "claude --continue", auto: true, cwd: project } },
+    active: 0, nextPane: 1, nextTab: 1, restoreMode: "native-continue", procs: {},
+    // 대화창 칸으로 그 대화를 이어 연다. 10월 17일까지는 터미널 칸의 claude 위에 덮은 대화창으로 봤다.
+    streams: { "%0": { agent: "claude", session: sid, cwd: project } },
   }));
 
   const probe = "/" + randomUUID();
@@ -124,12 +125,10 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     try {
       const slot = document.querySelector('[data-pane="%0"]');
       const over = slot?.querySelector('.chat-over');
-      const b = window.__terms?.['%0']?.buffer.active;
-      const pane = b ? Array.from({length:b.length}, (_, y) => b.getLine(y)?.translateToString(true) ?? '') : null;
       const input = over?.querySelector('.composer textarea');
       const texts = (sel) => [...(over?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
       const dom = {
-        shown: !!over && getComputedStyle(over).visibility !== 'hidden',
+        shown: !!input && !input.disabled,
         theirs: texts('.msg:not(.mine):not(.live) .bubble'),
         live: texts('.msg.live .bubble'),
         subs: [...(over?.querySelectorAll('.sub') ?? [])].map(e => ({
@@ -149,9 +148,8 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
           };
         })(),
       };
-      const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
+      const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
-        if (c.term) window.__terms?.['%0']?.input(c.term);
         if (c.click) over?.querySelector(c.click)?.click();
         // 사람이 Esc 를 누른 것처럼 지금 포커스가 있는 곳에서 올린다.
         if (c.esc) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -165,41 +163,16 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     } finally { pending = false; }
   }, 100); return 'isolated sub test'; })()`;
 
-  // pid -> 부모 pid. 명부는 실제 claude 처럼 잎(실행기 아래 자식)에만 쓴다.
-  const claudePids = () => {
-    const raw = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      "(Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | ForEach-Object { \"$($_.ProcessId):$($_.ParentProcessId)\" }) -join ','"],
-      { encoding: "utf8", windowsHide: true }).stdout.trim();
-    return new Map(raw ? raw.split(",").map(s => s.split(":").map(Number)) : []);
-  };
-  const claudeBefore = claudePids();
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
-  const screen = () => (latest.pane ?? []).join("\n");
   const dom = () => latest.dom ?? {};
   const until = async (ok, n = 300) => { for (let i = 0; i < n && !ok(); i++) await delay(100); return ok(); };
-  const ESC = String.fromCharCode(27), CR = String.fromCharCode(13);
   try {
-    let settled = false;
-    for (let i = 0; i < 900 && !screen().includes("SUB_READY_MARK"); i++) {
-      const s = screen();
-      if (!settled && /Do you want to use this API key/.test(s)) {
-        if (/❯ No/.test(s)) commands.push({ term: ESC + "[A" });
-        else if (/❯ Yes/.test(s)) { commands.push({ term: CR }); settled = true; }
-      }
-      await delay(100);
-    }
-    assert.match(screen(), /SUB_READY_MARK/, "저장된 대화가 뜨지 않음");
-    let pids = [];
-    for (let i = 0; i < 60 && !pids.length; i++) { const now = claudePids(); const fresh = [...now.keys()].filter(v => !claudeBefore.has(v)); pids = fresh.filter(p => !fresh.some(q => now.get(q) === p)); if (!pids.length) await delay(500); }
-    assert.ok(pids.length, "새로 뜬 claude 가 없음");
-    mkdirSync(path.join(home, "sessions"), { recursive: true });
-    for (const pid of pids) writeFileSync(path.join(home, "sessions", pid + ".json"), JSON.stringify({ pid, sessionId: sid, cwd: project, kind: "interactive" }));
-    assert.ok(await until(() => dom().shown && dom().theirs?.some(t => t.includes("SUB_READY_MARK"))), "대화창이 뜨지 않음: " + JSON.stringify(dom()));
+    assert.ok(await until(() => dom().shown && dom().theirs?.some(t => t.includes("SUB_READY_MARK"))), "저장된 대화가 대화창에 안 뜸: " + JSON.stringify(dom()));
 
     commands.push({ send: "CHAT_SUB_ASK" });
     // 서브에이전트가 일하는 동안: 그 한 줄이 보이고, 본 대화 말풍선에는 섞이지 않는다.
     const working = () => dom().subs?.some(s => (s.what ?? "").includes("SUB_WORKING"));
-    assert.ok(await until(working, 400), "서브에이전트의 일이 대화창에 보이지 않음: " + JSON.stringify({ dom: dom(), seen }) + "\n" + screen().slice(-800));
+    assert.ok(await until(working, 400), "서브에이전트의 일이 대화창에 보이지 않음: " + JSON.stringify({ dom: dom(), seen }));
     const row = dom().subs.find(s => (s.what ?? "").includes("SUB_WORKING"));
     assert.equal(row.state, "쓰는 중");
     assert.match(row.label ?? "", /SUB_TASK|로그/, "서브에이전트에 맡긴 일이 이름으로 안 보임: " + JSON.stringify(row));
@@ -227,7 +200,8 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     assert.ok(await until(() => !dom().subs?.length, 300), "서브에이전트가 끝났는데 줄이 안 걷힘: " + JSON.stringify({ dom: dom(), seen }));
     assert.ok(await until(() => dom().theirs?.some(t => t.includes("MAIN_AFTER_SUB")), 300), "본 대화의 답이 안 섬: " + JSON.stringify({ dom: dom(), seen }));
     assert.ok(![...dom().theirs, ...dom().live].some(t => t.includes("SUB_WORKING") || t.includes("SUB_DONE")), "서브에이전트의 글이 본 대화 말풍선에 섞였음");
-    assert.ok(!/Interrupted/i.test(screen()), "서브에이전트 화면을 닫은 Esc 가 claude 로 샜음:\n" + screen().slice(-600));
+    // 새면 입력바의 Esc(중단)가 되어 대화에 "여기서 중단했다"가 선다.
+    assert.ok(!dom().notes?.some(t => t.includes("중단")), "서브에이전트 화면을 닫은 Esc 가 claude 로 샜음: " + JSON.stringify(dom().notes));
     // 끝난 뒤에도 "… 부름" 줄을 누르면 그 서브에이전트의 대화를 다시 연다(부른 호출 id 로 찾는다).
     commands.push({ click: ".note.launch" });
     assert.ok(await until(() => dom().view?.bubbles?.some(t => t.includes("SUB_DONE")), 100), "부름 줄로 서브에이전트 대화가 안 열림: " + JSON.stringify(dom()));

@@ -10,11 +10,13 @@ import { barCommands, mergeCommands, type PaletteCommand } from "./palette";
 
 type Session = Extract<StreamChat, { agent: "codex" }>;
 type Event = { id: string; run: string; message: Data };
-export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy, onChange }: {
+export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy, onChange, onFolder }: {
   id: string; chat: Session; slug?: string; name?: string; focused: boolean;
   onTitle: (id: string, title: string) => void;
   onBusy: (id: string, busy: boolean) => void;
   onChange: (id: string, patch: Partial<Session>) => void;
+  /** 폴더 칩에서 다른 폴더를 골랐다. 부른 쪽이 그 폴더의 새 대화로 칸을 다시 연다. */
+  onFolder: (id: string, agent: "codex", cwd: string) => void;
 }) {
   const [state, setState] = useState<CodexStream>(initialCodex);
   const latest = useRef(state);
@@ -188,8 +190,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     },
     statusOpen: status,
     onStatus: () => setStatus(v => !v),
-    onNew: () => { void transport.send("/new").catch(() => {}); },
-    busy: disabled,
+    folder: { path: chat.cwd, fresh: !state.entries.length, disabled, onPick: to => onFolder(id, "codex", to) },
     statusClass: "codex-status",
     status: [
       ["모델", modelLabel(selected?.displayName, settings.model)],
@@ -201,7 +202,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     ],
   };
   const toolbar = <StreamBar {...bar} />;
-  const commands = mergeCommands(barCommands(bar), CODEX_COMMANDS);
+  const commands = mergeCommands(barCommands({ ...bar, onNew: () => { void transport.send("/new").catch(() => {}); }, busy: disabled }), CODEX_COMMANDS);
   return <>
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}

@@ -54,6 +54,7 @@ export function ClaudeStreamPane({
   onTitle,
   onBusy,
   onSession,
+  onFolder,
 }: {
   id: string;
   cwd: string;
@@ -67,11 +68,15 @@ export function ClaudeStreamPane({
   onBusy: (id: string, busy: boolean) => void;
   /** claude 가 다른 대화로 넘어갔다(`/clear`). 부른 쪽은 그 id 를 이 칸의 대화로 적는다. */
   onSession: (id: string, session: string) => void;
+  /** 폴더 칩에서 다른 폴더를 골랐다. 부른 쪽이 그 폴더의 새 대화로 칸을 다시 연다. */
+  onFolder: (id: string, agent: "claude", cwd: string) => void;
 }) {
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(false);
   // 대화 파일이 아직 없는 새 대화인가. "여는 중" 대신 "새 대화"를 보여 준다.
   const [fresh, setFresh] = useState(false);
+  // 이 대화에서 주고받은 말이 있는가. 폴더를 바꾸면 새 대화라 그 전에 물을지 가른다.
+  const [talked, setTalked] = useState(false);
   // 다시 켜기를 누르면 바뀐다. 이 값이 바뀌면 통로를 새로 연다.
   const [boot, setBoot] = useState(0);
   const titled = useRef(false);
@@ -135,6 +140,7 @@ export function ClaudeStreamPane({
       const resume = await invoke<number>("claude_transcript_size", { root: cwd, id: session }).then((n) => n > 0, () => false);
       if (!live) return;
       setFresh(!resume);
+      setTalked(resume);
       titled.current = resume;
       try {
         await invoke("claude_chat_start", { id, cwd, session, resume });
@@ -182,6 +188,7 @@ export function ClaudeStreamPane({
       send: async (text) => {
         await send(userLine(text));
         setSt(sentStream);
+        setTalked(true);
         const title = titled.current ? null : titleFrom(text);
         if (title) {
           titled.current = true;
@@ -250,13 +257,7 @@ export function ClaudeStreamPane({
     },
     statusOpen,
     onStatus: toggleStatus,
-    onNew: () =>
-      void transport.send("/clear").then(() => {
-        // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
-        titled.current = false;
-        onTitle(id, "새 대화");
-      }, () => {}),
-    busy: !alive || st.busy,
+    folder: { path: cwd, fresh: !talked, disabled: !alive || st.busy, onPick: (to) => onFolder(id, "claude", to) },
     status: [
       ["모델", modelLabel(model?.displayName, st.model ?? model?.resolvedModel)],
       ["추론", st.effort ? effortLabel(st.effort) : "기본"],
@@ -267,7 +268,14 @@ export function ClaudeStreamPane({
     ],
   };
   const toolbar = <StreamBar {...bar} />;
-  const commands = mergeCommands(barCommands(bar), agentCommands(st.commands));
+  const onNew = () =>
+    void transport.send("/clear").then(() => {
+      // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
+      titled.current = false;
+      setTalked(false);
+      onTitle(id, "새 대화");
+    }, () => {});
+  const commands = mergeCommands(barCommands({ ...bar, onNew, busy: !alive || st.busy }), agentCommands(st.commands));
 
   const extra = (
     <>

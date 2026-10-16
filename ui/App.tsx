@@ -1,7 +1,7 @@
 /** 얼개 — 탭·배치와 세션 저장·복원을 쥐고, 나머지는 제 파일에 맡겨 조립한다.
  *
  *  칸 하나를 그리는 일은 `Pane`, 터미널 칸의 상태 폴링·복원 명령·명부는 `usePaneAgents`,
- *  터미널 없는 칸은 `useStreams`, 터미널 위 대화창과 포커스는 `useChatOverlay`,
+ *  터미널 없는 칸(대화창)은 `useStreams`, 포커스는 `focus`,
  *  단축키·끌기·칸 정리는 각 `use*` 가 맡는다. 여기를 고칠 일이 줄어야 동시에 일하는 세션끼리 덜 부딪힌다. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -23,7 +23,7 @@ import { usePaneBridge } from "./bridge";
 import { bootStreams, leavesOf, readSaved, savedJson, type Tab } from "./saved";
 import { usePaneAgents } from "./usePaneAgents";
 import { useStreams } from "./useStreams";
-import { useChatOverlay } from "./useChatOverlay";
+import { useFocus } from "./focus";
 import { useShortcuts } from "./useShortcuts";
 import { usePaneDrag, useSeamDrag } from "./useDrag";
 import { useTabCleanup } from "./useTabCleanup";
@@ -71,8 +71,7 @@ export default function App() {
   const agents = usePaneAgents();
   const { stat, procs, chatIds } = agents;
   const streams = useStreams(booted, tabs, stat);
-  const overlay = useChatOverlay(streams.streams, stat, chatIds);
-  const { focusPane } = overlay;
+  const { focusPane, chats } = useFocus(streams.streams);
   const [casting, setCasting] = useCasting(live);
   const curRoot = cur?.root ?? null;
   const git = useGit(curRoot);
@@ -297,7 +296,7 @@ export default function App() {
   }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streamMap, keepTerm]);
 
   useTabCleanup(tabs, tabsNow, setTabs, setActive);
-  useShortcuts(cur, tabs.length, overlay.showsChat, {
+  useShortcuts(cur, tabs.length, chats, {
     split, closePane, newTab, pick, patch, setFontSize, setSideOpen, setActive,
   });
   const startSeam = useSeamDrag(active, setTabs);
@@ -306,9 +305,8 @@ export default function App() {
   // 숨은 textarea 가 포커스를 잃는다(결정 5번). Term 쪽 effect 는 focused prop 이 그대로라
   // 다시 돌지 않으므로 여기서 되돌린다. 이걸 안 하면 pane 을 옮긴 뒤 그 pane 에
   // 아무것도 못 친다 — 한글도 영문도 백스페이스도.
-  // 대화창이 덮이거나 걷힐 때도 다시 준다. 안 그러면 대화창이 막 뜬 칸에서
-  // 키가 여전히 그 아래 숨은 터미널로 들어간다.
-  const focusChat = overlay.chatState(cur?.focus).shown;
+  // 칸이 터미널과 대화창 사이를 오갈 때도 다시 준다. 안 그러면 키가 걷힌 쪽에 남는다.
+  const focusChat = !!streamMap[cur?.focus ?? ""];
   useEffect(() => {
     if (!booted) return;
     focusPane(cur?.focus);
@@ -316,11 +314,12 @@ export default function App() {
 
   const paneDrag = usePaneDrag(cur, patch);
 
-  /** 터미널 Claude 칸을 터미널 없는 칸으로 옮길 때 터미널 쪽에서 알던 것을 함께 놓는다. */
-  const release = useCallback((id: string) => {
-    agents.forget(id);
-    overlay.forget(id);
-  }, [agents.forget, overlay.forget]);
+  /** 대화창 칸의 폴더를 바꾼다. claude 는 대화를 폴더별로 적어 같은 대화를 다른 폴더로 옮길 수 없으므로
+   *  그 폴더에서 새 대화로 연다. 지금 대화 파일은 지우지 않는다. */
+  const changeFolder = useCallback((id: string, agent: AgentKind, cwd: string) => {
+    openStream(id, agent, cwd);
+    setPaneTitles((t) => ({ ...t, [id]: "새 대화" }));
+  }, [openStream]);
 
   const { paneView } = streams;
   return (
@@ -394,8 +393,6 @@ export default function App() {
                         stream={streamMap[s.id]}
                         streamBusy={!!streams.streamBusy[s.id]}
                         chatId={chatIds[s.id]}
-                        termView={overlay.termView[s.id]}
-                        chat={overlay.chatState(s.id)}
                         seed={agents.seeds[s.id]}
                         onSelect={() => {
                           setTabs((ts) =>
@@ -415,15 +412,13 @@ export default function App() {
                         }}
                         onClose={() => closePane(s.id)}
                         onToTerminal={() => streams.toTerminal(s.id, agents.seed)}
-                        onToggleView={() => overlay.toggleView(s.id)}
                         onToStream={() =>
+                          // 터미널 쪽에서 알던 것(복원 명령·명부 id)은 옮기는 순간 같이 놓는다.
                           void streams.toStream(
-                            s.id, chatIds[s.id], stat[s.id]?.cwd ?? procs.current[s.id]?.cwd ?? t.root ?? "", release,
+                            s.id, chatIds[s.id], stat[s.id]?.cwd ?? procs.current[s.id]?.cwd ?? t.root ?? "", agents.forget,
                           )
                         }
-                        onChatReady={(ready) => overlay.ready(s.id, ready)}
-                        onShowTerm={(auto) => overlay.showTerm(s.id, auto)}
-                        onBack={() => overlay.back(s.id)}
+                        onFolder={changeFolder}
                         onTermTitle={onTitle}
                         onStreamTitle={onStreamTitle}
                         onStreamBusy={streams.onBusy}

@@ -136,47 +136,6 @@ fn pty_write(
     s.send_bytes(data.as_bytes()).map_err(|e| e.to_string())
 }
 
-/// 대화창 입력바에서 쓴 말을 claude 에 넣고 제출한다.
-///
-/// 글과 Enter 를 한 덩어리로 보내면 claude 입력창은 그 전체를 붙여넣기로 받아
-/// Enter 가 줄바꿈이 되고 제출되지 않는다. 위임 쪽지(`collab_deliver`)가 이미
-/// 검증한 순서를 그대로 쓴다 — 켜져 있으면 bracketed paste 로 감싸 넣고, 잠깐
-/// 뒤에 Enter 를 따로 보낸다. 여러 줄 글도 그래야 한 번에 한 메시지로 들어간다.
-#[tauri::command]
-fn pty_submit(
-    collab: State<collab::Collab>,
-    panes: State<Panes>,
-    turns: State<AgentTurns>,
-    id: String,
-    text: String,
-    agent: Option<String>,
-) -> Result<(), String> {
-    // 사용자 입력과 같은 락을 잡아, 쪽지 전달이 그 사이에 끼어들지 않게 한다.
-    let mut queue = collab.0.lock().unwrap();
-    let map = panes.0.lock().unwrap();
-    let Some(s) = map.get(&id) else {
-        return Err(format!("없는 pane: {id}"));
-    };
-    if let Some(agent) = &agent {
-        if pane_agent::fresh(s).map(|(a, _)| a.as_str()) != Some(agent.as_str()) {
-            return Err("에이전트가 종료되어 메시지를 보내지 않았습니다".into());
-        }
-    }
-    let body = if s.full_snapshot().bracketed_paste {
-        format!("\x1b[200~{text}\x1b[201~")
-    } else {
-        text
-    };
-    queue.input(&id, body.as_bytes());
-    s.send_bytes(body.as_bytes()).map_err(|e| e.to_string())?;
-    std::thread::sleep(std::time::Duration::from_millis(120));
-    queue.input(&id, b"\r");
-    if pane_agent::find(s).is_some() {
-        turns.0.lock().unwrap().insert(id.clone(), false);
-    }
-    s.send_bytes(b"\r").map_err(|e| e.to_string())
-}
-
 #[tauri::command]
 fn pty_resize(panes: State<Panes>, id: String, cols: u16, rows: u16) -> Result<(), String> {
     let map = panes.0.lock().unwrap();
@@ -358,7 +317,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty_open,
             pty_write,
-            pty_submit,
             pty_resize,
             pty_close,
             pane_status,
@@ -369,6 +327,7 @@ pub fn run() {
             shells::shells,
             workspace::initial_root,
             workspace::fs_pick,
+            workspace::fs_dirs,
             workspace::git_status,
             claude_files::claude_session_of_pid,
             claude_files::claude_transcript_raw,

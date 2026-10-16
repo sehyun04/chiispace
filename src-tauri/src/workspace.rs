@@ -32,6 +32,34 @@ pub async fn fs_pick(app: AppHandle) -> Option<String> {
     Some(picked.into_path().ok()?.to_string_lossy().replace('\\', "/"))
 }
 
+#[derive(serde::Serialize)]
+pub struct Dirs {
+    parent: Option<String>,
+    children: Vec<String>,
+}
+
+/// 대화창의 폴더 칩에서 한 단계 위(`..`)와 바로 아래 폴더들. 고르기 상자를 열지 않고 옮겨 다니게 하려는 것이다.
+/// 숨은 폴더(`.git`·`$RECYCLE.BIN` 따위)는 뺀다 — 들어갈 일이 없는데 목록 맨 위를 차지한다.
+/// 빈 경로는 홈이다(새 대화를 폴더 없이 연 칸).
+#[tauri::command]
+pub fn fs_dirs(path: String) -> Result<Dirs, String> {
+    let dir = if path.is_empty() {
+        std::path::PathBuf::from(std::env::var("USERPROFILE").map_err(|e| e.to_string())?)
+    } else {
+        std::path::PathBuf::from(&path)
+    };
+    let slash = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
+    let mut children: Vec<String> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !e.file_name().to_string_lossy().starts_with(['.', '$']))
+        .map(|e| slash(&e.path()))
+        .collect();
+    children.sort_by_key(|p| p.to_lowercase());
+    Ok(Dirs { parent: dir.parent().map(slash), children })
+}
+
 #[derive(serde::Serialize, Default)]
 pub struct GitInfo {
     branch: String,

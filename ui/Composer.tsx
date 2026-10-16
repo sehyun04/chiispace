@@ -1,15 +1,10 @@
-/** 대화창의 입력바. 터미널 칸 위 덮개에서는 칸의 PTY 로, 터미널 없는 칸에서는 통로(`Transport`)로 보낸다. */
+/** 대화창의 입력바. 쓴 말은 칸이 준 통로(`Transport`)로 보낸다. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { choose, complete, paletteView, type PaletteAction, type PaletteCommand, type PaletteView } from "./palette";
 
 export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void; isCommand?: (text: string) => boolean };
 
 type ChatWin = { __chats?: Record<string, HTMLTextAreaElement | null> };
-
-/** 보내고 나서 머물러도 되는 슬래시 명령. 나머지(`/model`, `/resume`, `/config` …)는
- *  고르는 메뉴를 TUI 에 띄우는데 그 메뉴는 대화창에 없다. 보내고 곧바로 터미널을 보여준다. */
-const STAY_IN_CHAT = new Set(["/clear", "/compact", "/cost", "/context", "/usage", "/exit", "/quit", "/rename"]);
 
 /** 입력바. 평범한 textarea 라 한글 조합은 브라우저가 그대로 처리한다 —
  *  xterm 에서 조합을 직접 떠받치던 일(결정 4번)이 여기서는 없다. */
@@ -18,8 +13,6 @@ export function Composer({
   live,
   busy,
   onSent,
-  onShowTerm,
-  beforeMenu,
   agent,
   waiting,
   transport,
@@ -29,12 +22,9 @@ export function Composer({
   live: boolean;
   busy: boolean;
   onSent: (text: string) => () => void;
-  onShowTerm?: (auto?: boolean) => void;
-  /** 메뉴 명령을 보내기 직전에 부른다. 끝났는지 잴 기준을 잡는다. */
-  beforeMenu?: () => Promise<void>;
   agent: "claude" | "codex";
   waiting: boolean;
-  transport?: Transport;
+  transport: Transport;
   /** `/` 를 치면 띄울 명령. 없으면 고르기 목록을 띄우지 않는다. */
   commands?: PaletteCommand[];
 }) {
@@ -66,37 +56,19 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [text]);
 
-  const interrupt = transport
-    ? transport.interrupt
-    : () => void invoke("pty_write", { id: paneId, data: "\x1b" }).catch(() => {});
+  const interrupt = transport.interrupt;
 
   const send = (raw = text) => {
     const t = raw.trim();
     if (!t || !live || waiting) return;
     setText("");
-    if (transport) {
-      // 로컬 메뉴 명령은 모델에 보낸 말풍선으로 남기지 않는다.
-      const undo = transport.isCommand?.(t) ? () => {} : onSent(t);
-      transport.send(t).catch(() => {
-        undo();
-        setText((current) => (current ? `${t}\n${current}` : t));
-      });
-      return;
-    }
-    const menu = /^\/[\w-]+$/.test(t) && !STAY_IN_CHAT.has(t);
-    // 명령은 대화 파일에 내 말이 아니라 명령 줄로 적힌다. "보내는 중" 말풍선을 띄우면 짝이 안 맞아 30초를 남는다.
-    const undo = /^\/[\w-]+/.test(t) ? () => {} : onSent(t);
-    void (menu && beforeMenu ? beforeMenu() : Promise.resolve())
-      .then(() => invoke("pty_submit", { id: paneId, text: t, agent }))
-      .then(() => {
-        // 메뉴가 닫히면 대화창으로 돌아온다. 닫힌 것은 대화 파일이 알려 준다.
-        if (menu) onShowTerm?.(true);
-      })
-      // 못 보냈으면 쓴 말을 되살린다. 사라지면 다시 칠 방법이 없다.
-      .catch(() => {
-        undo();
-        setText(current => current ? `${t}\n${current}` : t);
-      });
+    // 명령은 대화 파일에 내 말이 아니라 명령 줄로 적힌다. "보내는 중" 말풍선을 띄우면 짝이 안 맞아 오래 남는다.
+    const undo = transport.isCommand?.(t) ? () => {} : onSent(t);
+    // 못 보냈으면 쓴 말을 되살린다. 사라지면 다시 칠 방법이 없다.
+    transport.send(t).catch(() => {
+      undo();
+      setText((current) => (current ? `${t}\n${current}` : t));
+    });
   };
 
   const act = (a: PaletteAction) => {
@@ -114,7 +86,7 @@ export function Composer({
         rows={1}
         value={text}
         disabled={!live || waiting}
-        placeholder={waiting ? transport ? "위의 승인·질문 카드에 답해 줘" : "터미널에서 실행 허락을 확인해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : `${agent} 가 떠 있지 않다`}
+        placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // 조합 중인 Enter 는 글자를 확정하는 키지 보내는 키가 아니다.
@@ -157,13 +129,6 @@ export function Composer({
           </svg>
         </button>
       ) : null}
-      {!transport && (
-        <button className="composer-term" onMouseDown={(e) => e.preventDefault()} onClick={() => onShowTerm?.(false)} title="터미널 보기">
-          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3.2 4.4 L6.6 8 L3.2 11.6 M8.4 11.8 H12.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      )}
     </div>
   );
 }
@@ -188,7 +153,6 @@ function Palette({ view, at, onHover, onPick }: { view: PaletteView; at: number;
               <span className="palette-name">/{c.name}</span>
               {c.args ? <span className="palette-args">{c.args}</span> : null}
               <span className="palette-hint" title={c.hint}>{c.hint}</span>
-              {c.terminal ? <span className="palette-tag">터미널</span> : null}
             </div>
           ))
         : view.items.map((c, i) => (

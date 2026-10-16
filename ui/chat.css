@@ -496,7 +496,7 @@
   margin-top: 0;
 }
 
-/* ── 칸 위 덮개 (ChatPane) ──
+/* ── 대화창 자리 (ChatPane) ──
  * top 은 스크립트가 머리줄 높이를 재서 준다. z-index 는 칸 안에 세워 둔
  * 캐릭터(.buddy, 2)보다 위 — 대화창에서는 말풍선마다 얼굴이 있어 겹칠 이유가 없다. */
 .chat-over {
@@ -541,22 +541,6 @@
 }
 .composer textarea:disabled {
   background: var(--paper-2);
-}
-.composer-term {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--paper-2);
-  color: var(--ink-2);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.composer-term:hover {
-  background: var(--line);
 }
 
 /* ── `/` 명령 목록 ── 입력바 바로 위에 떠서 대화를 가리지만, 고르는 동안만이다. */
@@ -664,20 +648,39 @@
   cursor: pointer;
 }
 
-/* 칸 머리줄의 대화/터미널 전환. 칸 이름표(.chip)와 나란히 서므로 같은 크기로 둔다. */
-.pane-head .view {
+/* 칸 머리줄의 [터미널][대화창]. 칸 이름표(.chip)와 나란히 서므로 같은 높이로 둔다.
+ * 지금 방식은 카드색으로 떠 있고, 고를 수 있는 쪽은 바탕에 묻혀 있다. */
+.pane-head .mode {
   flex: none;
+  display: inline-flex;
+  padding: 1px;
+  border-radius: 999px;
+  background: var(--paper-2);
+}
+.pane-head .mode button {
   border: 0;
   border-radius: 999px;
-  padding: 1px 8px;
-  background: var(--paper-2);
+  padding: 0 8px;
+  background: transparent;
   color: var(--ink-2);
   font: inherit;
   font-size: 11px;
+  line-height: 18px;
   cursor: pointer;
 }
-.pane-head .view:hover {
+.pane-head .mode button:hover:not(:disabled):not(.on) {
   background: var(--line);
+}
+.pane-head .mode button.on {
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: 0 0 0 1px var(--line) inset;
+  cursor: default;
+}
+.pane-head .mode button:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
 }
 
 /* ── 쓰이는 중인 답 (live.ts ← proxy.rs) ──
@@ -1122,6 +1125,112 @@ button.note.launch::after {
   flex: none;
   display: flex;
   gap: 4px;
+}
+
+/* 폴더 칩(FolderChip). 줄 단추와 같은 모양이고, 펼치면 위로 연다 — 줄이 칸 아래쪽이라 아래로 열면 잘린다. */
+.folder {
+  position: relative;
+  display: inline-flex;
+}
+.stream-bar .folder > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+}
+.folder-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.folder-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 6;
+  width: 260px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset, 0 6px 18px rgba(91, 68, 51, 0.12);
+  font-size: 12px;
+  color: var(--ink);
+}
+.folder-path {
+  padding: 4px 8px 6px;
+  color: var(--ink-3);
+  font-family: var(--mono-font);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.folder-list {
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-color: var(--line) transparent;
+}
+.stream-bar .folder-menu button.folder-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+}
+.stream-bar .folder-menu button.folder-row:hover {
+  background: var(--paper-2);
+}
+.folder-row-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.folder-row.up .folder-row-name {
+  font-family: var(--mono-font);
+  font-weight: 600;
+}
+.folder-row-hint {
+  color: var(--ink-2);
+}
+.stream-bar .folder-menu button.folder-row.other {
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  color: var(--ink-2);
+}
+.folder-note {
+  padding: 4px 8px;
+  color: var(--ink-3);
+}
+.folder-ask {
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+.folder-ask-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* 줄 단추 규칙(.stream-bar button)이 카드 단추 색을 덮지 않게 여기서 다시 준다. */
+.stream-bar .folder-ask-row button {
+  margin: 0;
+  border-radius: 9px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.stream-bar .folder-ask-row .ask-go {
+  background: var(--me);
+  color: #fff;
+  font-weight: 700;
+}
+.stream-bar .folder-ask-row .ask-no {
+  background: none;
+  color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--line) inset;
 }
 /* 상태 표. Claude·Codex 가 같은 항목을 같은 순서로 보인다(StreamBar). */
 .stream-status {
