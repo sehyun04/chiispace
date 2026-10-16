@@ -6,6 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
@@ -36,16 +37,9 @@ test("실제 Claude continue의 구형 복원 전환과 저장 대화 표시", {
   writeFileSync(state, JSON.stringify({ tabs: [{ key: "t0", focus: "%0", root: project,
     shell: path.join(process.env.SystemRoot, "System32", "cmd.exe"), layout: { kind: "leaf", id: "%0" } }],
     active: 0, nextPane: 1, nextTab: 1, procs: { "%0": { cmd: `claude --resume ${randomUUID()}`, auto: true } } }));
-  // 사용자 앱·claude 가 떠 있으면 그것들이 자기 파일을 계속 쓴다. 우리 탓이 아닌 변화라
-  // 실행 중일 때는 비교에서 빼고 뺐다는 사실을 남긴다. 이 테스트의 claude 는 CLAUDE_CONFIG_DIR 로 격리한다.
-  const busy = (name) => spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    `(Get-Process ${name} -ErrorAction SilentlyContinue | Measure-Object).Count`],
-    { encoding: "utf8", windowsHide: true }).stdout.trim() !== "0";
-  const otherApp = busy("chiispace"), otherClaude = busy("claude");
-  const protectedFiles = [
-    ...(otherClaude ? [] : [path.join(os.homedir(), ".claude.json"), path.join(os.homedir(), ".claude", "settings.json")]),
-    ...(otherApp ? [] : [path.join(process.env.APPDATA, "com.sehyun.chiispace", "session.json")])];
-  const before = protectedFiles.map(hash);
+  // 이 테스트의 claude 는 CLAUDE_CONFIG_DIR 로 격리한다. 격리가 새면 사용자 설정에 이 폴더가 남는다.
+  const guard = watchUserFiles([path.join(os.homedir(), ".claude.json"), path.join(os.homedir(), ".claude", "settings.json"),
+    path.join(process.env.APPDATA, "com.sehyun.chiispace", "session.json")], { root, exe });
   const probe = `/${randomUUID()}`;
   let latest = {};
   const calls = [];
@@ -113,7 +107,7 @@ test("실제 Claude continue의 구형 복원 전환과 저장 대화 표시", {
     if (app.exitCode === null) app.kill();
     server.closeAllConnections();
     await new Promise(r => server.close(r));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·Claude 설정 변경");
+    guard("사용자 세션·Claude 설정 변경");
   }
 });
 
@@ -136,17 +130,8 @@ test("같은 폴더의 두 칸 모두 선택 목록 없이 이어가기 명령�
     procs: { "%0": { cmd: "claude --continue", auto: true, cwd: project },
              "%1": { cmd: "claude --continue", auto: true, cwd: project } },
   }));
-  // 사용자 앱이 떠 있으면 그 앱이 자기 세션을 계속 저장하므로 이 해시는 우리 탓이 아니어도 바뀐다.
-  // CHIISPACE_STATE 를 준 앱은 사용자 자리를 아예 열지 않으니(probe_state_file 이 legacy 까지 막는다)
-  // 떠 있을 때는 비교에서 빼고 그 사실을 남긴다. 닫혀 있으면 평소대로 엄격히 본다.
-  const running = (name) => spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    `(Get-Process ${name} -ErrorAction SilentlyContinue | Measure-Object).Count`],
-    { encoding: "utf8", windowsHide: true }).stdout.trim() !== "0";
-  const liveApp = running("chiispace"), liveClaude = running("claude");
-  const userState = path.join(process.env.APPDATA, "com.sehyun.chiispace", "session.json");
-  const claudeFiles = [path.join(os.homedir(), ".claude.json"), path.join(os.homedir(), ".claude", "settings.json")];
-  const protectedFiles = [...(liveClaude ? [] : claudeFiles), ...(liveApp ? [] : [userState])];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles([path.join(os.homedir(), ".claude.json"), path.join(os.homedir(), ".claude", "settings.json"),
+    path.join(process.env.APPDATA, "com.sehyun.chiispace", "session.json")], { root, exe });
   const probe = `/${randomUUID()}`;
   let latest = {};
   const server = http.createServer((req, res) => {
@@ -191,9 +176,6 @@ test("같은 폴더의 두 칸 모두 선택 목록 없이 이어가기 명령�
     console.log("같은 폴더 두 칸 모두 --continue 실행 확인", root);
     // 검증이 제 자리에만 썼는지 확인한다 — 임시 세션은 갱신되고 사용자 자리는 손대지 않는다.
     assert.notEqual(hash(state), null, "임시 세션 파일이 사라짐");
-    // 격리한 claude 는 폴더 신뢰 확인에서 멈추므로 모델 요청도, 사용자 설정 변경도 없다.
-    if (liveApp) console.log("사용자 앱이 실행 중이라 사용자 세션 해시는 비교하지 않았다:", userState);
-    if (liveClaude) console.log("사용자 claude 가 실행 중이라 claude 설정 해시는 비교하지 않았다. 이 테스트의 claude 는 CLAUDE_CONFIG_DIR 로 격리했다.");
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify(latest));
     console.error("중복 칸 이어가기 검증 기록", root);
@@ -204,7 +186,7 @@ test("같은 폴더의 두 칸 모두 선택 목록 없이 이어가기 명령�
     if (app.exitCode === null) app.kill();
     server.closeAllConnections();
     await new Promise(r => server.close(r));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·Claude 설정 변경");
+    guard("사용자 세션·Claude 설정 변경");
   }
 });
 

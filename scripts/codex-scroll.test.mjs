@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hash = (file) => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 async function until(fn, timeout = 20000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
@@ -29,7 +29,7 @@ test("실제 Codex의 출력 누적·휠 이동·입력 오염 방지", { skip: 
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json")),
     path.join(os.homedir(), ".codex", "config.toml"),
   ];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   // 인증 정보와 실제 대화를 가져오지 않고, 모델 요청도 받을 수 없는 로컬 주소만 쓴다.
   writeFileSync(path.join(codexState, "config.toml"), `
 model = "scroll-test"
@@ -168,7 +168,7 @@ trust_level = "trusted"
     await until(() => app.exitCode !== null, 5000).catch(() => app.kill());
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·전역 설정 변경");
+    guard("사용자 세션·전역 설정 변경");
     console.log(`Codex 검증 세션: ${root}`);
   }
 });

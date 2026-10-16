@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
-const hash = (file) => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
 test("새 대화에서 상대를 누르면 새 탭에서 Claude·Codex가 터미널 없이 켜진다", { skip: !exe || !claude, timeout: 150000 }, async () => {
   // 연락처에서 고르듯 누르면 끝이어야 한다 — 셸을 연 뒤 명령을 치는 단계가 사용자에게 남지 않는다.
@@ -25,7 +25,7 @@ test("새 대화에서 상대를 누르면 새 탭에서 Claude·Codex가 터미
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json")),
     path.join(os.homedir(), ".codex", "config.toml"),
   ];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
   // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막아 대화창에서 보낸 말이 제출되지 않는다.
   const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
@@ -178,5 +178,5 @@ trust_level = "trusted"
     }
     server.close();
   }
-  assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·설정 파일이 바뀜");
+  guard("사용자 세션·설정 파일이 바뀜");
 });

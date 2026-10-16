@@ -68,6 +68,12 @@ test("PowerShell 입력·삭제 뒤 배경색과 화면 잔상", { skip: !exe, t
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
   const action = async (...list) => { commands.push(...list); await delay(500); };
   const erase = n => action(...Array.from({ length:n }, () => ({ key:"Backspace", code:8 })));
+  // 키를 몰아 보낸 뒤 PowerShell 이 다 그리기까지는 부하에 따라 0.5초를 넘는다(10월 16일 배포에서 줄바꿈 지우기가 그랬다).
+  // 줄이 맞을 때까지 기다리되, 끝내 안 맞으면 그때의 줄을 그대로 보여 준다.
+  const lineIs = async (expected) => {
+    await until(() => latest.line?.trimEnd() === expected).catch(() => {});
+    assert.equal(latest.line.trimEnd(), expected);
+  };
   const clean = () => assert.deepEqual(latest.cells.filter(c => !c.bgDefault || c.inverse), [], "입력·삭제한 자리에 기본 배경이 아닌 셀이 남음");
   const snapshot = label => {
     snapshots.push({ label, ...latest });
@@ -88,27 +94,29 @@ test("PowerShell 입력·삭제 뒤 배경색과 화면 잔상", { skip: !exe, t
     snapshot("empty");
     for (const key of "codex abcdefghijklmnop") await action({ key, code: key.toUpperCase().charCodeAt(0) });
     snapshot("typed");
-    assert.equal(latest.line.trimEnd(), "PS-EDIT> codex abcdefghijklmnop");
+    await lineIs("PS-EDIT> codex abcdefghijklmnop");
     clean();
     for (let i = 0; i < 15; i++) await action({ key: "Backspace", code: 8 });
     snapshot("deleted");
     clean();
     await action({ key: "a", code: 65 });
     snapshot("retyped");
-    assert.equal(latest.line.trimEnd(), "PS-EDIT> codex aa");
+    await lineIs("PS-EDIT> codex aa");
     clean();
     assert.equal(latest.composition, "none");
     await erase(8);
     await action({ input:"한글 테스트" });
-    assert.equal(latest.line.trimEnd(), "PS-EDIT> 한글 테스트");
+    await lineIs("PS-EDIT> 한글 테스트");
     await erase(2);
-    assert.equal(latest.line.trimEnd(), "PS-EDIT> 한글 테");
+    await lineIs("PS-EDIT> 한글 테");
     clean();
     snapshot("korean-delete");
     await erase(4);
     await action({ input:"x".repeat(latest.cols + 20) });
+    // 지우기 전에 줄바꿈까지 그려졌는지 본다. 안 그러면 쓰기 전 화면이 "PS-EDIT>" 라 지우기 확인이 거저 통과한다.
+    await until(() => latest.line?.trimEnd().endsWith("x".repeat(20)));
     await erase(latest.cols + 20);
-    assert.equal(latest.line.trimEnd(), "PS-EDIT>");
+    await lineIs("PS-EDIT>");
     clean();
     snapshot("wrapped-delete");
     const child = path.join(root, "color-child.cjs");

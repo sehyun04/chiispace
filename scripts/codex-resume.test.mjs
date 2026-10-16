@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hash = (file) => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 async function until(fn, timeout = 30000) {
   const end = Date.now() + timeout;
   let last;
@@ -31,7 +31,7 @@ test("실제 Codex의 네이티브 continue·작업 폴더별 복원·권한 유
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json")),
     path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".claude.json"),
   ];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   const clients = new Map();
   let modelRequests = 0;
   const models = [];
@@ -260,7 +260,7 @@ trust_level = "trusted"
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     console.log(`Codex 복원 검증 세션: ${root}`);
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·전역 설정 변경");
+    guard("사용자 세션·전역 설정 변경");
   }
 });
 

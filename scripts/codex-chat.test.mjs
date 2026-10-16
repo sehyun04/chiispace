@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const hash = file => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 
 test("PTY Codex는 훅·덮개 없이 두 칸 대화와 네이티브 복원", { skip: !exe || !codex, timeout: 180000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-codex-chat-"));
@@ -19,7 +19,7 @@ test("PTY Codex는 훅·덮개 없이 두 칸 대화와 네이티브 복원", { 
   mkdirSync(home); mkdirSync(project);
   const protectedFiles = [path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".codex", "hooks.json"),
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(id => path.join(process.env.APPDATA, id, "session.json"))];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   const probe = "/" + randomUUID();
   let latest = {};
   const commands = [];
@@ -168,7 +168,7 @@ test("PTY Codex는 훅·덮개 없이 두 칸 대화와 네이티브 복원", { 
   } finally {
     for (const app of apps) await close(app).catch(() => app.kill());
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·설정 변경");
+    guard("사용자 세션·설정 변경");
     console.log("PTY Codex 검증:", root);
   }
 });

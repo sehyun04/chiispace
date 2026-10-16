@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = ms => new Promise(r => setTimeout(r, ms));
-const hash = file => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
 test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·복원·종료", { skip: !exe || !codex, timeout: 240000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-codex-stream-"));
@@ -18,7 +18,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
   mkdirSync(home); mkdirSync(project);
   const protectedFiles = [path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".codex", "hooks.json"),
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(s => path.join(process.env.APPDATA, s, "session.json"))];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   const probe = "/" + randomUUID(), commands = [], requests = [], observations = [], apps = [];
   let latest = {}, slow;
   const server = http.createServer((req, res) => {
@@ -239,7 +239,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
   } finally {
     for (const app of apps) await close(app).catch(() => app.kill());
     slow?.destroy(); server.closeAllConnections(); await new Promise(r => server.close(r));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·설정 변경");
+    guard("사용자 세션·설정 변경");
     console.log("Codex stream 검증:", root);
   }
 });

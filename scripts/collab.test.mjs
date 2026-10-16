@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const fixtures = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hash = (file) => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 async function until(fn, timeout = 20000) {
   const end = Date.now() + timeout;
   let last;
@@ -45,7 +44,7 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json")),
     path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".claude.json"),
   ];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   const compile = spawnSync("rustc", [path.join(fixtures, "agent-proxy.rs"), "-o", path.join(root, "claude.exe")], { windowsHide: true, encoding: "utf8" });
   assert.equal(compile.status, 0, compile.stderr);
   copyFileSync(path.join(root, "claude.exe"), path.join(root, "codex.exe"));
@@ -166,14 +165,14 @@ test("실제 PTY의 자동 MCP 연결, 초안·작업 중 대기, 결과 회수�
     const close = await collab("delegate", { target: "right", description: "close" });
     await call("surface.close", { surface_id: "%1" });
     assert.equal((await collab("status", { task_id: close.id })).status, "failed");
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션·전역 설정 변경");
+    guard("사용자 세션·전역 설정 변경");
   } catch (error) {
     for (const pane of ["%0", "%1"]) console.error(pane, await peek(pane).catch(String));
     throw error;
   } finally {
     spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${app.pid} -ErrorAction SilentlyContinue).CloseMainWindow()`], { windowsHide: true });
     await until(() => app.exitCode !== null, 5000).catch(() => app.kill());
-    assert.deepEqual(protectedFiles.map(hash), before, "검증 종료 후 사용자 세션·전역 설정 변경");
+    guard("검증 종료 후 사용자 세션·전역 설정 변경");
     console.log(`협업 검증 세션: ${root}`);
   }
 });
