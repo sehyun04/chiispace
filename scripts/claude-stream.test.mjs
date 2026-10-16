@@ -26,6 +26,13 @@ test("초기화 답에서 모델 목록과 권한 모드를 받는다", () => {
   assert.equal(run({ type: "control_response", response: { request_id: "x", response: { models: [] } } }).ready, false);
 });
 
+test("초기화 답의 명령 목록이 그 claude 가 받는 슬래시 명령이다", () => {
+  const s = run({ type: "control_response", response: { subtype: "success", request_id: INIT_ID, response: {
+    models: [], commands: [{ name: "clear", description: "Start a new session", argumentHint: "[name]", aliases: ["reset", "new", 3] }, { description: "이름 없음" }] } } });
+  assert.deepEqual(s.commands, [{ name: "clear", description: "Start a new session", argumentHint: "[name]", aliases: ["reset", "new"] }]);
+  assert.deepEqual(run({ type: "system", subtype: "init" }).commands, [], "초기화 전에는 비어 있다");
+});
+
 test("권한 묻기는 화면 대신 카드로 오고, 결과가 오면 걷힌다", () => {
   let s = run(permission);
   assert.equal(s.busy, true);

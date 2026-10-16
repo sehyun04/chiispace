@@ -50,6 +50,9 @@ export const effortChoices = (m?: ModelChoice) => (m?.supportedEffortLevels ?? [
 export const currentModel = (s: StreamState) =>
   s.model ? s.models.find((m) => m.value === s.model || m.resolvedModel === s.model) : s.models.find((m) => m.value === "default");
 
+/** claude 가 이 세션에서 받는 슬래시 명령. 스킬·사용자 명령도 여기 든다. */
+export type AgentCommand = { name: string; description?: string; argumentHint?: string; aliases?: string[] };
+
 export type StreamState = {
   /** 초기화에 답이 왔다. 모델 목록은 그때 온다. */
   ready: boolean;
@@ -57,6 +60,7 @@ export type StreamState = {
   busy: boolean;
   prompts: Prompt[];
   models: ModelChoice[];
+  commands: AgentCommand[];
   /** 지금 쓰는 모델. 고른 값(`sonnet`)이 아니라 실제 이름(`claude-sonnet-5`)일 수 있다. */
   model?: string;
   mode?: string;
@@ -69,7 +73,7 @@ export type StreamState = {
   exited?: { code: number | null; error: string };
 };
 
-export const initialStream: StreamState = { ready: false, busy: false, prompts: [], models: [] };
+export const initialStream: StreamState = { ready: false, busy: false, prompts: [], models: [], commands: [] };
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
@@ -106,7 +110,13 @@ export function reduceStream(s: StreamState, msg: unknown): StreamState {
           ? [{ value, displayName: str(v.displayName), description: str(v.description), resolvedModel: str(v.resolvedModel), supportedEffortLevels: efforts }]
           : [];
       });
-      return { ...s, ready: true, models, mode: str(body.current_permission_mode) ?? s.mode };
+      const commands = (Array.isArray(body.commands) ? body.commands : []).flatMap((raw) => {
+        const c = obj(raw);
+        const name = str(c.name);
+        const aliases = Array.isArray(c.aliases) ? c.aliases.filter((a): a is string => typeof a === "string") : undefined;
+        return name ? [{ name, description: str(c.description), argumentHint: str(c.argumentHint), aliases }] : [];
+      });
+      return { ...s, ready: true, models, commands, mode: str(body.current_permission_mode) ?? s.mode };
     }
     case "system":
       if (m.subtype !== "init") return s;

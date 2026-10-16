@@ -28,6 +28,7 @@ import { SubAgents } from "./SubAgents";
 import { OpenSubContext, SubagentView, type SubTarget } from "./SubagentView";
 import { LiveRows, Row } from "./ChatRows";
 import { Composer, type Transport } from "./Composer";
+import type { PaletteCommand } from "./palette";
 import "./chat.css";
 
 export type { Transport };
@@ -61,6 +62,8 @@ type ChatProps = {
   extra?: ReactNode;
   /** 입력바 위에 붙는 것 — 모델·권한 모드. */
   toolbar?: ReactNode;
+  /** 입력바에서 `/` 를 치면 띄울 명령. */
+  commands?: PaletteCommand[];
   /** 아직 한 마디도 없는 새 대화. */
   fresh?: boolean;
   /** app-server는 파일을 거치지 않고 이력과 현재 메시지를 같은 항목으로 준다. */
@@ -87,6 +90,7 @@ export function Chat({
   transport,
   extra,
   toolbar,
+  commands,
   fresh = false,
   content,
 }: ChatProps) {
@@ -372,6 +376,7 @@ export function Chat({
           onShowTerm={(auto) => (auto ? onShowTerm?.(true) : showTerm(false))}
           beforeMenu={markAway}
           transport={transport}
+          commands={commands}
         />
       )}
     </div>

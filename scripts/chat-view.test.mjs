@@ -93,6 +93,9 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
         termFocused: !!document.activeElement?.classList.contains('xterm-helper-textarea'),
         toggle: slot?.querySelector('.pane-head .view.toggle')?.textContent ?? null,
         cmds: [...(over?.querySelectorAll('.cmd span') ?? [])].map(e => e.textContent),
+        palette: [...(over?.querySelectorAll('.palette-row') ?? [])].map(e => e.textContent),
+        value: input?.value ?? null,
+        sending: over?.querySelectorAll('.msg.sending').length ?? 0,
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({pane,dom})});
       for (const c of await r.json()) {
@@ -180,8 +183,8 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
 
     // 메뉴를 여는 명령은 보내면 터미널로 넘어가고, 메뉴를 닫으면 대화창으로 돌아와야 한다.
     // 닫힌 것은 claude 가 대화 파일에 적는 명령·결과 줄로 안다(열 때는 아무것도 안 적는다).
-    // /config 는 첫 Esc 가 검색어 지우기라 두 번 눌러야 닫힌다.
-    for (const [cmd, escs] of [["/config", 2], ["/model", 1]]) {
+    // /config 는 첫 Esc 가 검색어 지우기라 두 번 눌러야 닫힌다. /model 은 아래처럼 입력바 위 목록에서 고른다.
+    for (const [cmd, escs] of [["/config", 2]]) {
       commands.push({ send: cmd });
       assert.ok(await until(() => dom().over && dom().hidden && dom().toggle === "대화로", 50), cmd + " 을 보냈는데 터미널로 넘어가지 않음: " + JSON.stringify(dom()));
       assert.ok(await until(() => /Esc to (close|cancel|clear)/.test(screen()), 80), cmd + " 메뉴가 열리지 않음:\n" + screen().slice(-600));
@@ -194,6 +197,15 @@ test("claude 칸이 대화창으로 덮이고 입력바의 말이 claude 에 제
       assert.ok(await until(() => dom().cmds?.includes(cmd), 30), cmd + " 기록이 대화창에 안 보임: " + JSON.stringify(dom().cmds));
       assert.ok(await until(() => dom().inputFocused, 30), cmd + " 뒤 포커스가 입력바로 오지 않음");
     }
+
+    // /model 은 TUI 메뉴 대신 입력바 위 목록에서 고른다. 인자를 붙여 보내므로 터미널로 넘어가지 않는다.
+    commands.push({ send: "/model" });
+    assert.ok(await until(() => dom().value === "/model " && dom().palette.some(t => t.startsWith("Sonnet")), 50), "/model 선택지가 안 뜸: " + JSON.stringify(dom()));
+    commands.push({ send: "/model son" });
+    assert.ok(await until(() => dom().cmds?.some(t => t.startsWith("/model")), 80), "/model sonnet 이 claude 에 안 들어감: " + JSON.stringify(dom().cmds) + "\n" + screen().slice(-600));
+    assert.equal(dom().hidden, false, "모델을 고르는데 터미널로 넘어감");
+    assert.equal(dom().toggle, "터미널로");
+    assert.equal(dom().sending, 0, "명령이 보내는 중 말풍선으로 남음");
 
     commands.push({ toggle: true });
     assert.ok(await until(() => dom().over === false && dom().toggle === "대화로", 50), "터미널로 돌아가지 않음");

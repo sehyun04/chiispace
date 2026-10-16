@@ -6,6 +6,7 @@ import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { titleFrom } from "./claude-stream";
 import { approvalOptions, blockingPrompt, codexItems, initialCodex, questionAnswer, reduceCodex, resumedCodex, type CodexStream, type Data, type Request } from "./codex-stream";
 import { missingUnstarted, type StreamChat } from "./stream-session";
+import { barCommands, mergeCommands, type PaletteCommand } from "./palette";
 
 type Session = Extract<StreamChat, { agent: "codex" }>;
 type Event = { id: string; run: string; message: Data };
@@ -168,41 +169,44 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
   const policyName = APPROVALS.find(([v]) => v === policy)?.[1] ?? "기존 설정";
   const efforts: string[] = (selected?.supportedReasoningEfforts ?? []).map((e: Data) => e.reasoningEffort);
   const effort = settings.effort ?? selected?.defaultReasoningEffort;
-  const toolbar = <StreamBar
-    model={{
+  // 줄과 `/` 명령이 같은 항목에서 나온다(Claude 칸과 같다).
+  const bar: Parameters<typeof StreamBar>[0] = {
+    model: {
       label: "모델", aria: "Codex 모델", selectRef: modelSelect, value: settings.model ?? "", disabled,
       choices: [...(selected ? [] : [{ value: settings.model ?? "", label: settings.model ?? "기본" }]), ...models.map(m => ({ value: m.model, label: m.displayName ?? m.model }))],
       onChange: v => { const m = models.find(m => m.model === v); configure({ model: v, effort: m?.defaultReasoningEffort }); },
-    }}
-    effort={efforts.length ? {
+    },
+    effort: efforts.length ? {
       label: "추론", aria: "Codex 추론", value: effort ?? "", disabled,
       choices: efforts.map(v => ({ value: v, label: effortLabel(v) })),
       onChange: v => configure({ effort: v }),
-    } : undefined}
-    permission={{
+    } : undefined,
+    permission: {
       label: "권한", aria: "Codex 승인", value: policy, disabled,
       choices: [...(policy === "custom" ? [{ value: "custom", label: "기존 설정" }] : []), ...APPROVALS.map(([value, label]) => ({ value, label }))],
       onChange: v => configure({ approvalPolicy: v }),
-    }}
-    statusOpen={status}
-    onStatus={() => setStatus(v => !v)}
-    onNew={() => { void transport.send("/new").catch(() => {}); }}
-    busy={disabled}
-    statusClass="codex-status"
-    status={[
+    },
+    statusOpen: status,
+    onStatus: () => setStatus(v => !v),
+    onNew: () => { void transport.send("/new").catch(() => {}); },
+    busy: disabled,
+    statusClass: "codex-status",
+    status: [
       ["모델", modelLabel(selected?.displayName, settings.model)],
       ["추론", effort ? effortLabel(effort) : "기본"],
       ["권한", `${policyName} · 샌드박스 ${settings.sandbox?.type ?? "기존 설정"}`],
       ["폴더", folderLabel(chat.cwd)],
       ["사용 토큰", state.tokens ?? "집계 전"],
       ["대화", state.thread || "연결 중"],
-    ]}
-  />;
+    ],
+  };
+  const toolbar = <StreamBar {...bar} />;
+  const commands = mergeCommands(barCommands(bar), CODEX_COMMANDS);
   return <>
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}
       live={ready && !dispatching} working={state.busy || dispatching} waiting={state.prompts.some(blockingPrompt)}
-      fresh={!state.entries.length} transport={transport} content={rendered} toolbar={toolbar}
+      fresh={!state.entries.length} transport={transport} content={rendered} toolbar={toolbar} commands={commands}
       extra={<>
         {state.prompts.map(p => <RequestCard key={p.id} prompt={p} item={state.entries.find(i => i.id === p.params.itemId && i._turn === p.params.turnId)} disabled={answering === p.id} answer={(result, error) => void answer(p, result, error)} />)}
         {(failure || state.error) && <div className="note bad" role="alert">{failure || state.error}</div>}
@@ -216,6 +220,12 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
       </>} />
   </>;
 }
+
+/** 줄에 없는데 이 칸이 받는 명령(위 `transport.send` 가 맡는다). */
+const CODEX_COMMANDS: PaletteCommand[] = [
+  { name: "compact", hint: "지난 대화를 줄여 문맥 비우기" },
+  { name: "rename", hint: "대화 이름 바꾸기", args: "<이름>" },
+];
 
 /** Codex 승인 정책. 줄에서는 Claude 의 권한 모드와 같은 "권한" 자리에 선다. */
 const APPROVALS: [string, string][] = [

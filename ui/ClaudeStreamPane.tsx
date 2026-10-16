@@ -15,6 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { shortToolName, toolSummary } from "./tools";
+import { agentCommands, barCommands, mergeCommands } from "./palette";
 import {
   answerLine,
   answeredStream,
@@ -212,63 +213,61 @@ export function ClaudeStreamPane({
   const model = currentModel(st);
   const efforts = effortChoices(model);
   const modeName = MODES.find(([v]) => v === (st.mode ?? "default"))?.[1] ?? st.mode ?? "매번 묻기";
-  const toolbar = (
-    <StreamBar
-      model={{
-        label: "모델",
-        aria: "Claude 모델",
-        value: model?.value ?? "",
-        title: model?.description ?? st.model,
-        disabled: !alive,
-        choices: [
-          ...(model ? [] : [{ value: "", label: st.model ?? "기본" }]),
-          ...st.models.map((m) => ({ value: m.value, label: m.displayName ?? m.value, title: m.description })),
-        ],
-        onChange: (v) => setting({ subtype: "set_model", model: v }, (s) => ({ ...s, model: v })),
-      }}
-      effort={
-        efforts.length
-          ? {
-              label: "추론",
-              aria: "Claude 추론",
-              value: st.effort && efforts.includes(st.effort) ? st.effort : "",
-              disabled: !alive,
-              choices: [
-                ...(st.effort && efforts.includes(st.effort) ? [] : [{ value: "", label: st.effort ? effortLabel(st.effort) : "기본" }]),
-                ...efforts.map((v) => ({ value: v, label: effortLabel(v) })),
-              ],
-              onChange: (v) => setting(effortRequest(v), (s) => ({ ...s, effort: v })),
-            }
-          : undefined
-      }
-      permission={{
-        label: "권한",
-        aria: "Claude 권한",
-        value: st.mode ?? "default",
-        disabled: !alive,
-        choices: MODES.map(([value, label]) => ({ value, label })),
-        onChange: (v) => setting({ subtype: "set_permission_mode", mode: v }, (s) => ({ ...s, mode: v })),
-      }}
-      statusOpen={statusOpen}
-      onStatus={toggleStatus}
-      onNew={() =>
-        void transport.send("/clear").then(() => {
-          // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
-          titled.current = false;
-          onTitle(id, "새 대화");
-        }, () => {})
-      }
-      busy={!alive || st.busy}
-      status={[
-        ["모델", modelLabel(model?.displayName, st.model ?? model?.resolvedModel)],
-        ["추론", st.effort ? effortLabel(st.effort) : "기본"],
-        ["권한", modeName],
-        ["폴더", folderLabel(cwd)],
-        ["사용 토큰", context ?? "집계 전"],
-        ["대화", st.session ?? session],
-      ]}
-    />
-  );
+  // 줄과 `/` 명령이 같은 항목에서 나온다. 따로 두면 줄에서 고른 것과 명령으로 고른 것이 어긋난다.
+  const bar: Parameters<typeof StreamBar>[0] = {
+    model: {
+      label: "모델",
+      aria: "Claude 모델",
+      value: model?.value ?? "",
+      title: model?.description ?? st.model,
+      disabled: !alive,
+      choices: [
+        ...(model ? [] : [{ value: "", label: st.model ?? "기본" }]),
+        ...st.models.map((m) => ({ value: m.value, label: m.displayName ?? m.value, title: m.description })),
+      ],
+      onChange: (v) => setting({ subtype: "set_model", model: v }, (s) => ({ ...s, model: v })),
+    },
+    effort: efforts.length
+      ? {
+          label: "추론",
+          aria: "Claude 추론",
+          value: st.effort && efforts.includes(st.effort) ? st.effort : "",
+          disabled: !alive,
+          choices: [
+            ...(st.effort && efforts.includes(st.effort) ? [] : [{ value: "", label: st.effort ? effortLabel(st.effort) : "기본" }]),
+            ...efforts.map((v) => ({ value: v, label: effortLabel(v) })),
+          ],
+          onChange: (v) => setting(effortRequest(v), (s) => ({ ...s, effort: v })),
+        }
+      : undefined,
+    permission: {
+      label: "권한",
+      aria: "Claude 권한",
+      value: st.mode ?? "default",
+      disabled: !alive,
+      choices: MODES.map(([value, label]) => ({ value, label })),
+      onChange: (v) => setting({ subtype: "set_permission_mode", mode: v }, (s) => ({ ...s, mode: v })),
+    },
+    statusOpen,
+    onStatus: toggleStatus,
+    onNew: () =>
+      void transport.send("/clear").then(() => {
+        // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
+        titled.current = false;
+        onTitle(id, "새 대화");
+      }, () => {}),
+    busy: !alive || st.busy,
+    status: [
+      ["모델", modelLabel(model?.displayName, st.model ?? model?.resolvedModel)],
+      ["추론", st.effort ? effortLabel(st.effort) : "기본"],
+      ["권한", modeName],
+      ["폴더", folderLabel(cwd)],
+      ["사용 토큰", context ?? "집계 전"],
+      ["대화", st.session ?? session],
+    ],
+  };
+  const toolbar = <StreamBar {...bar} />;
+  const commands = mergeCommands(barCommands(bar), agentCommands(st.commands));
 
   const extra = (
     <>
@@ -309,6 +308,7 @@ export function ClaudeStreamPane({
         transport={transport}
         extra={extra}
         toolbar={toolbar}
+        commands={commands}
       />
     </>
   );

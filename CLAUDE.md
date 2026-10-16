@@ -86,6 +86,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 - **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · [상태] [새 대화]
   순서와 상태 표 항목을 거기서 정한다. 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
   Claude 추론 수준은 `apply_flag_settings`(이 세션에만 거는 층)로 건다 — 사용자 설정 파일을 고치지 않는다.
+  입력바 `/` 명령의 모델·추론·권한·상태·새 대화도 이 줄의 항목에서 만든다(`barCommands`). 따로 적으면 줄과 명령이 어긋난다.
+  Claude 칸의 나머지 명령은 claude 가 초기화 답(`commands`)으로 준 것만 띄운다 — 앱이 명령 목록을 적어 두지 않는다.
 - **기존 PTY Claude 칸의 대화창은 터미널 위에 덮기만 한다**(`ChatPane`). 터미널을 걷거나 숨기면 결정 1·2번이 깨진다.
   포커스는 `focusPane` 으로 준다 — 터미널에만 주면 덮인 xterm 이 보이지 않는 곳에서 키를 먹는다.
   **대화 파일이 없는 새 대화는 덮지 않는다.** 폴더 신뢰·API 키·bypass 경고 같은 시작 대화상자는 TUI 에만 있다.
@@ -116,7 +118,7 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ### 남은 범위
 
-- 터미널 없는 칸의 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력, 슬래시 명령 팔레트, 로그인·인증 UI.
+- 터미널 없는 칸의 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력, 로그인·인증 UI.
   `/config` 등 TUI 전용 메뉴는 터미널 없는 칸에서 지원하지 않는다 — 머리줄 "터미널로 열기"로 같은 대화를 터미널에서 연다.
 - 실모델 자연어 위임, Claude 팀 연동, 에이전트 자동 생성·지속 작업은 별도 범위다.
 - 두 앱의 정확한 동시 기동 타임아웃은 미진단이다(검증은 한 번에 하나씩 돈다). 순차 기동 통과와 구별한다.
@@ -382,6 +384,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·추론·권한 모드, 통로 해석(단위 검증) |
 | `ui/CodexStreamPane.tsx` · `ui/codex-stream.ts` | 터미널 없는 Codex 칸 — 승인·질문·설정, 스트림 해석 |
 | `ui/StreamBar.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·상태·새 대화 |
+| `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `ui/app.css` · `ui/theme.css` · `ui/chat.css` | 치이카와 테마 |
 | `ui/assets/faces/` · `scripts/make-motion.py` | 얼굴 그림과 움직임 |

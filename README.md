@@ -52,6 +52,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/Sidebar.tsx` | 옆칸. 그리기만 하고 판단은 App 이 준다 |
 | `ui/session.ts` | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
 | `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
+| `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령, 터미널 칸 고정 목록 (React 없음, 단위 검증) |
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 |
 | `ui/roster.tsx` | 치이카와 로스터 · 누가 어느 칸을 맡는가 |
 | `ui/layout.ts` | 칸 배치 트리 · 끌어 옮기기 · 고르게 펴기 |

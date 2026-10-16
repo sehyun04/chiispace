@@ -132,10 +132,16 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
         efforts: [...(over?.querySelectorAll('select[aria-label="Claude 추론"] option') ?? [])].map(o => o.value),
         status: over?.querySelector('.stream-status')?.textContent ?? null,
         chip: slot?.querySelector('.pane-head .chip')?.textContent ?? null,
+        palette: [...(over?.querySelectorAll('.palette-row') ?? [])].map(e => e.textContent),
+        value: input?.value ?? null,
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
         if (c.click) (c.in === 'side' ? side : over)?.querySelector(c.click)?.click();
+        if (c.type !== undefined && input) {
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.type);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         if (c.send && input) {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -264,6 +270,23 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
       "상태 표가 안 뜨거나 비었음: " + dom().status);
     commands.push({ button: "상태" });
     assert.ok(await until(() => dom().status === null, 50), "상태 표가 안 접힘");
+
+    // `/` 명령. 목록은 줄의 항목과 claude 가 초기화 답으로 준 명령이다. 줄 항목은 그 자리에서 바뀌어 터미널로 갈 일이 없다.
+    commands.push({ type: "/" });
+    const wanted = ["/model", "/effort", "/permissions", "/status", "/clear", "/compact", "/context"];
+    assert.ok(await until(() => wanted.every(n => dom().palette.some(t => t.startsWith(n))), 50), "명령 목록이 모자람: " + JSON.stringify(dom().palette));
+    shot("palette-commands");
+    commands.push({ send: "/model" });
+    assert.ok(await until(() => dom().value === "/model " && dom().palette.length > 1, 50), "/model 뒤 모델 목록이 안 뜸: " + JSON.stringify(dom()));
+    shot("palette-model");
+    const other = dom().models.includes("haiku") ? "haiku" : dom().models.find(m => m && m !== dom().model);
+    commands.push({ send: "/model " + other });
+    assert.ok(await until(() => dom().model === other && dom().value === "", 50), "명령으로 고른 모델이 줄에 안 들어감: " + JSON.stringify(dom()));
+    commands.push({ send: "/status" });
+    assert.ok(await until(() => dom().status !== null, 50), "/status 가 상태 표를 안 폄");
+    commands.push({ send: "/status" });
+    assert.ok(await until(() => dom().status === null, 50), "/status 를 다시 쳐도 안 접힘");
+    assert.ok(!dom().mine.some(t => t.startsWith("/")), "명령이 말풍선으로 샘: " + JSON.stringify(dom().mine));
   } finally {
     await close(app);
   }

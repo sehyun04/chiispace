@@ -11,6 +11,11 @@ import { Term } from "./Term";
 import { ChatPane } from "./Chat";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { CodexStreamPane } from "./CodexStreamPane";
+import { terminalCommands } from "./palette";
+import { effortLabel } from "./StreamBar";
+
+// TUI 에 무엇이 있는지 물을 길이 없어 고정 목록이다. 칸마다 새로 만들 까닭이 없다.
+const TERMINAL_COMMANDS = terminalCommands(effortLabel);
 
 type CodexChat = Extract<StreamChat, { agent: "codex" }>;
 
@@ -198,6 +203,7 @@ export function Pane(p: PaneProps) {
           onShowTerm={p.onShowTerm}
           away={p.termView === "auto"}
           onBack={p.onBack}
+          commands={TERMINAL_COMMANDS}
         />
       ) : null}
     </section>
