@@ -24,7 +24,7 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 열고, 머리줄 단추로 두 방식 사이를 오간다
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
 
-- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 16일 18:15(`9ef4114`, 리팩터링판).
+- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 16일 22:44(`4820cb7`, `/` 명령 목록판).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
 - **사용자 실사용 확인이 남은 것:** 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
   실제 모델 변경 뒤 연속 대화. 자동 검증 통과를 실사용 해결로 간주하지 않는다(9월 16일 사용자 재신고 뒤의 원칙).

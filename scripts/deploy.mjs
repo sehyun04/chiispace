@@ -112,6 +112,10 @@ if (dry) {
   say("--dry-run: 굽기·검증까지만 했다");
   process.exit(0);
 }
+// 검증하는 10분 사이에 사용자가 앱을 켤 수 있다(10월 16일 실제로 켰다). 시작할 때만 보면 백업까지 해 놓고
+// 잠긴 exe 에 막혀 끝나므로, 바꾸기 직전에 다시 보고 그때의 상태로 옮겨 낸다.
+const upNow = running("chiispace.exe") || running("chiispace-cli.exe");
+if (upNow && !flag("--allow-running")) die("검증하는 사이 앱이 켜졌다. 사용자가 끈 뒤 다시 하거나 --allow-running 을 준다");
 
 // 6. 백업 — 앱·CLI·사용자 세션
 const when = stamp();
@@ -137,7 +141,7 @@ const sessionFile = path.join(process.env.APPDATA ?? "", "com.sehyun.chiispace",
 const sessionBefore = existsSync(sessionFile) ? sha256(sessionFile) : null;
 for (const [name, from] of [["chiispace.exe", staged.app], ["chiispace-cli.exe", staged.cli]]) {
   const to = path.join(release, name);
-  if (appUp && existsSync(to)) renameSync(to, `${to}.old-${when}`);
+  if (upNow && existsSync(to)) renameSync(to, `${to}.old-${when}`);
   copyFileSync(from, to);
   if (sha256(to) !== sha256(from)) die(`바꾼 ${name} 가 검증한 파일과 다르다`);
 }
@@ -148,7 +152,7 @@ say(`바꿈 ${when} · 앱 ${hashes.app} · CLI ${hashes.cli}`);
 
 // 8. 기록 한 줄 — 커밋은 부른 쪽이 한다
 const log = path.join(repo, "docs", "DEPLOYS.md");
-const row = `| ${when.slice(0, 4)}-${when.slice(4, 6)}-${when.slice(6, 8)} ${when.slice(9, 11)}:${when.slice(11, 13)} | \`${short}\` ${subject} | ${appUp ? "떠 있음(.old 로 옮김)" : "꺼짐"} | JS ${summary} · Rust ${rustPassed} | \`${path.basename(backup)}/\` | \`${hashes.app.slice(0, 16)}…\` / \`${hashes.cli.slice(0, 16)}…\` |\n`;
+const row = `| ${when.slice(0, 4)}-${when.slice(4, 6)}-${when.slice(6, 8)} ${when.slice(9, 11)}:${when.slice(11, 13)} | \`${short}\` ${subject} | ${upNow ? "떠 있음(.old 로 옮김)" : "꺼짐"} | JS ${summary} · Rust ${rustPassed} | \`${path.basename(backup)}/\` | \`${hashes.app.slice(0, 16)}…\` / \`${hashes.cli.slice(0, 16)}…\` |\n`;
 if (existsSync(log)) {
   appendFileSync(log, row);
   say(`기록 docs/DEPLOYS.md 에 한 줄 붙임 — 커밋은 따로 한다`);
