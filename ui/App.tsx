@@ -321,6 +321,21 @@ export default function App() {
     setPaneTitles((t) => ({ ...t, [id]: "새 대화" }));
   }, [openStream]);
 
+  /** 대화창에서 터미널이 꼭 필요한 일(로그인·로그아웃)을 새 탭의 터미널에서 한 번 돌린다. 대화창 칸은 그대로 둔다 —
+   *  그 칸을 터미널로 바꾸면 하던 대화가 내려간다. 브라우저 인증을 앱이 대신 받으면 인증 정보를 앱이 다뤄야 하므로
+   *  CLI 의 로그인 화면에 맡긴다. */
+  const { seed } = agents;
+  const openTerminal = useCallback((cmd: string, title: string) => {
+    const id = `%${nextPane.current++}`;
+    const root = cur?.root ?? null;
+    seed(id, { cmd, auto: true, cwd: root ?? undefined });
+    setPaneTitles((t) => ({ ...t, [id]: title }));
+    setTabs((ts) => {
+      setActive(ts.length);
+      return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root, focus: id, shell: cur?.shell }];
+    });
+  }, [cur, seed]);
+
   const { paneView } = streams;
   return (
     <div className={sideOpen ? "app" : "app closed"}>
@@ -392,6 +407,7 @@ export default function App() {
                         renaming={renaming === s.id}
                         stream={streamMap[s.id]}
                         streamBusy={!!streams.streamBusy[s.id]}
+                        streamEpoch={streams.epoch[s.id] ?? 0}
                         chatId={chatIds[s.id]}
                         seed={agents.seeds[s.id]}
                         onSelect={() => {
@@ -419,6 +435,8 @@ export default function App() {
                           )
                         }
                         onFolder={changeFolder}
+                        onResume={streams.resume}
+                        onTerminal={openTerminal}
                         onTermTitle={onTitle}
                         onStreamTitle={onStreamTitle}
                         onStreamBusy={streams.onBusy}

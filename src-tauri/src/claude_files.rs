@@ -95,6 +95,93 @@ pub fn claude_transcript_size(app: AppHandle, root: String, id: String) -> u64 {
         .map_or(0, |m| m.len())
 }
 
+// ── 지난 대화 목록(`/resume`) ────────────────────────────────────
+//
+// **사람이 고르라고 보여 주는 목록이다. 앱은 이 목록에서 대화를 고르지 않는다**(CLAUDE.md "대화 파일을 뒤져
+// ID를 추측하지 않는다"). 칸에 붙일 대화를 앱이 "가장 최근 것"으로 골라 사용자 대화를 뺏던 옛 길과 달리, 여기서는
+// 사용자가 `/resume` 으로 목록을 열고 하나를 누를 때만 그 id 를 `--resume` 으로 연다. claude TUI 의 `/resume` 과 같다.
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct Conversation {
+    id: String,
+    title: String,
+    /// 마지막으로 쓰인 때(ms). 최근 것부터 늘어놓고 "3분 전"을 보인다.
+    modified: u64,
+}
+
+/// 대화 파일 하나의 이름. 사용자가 `/rename` 으로 붙인 이름, claude 가 지은 이름, 마지막에 보낸 말 순으로 고른다.
+/// 이 기록들은 파일 앞뒤에 붙으므로 수 MB 대화를 통째로 읽지 않고 앞·뒤만 본다.
+fn conversation_title(path: &std::path::Path) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    const HEAD: u64 = 64 * 1024;
+    const TAIL: u64 = 256 * 1024;
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut head = vec![0; HEAD.min(len) as usize];
+    let _ = f.read_exact(&mut head);
+    let mut tail = Vec::new();
+    if len > HEAD {
+        let _ = f.seek(SeekFrom::Start(len.saturating_sub(TAIL).max(HEAD)));
+        let _ = f.read_to_end(&mut tail);
+    }
+    title_from(&String::from_utf8_lossy(&head), &String::from_utf8_lossy(&tail))
+}
+
+fn title_from(head: &str, tail: &str) -> String {
+    // 자른 자리의 반 토막 줄은 파싱되지 않아 저절로 빠진다.
+    let records = || head.lines().chain(tail.lines()).filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok());
+    let last = |kind: &str, key: &str| {
+        records()
+            .filter(|v| v["type"] == kind)
+            .filter_map(|v| v[key].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from))
+            .last()
+    };
+    let first_prompt = || {
+        records().filter(|v| v["type"] == "user" && v["isMeta"] != true).find_map(|v| {
+            let text = v["message"]["content"].as_str()?.trim();
+            // 명령·훅이 남긴 꼬리표 줄은 사용자가 친 말이 아니다.
+            (!text.is_empty() && !text.starts_with('<')).then(|| text.to_string())
+        })
+    };
+    let title = last("custom-title", "customTitle")
+        .or_else(|| last("ai-title", "aiTitle"))
+        .or_else(|| last("last-prompt", "lastPrompt"))
+        .or_else(first_prompt)
+        .unwrap_or_default();
+    let line = title.lines().next().unwrap_or_default();
+    let chars: Vec<char> = line.chars().collect();
+    if chars.len() > 60 { chars[..60].iter().collect::<String>() + "…" } else { line.to_string() }
+}
+
+/// 그 폴더의 대화들, 최근 것부터 30개. 빈 폴더(`cwd` 빈 값)는 홈이다 — 폴더 없이 연 대화창은 홈에서 돈다(claude_chat.rs).
+#[tauri::command]
+pub fn claude_conversations(app: AppHandle, root: String) -> Vec<Conversation> {
+    let root = if root.trim().is_empty() { std::env::var("USERPROFILE").unwrap_or_default() } else { root };
+    let want = squash(&root);
+    let Some(dir) = claude_home(&app)
+        .and_then(|h| std::fs::read_dir(h.join("projects")).ok())
+        .and_then(|it| it.flatten().find(|d| squash(&d.file_name().to_string_lossy()) == want))
+    else {
+        return Vec::new();
+    };
+    let mut found: Vec<(u64, String, std::path::PathBuf)> = std::fs::read_dir(dir.path())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let id = path.file_stem()?.to_str()?.to_string();
+            let meta = e.metadata().ok()?;
+            let shaped = path.extension()? == "jsonl" && id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            let modified = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+            (shaped && meta.is_file() && meta.len() > 0).then_some((modified, id, path))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.truncate(30);
+    found.into_iter().map(|(modified, id, path)| Conversation { title: conversation_title(&path), id, modified }).collect()
+}
+
 /// 대화 원문 그대로. 말풍선은 이것을 직접 뜯는다.
 ///
 /// 줄이지도 색을 입히지도 않는다. 화면이 뜯을 **데이터**라 도구 호출도 생각도 다 필요하고,
@@ -403,5 +490,26 @@ mod session_of_pid_tests {
         // 없는 pid 는 조용히 없음.
         assert_eq!(session_of_pid_at(&dir, me + 12345, None), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod conversation_tests {
+    use super::title_from;
+
+    #[test]
+    fn names_come_from_rename_then_claude_then_last_prompt() {
+        let user = r#"{"type":"user","message":{"role":"user","content":"첫 말"}}"#;
+        let meta = r#"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#;
+        let ai = r#"{"type":"ai-title","aiTitle":"claude 가 지은 이름"}"#;
+        let last = r#"{"type":"last-prompt","lastPrompt":"마지막 말"}"#;
+        let custom = r#"{"type":"custom-title","customTitle":"내가 붙인 이름"}"#;
+        assert_eq!(title_from(&[meta, user].join("\n"), ""), "첫 말", "꼬리표 줄은 사용자 말이 아니다");
+        assert_eq!(title_from(user, last), "마지막 말");
+        assert_eq!(title_from(&[user, ai].join("\n"), last), "claude 가 지은 이름");
+        assert_eq!(title_from(&[user, ai].join("\n"), &[last, custom].join("\n")), "내가 붙인 이름");
+        // 자른 자리의 반 토막 줄과 긴 이름.
+        let long = format!(r#"{{"type":"custom-title","customTitle":"{}"}}"#, "가".repeat(80));
+        assert_eq!(title_from("", &format!("le\":\"x\"}}\n{long}")), format!("{}…", "가".repeat(60)));
     }
 }

@@ -32,6 +32,8 @@ export type PaneProps = {
   renaming: boolean;
   stream?: StreamChat;
   streamBusy: boolean;
+  /** 같은 폴더의 다른 대화로 다시 연 횟수(`/resume`). 칸 키에 넣어 통로를 새로 연다. */
+  streamEpoch: number;
   /** 명부가 알려 준 이 칸 claude 의 대화 id. 있어야 같은 대화를 대화창으로 옮길 수 있다. */
   chatId?: string;
   seed?: Seed;
@@ -50,6 +52,8 @@ export type PaneProps = {
   onStreamSession: (id: string, session: string) => void;
   onCodexChange: (id: string, patch: Partial<CodexChat>) => void;
   onFolder: (id: string, agent: StreamChat["agent"], cwd: string) => void;
+  onResume: (id: string, session: string) => void;
+  onTerminal: (cmd: string, title: string) => void;
 };
 
 export function Pane(p: PaneProps) {
@@ -133,14 +137,15 @@ export function Pane(p: PaneProps) {
         )
       ) : null}
       {p.stream?.agent === "codex" ? (
-        // 폴더를 바꾸면 그 폴더의 새 대화다. 칸을 새로 그려 통로도 새로 연다.
-        <CodexStreamPane key={p.stream.cwd} id={id} chat={p.stream as CodexChat}
+        // 폴더를 바꾸거나(새 대화) /resume 으로 다른 대화를 고르면 칸을 새로 그려 통로도 새로 연다.
+        <CodexStreamPane key={`${p.stream.cwd}#${p.streamEpoch}`} id={id} chat={p.stream as CodexChat}
           slug={slug} name={who}
           focused={p.on}
-          onTitle={p.onStreamTitle} onBusy={p.onStreamBusy} onChange={p.onCodexChange} onFolder={p.onFolder} />
+          onTitle={p.onStreamTitle} onBusy={p.onStreamBusy} onChange={p.onCodexChange} onFolder={p.onFolder}
+          onResume={p.onResume} onTerminal={p.onTerminal} />
       ) : p.stream ? (
         <ClaudeStreamPane
-          key={p.stream.cwd}
+          key={`${p.stream.cwd}#${p.streamEpoch}`}
           id={id}
           cwd={p.stream.cwd}
           session={p.stream.session}
@@ -151,6 +156,8 @@ export function Pane(p: PaneProps) {
           onBusy={p.onStreamBusy}
           onSession={p.onStreamSession}
           onFolder={p.onFolder}
+          onResume={p.onResume}
+          onTerminal={p.onTerminal}
         />
       ) : (
         <Term

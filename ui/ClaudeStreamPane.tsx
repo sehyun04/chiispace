@@ -15,7 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { shortToolName, toolSummary } from "./tools";
-import { agentCommands, barCommands, mergeCommands } from "./palette";
+import { agentCommands, ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
 import {
   answerLine,
   answeredStream,
@@ -55,6 +55,8 @@ export function ClaudeStreamPane({
   onBusy,
   onSession,
   onFolder,
+  onResume,
+  onTerminal,
 }: {
   id: string;
   cwd: string;
@@ -70,6 +72,10 @@ export function ClaudeStreamPane({
   onSession: (id: string, session: string) => void;
   /** 폴더 칩에서 다른 폴더를 골랐다. 부른 쪽이 그 폴더의 새 대화로 칸을 다시 연다. */
   onFolder: (id: string, agent: "claude", cwd: string) => void;
+  /** `/resume` 에서 사용자가 고른 지난 대화로 이 칸을 다시 연다. */
+  onResume: (id: string, session: string) => void;
+  /** 로그인처럼 터미널이 꼭 필요한 일을 새 탭의 터미널에서 돌린다. */
+  onTerminal: (cmd: string, title: string) => void;
 }) {
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(false);
@@ -268,6 +274,31 @@ export function ClaudeStreamPane({
     ],
   };
   const toolbar = <StreamBar {...bar} />;
+  // TUI 에만 있던 명령 중 대화창에서 할 수 있게 만든 것. `claude -p` 는 이것들을 받지 않는다(초기화 답의 목록에 없다).
+  const titles = useRef(new Map<string, string>());
+  const paneCommands = (busy: boolean): PaletteCommand[] => [
+    // 일하는 중에 다른 대화로 바꾸면 하던 턴이 끊긴다. 새 대화(/clear)와 같이 막는다.
+    ...(busy ? [] : [{
+      name: "resume",
+      hint: "지난 대화 고르기 — 이 폴더",
+      empty: "이 폴더에 지난 대화가 없다",
+      // 목록을 보여 주기만 하고 고르는 것은 사람이다. 앱이 이 목록에서 대화를 고르지 않는다(claude_files.rs).
+      load: () =>
+        invoke<{ id: string; title: string; modified: number }[]>("claude_conversations", { root: cwd }).then((list) =>
+          list.map((c) => {
+            titles.current.set(c.id, c.title);
+            return { value: c.id, label: c.title || "이름 없는 대화", hint: ago(c.modified), current: c.id === (st.session ?? session) };
+          }),
+        ),
+      run: (v?: string) => {
+        if (!v || v === (st.session ?? session)) return;
+        onTitle(id, titles.current.get(v) || "지난 대화");
+        onResume(id, v);
+      },
+    }]),
+    { name: "login", hint: "로그인 — 새 탭의 터미널에서 claude auth login", run: () => onTerminal("claude auth login", "로그인") },
+    { name: "logout", hint: "로그아웃 — 새 탭의 터미널에서 claude auth logout", run: () => onTerminal("claude auth logout", "로그아웃") },
+  ];
   const onNew = () =>
     void transport.send("/clear").then(() => {
       // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
@@ -275,7 +306,10 @@ export function ClaudeStreamPane({
       setTalked(false);
       onTitle(id, "새 대화");
     }, () => {});
-  const commands = mergeCommands(barCommands({ ...bar, onNew, busy: !alive || st.busy }), agentCommands(st.commands));
+  const commands = mergeCommands(
+    [...barCommands({ ...bar, onNew, busy: !alive || st.busy }), ...paneCommands(!alive || st.busy)],
+    agentCommands(st.commands),
+  );
 
   const extra = (
     <>

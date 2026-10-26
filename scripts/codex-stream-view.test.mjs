@@ -100,13 +100,16 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
             perm: over?.querySelector('.ask.perm')?.textContent, ask: over?.querySelector('.ask.choose')?.textContent,
             error: texts('[role="alert"]'), stop: !!over?.querySelector('.composer-stop'), status: over?.querySelector('.codex-status')?.textContent,
             models: [...(over?.querySelectorAll('select[aria-label="Codex 모델"] option') ?? [])].map(o => o.value),
-            model: over?.querySelector('select[aria-label="Codex 모델"]')?.value, title: slot.querySelector('.pane-head .title')?.textContent };
+            model: over?.querySelector('select[aria-label="Codex 모델"]')?.value, title: slot.querySelector('.pane-head .title')?.textContent,
+            palette: texts('.palette-row') };
         }
         const r = await fetch(${JSON.stringify(base + probe)}, {method:'POST', body:JSON.stringify({panes, picker: !!side?.querySelector('.contacts')})});
         for (const c of await r.json()) {
           const slot = document.querySelector('[data-pane="' + (c.id ?? '%1') + '"]'), over = slot?.querySelector('.chat-over');
           if (c.click) (c.side ? side : over)?.querySelector(c.click)?.click();
           if (c.button) [...(over?.querySelectorAll('button') ?? [])].find(b => b.textContent === c.button)?.click();
+          // 키 사이에 화면이 다시 그려져야 한다. 몰아 보내면 Enter 가 화살표로 옮기기 전의 줄을 고른다.
+          if (c.key) { over?.querySelector('.composer textarea')?.dispatchEvent(new KeyboardEvent('keydown', {key:c.key, bubbles:true, cancelable:true})); await new Promise(r => setTimeout(r, 80)); }
           if (c.send) {
             const input = over?.querySelector('.composer textarea'); if (!input) continue;
             Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
@@ -205,6 +208,18 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await reply("CS_NEW", "%2");
     assert.deepEqual(pane("%2").error, [], "새 대화 첫 턴의 이름 저장 오류");
     assert.ok(!JSON.stringify(requests.find(r => r.mark === "CS_NEW").input).includes("CS_SECOND"));
+    // /resume: 서버가 준 지난 대화 목록에서 /new 앞의 대화를 골라 thread/resume 으로 다시 연다. 고르는 것은 사람이다.
+    commands.push({ id: "%2", send: "/resume" });
+    await until(() => pane("%2").value === "/resume " && pane("%2").palette?.some(t => t.includes("CS_SECOND")) && pane("%2").palette.some(t => t.includes("지금")), "지난 대화 목록");
+    const older = pane("%2").palette.findIndex(t => t.includes("CS_SECOND"));
+    for (let i = 0; i < older; i++) commands.push({ id: "%2", key: "ArrowDown" });
+    commands.push({ id: "%2", key: "Enter" });
+    await until(() => saved().streams?.["%2"]?.session === second, "고른 지난 대화로 전환");
+    await until(() => pane("%2").mine?.some(t => t.includes("CS_SECOND")) && !pane("%2").mine.some(t => t.includes("CS_NEW")), "고른 대화의 이력");
+    await reply("CS_BACK", "%2");
+    assert.ok(JSON.stringify(requests.find(r => r.mark === "CS_BACK").input).includes("CS_SECOND"), "고른 대화로 이어 가지 않음");
+    // 다시 연 칸의 앞 app-server 는 거둔다. 남는 것은 두 칸 몫이다.
+    await until(() => childPids(app).length === 2, "다시 연 칸의 앞 Codex 회수", 12000);
     const remaining = childPids(app); assert.equal(remaining.length, 2);
     commands.push({ id: "%2", close: true });
     await until(() => !latest.panes?.["%2"] && !saved().streams?.["%2"], "칸 닫기");

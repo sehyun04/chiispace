@@ -1,6 +1,6 @@
 /** 대화창의 입력바. 쓴 말은 칸이 준 통로(`Transport`)로 보낸다. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { choose, complete, paletteView, type PaletteAction, type PaletteCommand, type PaletteView } from "./palette";
+import { choose, complete, paletteView, type PaletteAction, type PaletteChoice, type PaletteCommand, type PaletteView } from "./palette";
 
 export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void; isCommand?: (text: string) => boolean };
 
@@ -33,9 +33,38 @@ export function Composer({
   const [pick, setPick] = useState(0);
   // Esc 로 닫은 그때의 글. 글이 바뀌면 다시 뜬다 — 닫은 채로 박히면 다음 명령도 못 고른다.
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const view = commands && live && !waiting && dismissed !== text ? paletteView(text, commands) : null;
-  const at = view ? Math.min(pick, view.items.length - 1) : 0;
+  // 고르는 순간 불러온 목록(`load`). 명령을 쓰는 동안만 들고 있다 — 다음에 열 때는 새로 불러와야 방금 생긴 대화도 보인다.
+  const [loaded, setLoaded] = useState<Record<string, PaletteChoice[]>>({});
+  // 못 불러온 까닭. 빈 목록과 섞으면 "지난 대화가 없다"로 보여 엉뚱한 데를 찾게 된다(Codex 중계가 목록 요청을 막았을 때 그랬다).
+  const [loadError, setLoadError] = useState<Record<string, string>>({});
+  const merged = commands?.map((c) => (c.load && loaded[c.name] ? { ...c, choices: loaded[c.name] } : c));
+  const view = merged && live && !waiting && dismissed !== text ? paletteView(text, merged) : null;
+  const at = view ? Math.max(0, Math.min(pick, view.items.length - 1)) : 0;
   useEffect(() => setPick(0), [text]);
+  const loading = view?.stage === "choices" && view.command.load && !loaded[view.command.name] ? view.command : null;
+  useEffect(() => {
+    if (!loading?.load) return;
+    let alive = true;
+    const name = loading.name;
+    loading.load().then(
+      (items) => alive && setLoaded((l) => ({ ...l, [name]: items })),
+      (e) => {
+        if (!alive) return;
+        setLoadError((m) => ({ ...m, [name]: String(e instanceof Error ? e.message : e) }));
+        setLoaded((l) => ({ ...l, [name]: [] }));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+    // 명령이 바뀔 때만 다시 부른다. 거르려고 글자를 칠 때마다 부르면 같은 목록을 계속 다시 읽는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading?.name]);
+  useEffect(() => {
+    if (text.startsWith("/") || !Object.keys(loaded).length) return;
+    setLoaded({});
+    setLoadError({});
+  }, [text, loaded]);
 
   // App 이 칸 포커스를 되돌릴 때(결정 5번) 터미널 대신 이 입력바를 잡을 수 있게
   // 자리를 알려 둔다. 칸 id 로 찾으므로 전역 하나를 들지 않는다(결정 6번).
@@ -71,7 +100,8 @@ export function Composer({
     });
   };
 
-  const act = (a: PaletteAction) => {
+  const act = (a: PaletteAction | null) => {
+    if (!a) return;
     if (a.kind === "fill") return setText(a.text);
     if (a.kind === "send") return send(a.text);
     setText("");
@@ -80,7 +110,14 @@ export function Composer({
 
   return (
     <div className="composer">
-      {view && <Palette view={view} at={at} onHover={setPick} onPick={(i) => act(choose(view, i))} />}
+      {view && (
+        <Palette
+          view={view.stage === "choices" && loadError[view.command.name] ? { ...view, note: `목록을 못 불러왔다 — ${loadError[view.command.name]}` } : view}
+          at={at}
+          onHover={setPick}
+          onPick={(i) => act(choose(view, i))}
+        />
+      )}
       <textarea
         ref={ref}
         rows={1}
@@ -96,7 +133,7 @@ export function Composer({
             const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
             if (move) {
               e.preventDefault();
-              return setPick((at + move + n) % n);
+              return n && setPick((at + move + n) % n);
             }
             if (e.key === "Tab") {
               e.preventDefault();
@@ -162,6 +199,7 @@ function Palette({ view, at, onHover, onPick }: { view: PaletteView; at: number;
               <span className="palette-hint" title={c.hint}>{c.hint}</span>
             </div>
           ))}
+      {view.stage === "choices" && view.note ? <div className="palette-note">{view.note}</div> : null}
     </div>
   );
 }

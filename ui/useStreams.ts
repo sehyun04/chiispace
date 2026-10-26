@@ -18,6 +18,9 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   const [streamBusy, setStreamBusy] = useState<Record<string, boolean>>({});
   /** 사용자가 "터미널로 열기"로 되돌려 둔 칸. 켤 때 터미널 없는 칸으로 옮기지 않는다. */
   const [keepTerm, setKeepTerm] = useState<Record<string, true>>({});
+  /** 칸을 같은 폴더의 다른 대화로 다시 연 횟수. 칸이 이것을 키에 넣어 통로를 새로 연다 — 대화 id 만 바뀌는 것은
+   *  `/clear` 처럼 claude 가 스스로 넘어간 것이라 다시 띄우면 안 되므로, 다시 열 때를 따로 센다. */
+  const [epoch, setEpoch] = useState<Record<string, number>>({});
   const streamsNow = useRef(streams);
   streamsNow.current = streams;
 
@@ -49,6 +52,15 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
    *  첫 응답이 오기 전에도 칸은 저장한다. */
   const open = useCallback((id: string, agent: StreamChat["agent"], cwd: string) => {
     setStreams((s) => ({ ...s, [id]: { agent, session: agent === "claude" ? crypto.randomUUID() : "", cwd } }));
+  }, []);
+
+  /** `/resume` 으로 사용자가 고른 지난 대화를 이 칸에서 연다. 고르는 것은 사람이다 — 앱이 목록에서 고르지 않는다.
+   *  Codex 는 서버가 준 대화 id 라 그대로 `thread/resume` 하고, 이미 보낸 대화라 빈 칸 표시를 끈다. */
+  const resume = useCallback((id: string, session: string) => {
+    const c = streamsNow.current[id];
+    if (!c) return;
+    setStreams((st) => ({ ...st, [id]: c.agent === "codex" ? { ...c, session, unstarted: false } : { ...c, session } }));
+    setEpoch((e) => ({ ...e, [id]: (e[id] ?? 0) + 1 }));
   }, []);
 
   /** 켤 때 터미널 칸에서 옮겨 온 Claude 칸을 얹는다. */
@@ -99,7 +111,7 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   }, [stat, streams, streamBusy]);
 
   return {
-    streams, streamBusy, keepTerm, setKeepTerm, paneView,
-    open, adopt, onSession, onBusy, onCodexChange, toTerminal, toStream,
+    streams, streamBusy, keepTerm, setKeepTerm, paneView, epoch,
+    open, adopt, resume, onSession, onBusy, onCodexChange, toTerminal, toStream,
   };
 }

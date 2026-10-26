@@ -140,6 +140,8 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
         if (c.click) (c.in === 'side' ? side : over)?.querySelector(c.click)?.click();
+        // 키 사이에 화면이 다시 그려져야 한다. 몰아 보내면 Enter 가 화살표로 옮기기 전의 줄을 고른다.
+        if (c.key && input) { input.dispatchEvent(new KeyboardEvent('keydown', { key: c.key, bubbles: true, cancelable: true })); await new Promise(r => setTimeout(r, 80)); }
         if (c.type !== undefined && input) {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.type);
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -276,7 +278,8 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
 
     // `/` 명령. 목록은 줄의 항목과 claude 가 초기화 답으로 준 명령이다. 줄 항목은 그 자리에서 바뀌어 터미널로 갈 일이 없다.
     commands.push({ type: "/" });
-    const wanted = ["/model", "/effort", "/permissions", "/status", "/clear", "/compact", "/context"];
+    // /resume·/login·/logout 은 claude -p 가 받지 않는 TUI 명령이라 앱이 만든 것이다.
+    const wanted = ["/model", "/effort", "/permissions", "/status", "/clear", "/resume", "/login", "/logout", "/compact", "/context"];
     assert.ok(await until(() => wanted.every(n => dom().palette.some(t => t.startsWith(n))), 50), "명령 목록이 모자람: " + JSON.stringify(dom().palette));
     shot("palette-commands");
     commands.push({ send: "/model" });
@@ -317,6 +320,23 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.ok(await until(() => dom().theirs.some(t => t.includes("STREAM_CLEARED_REPLY")), 300), "/clear 뒤 대화가 안 됨: " + JSON.stringify(dom()));
     assert.equal(requests.find(r => r.mark === "STREAM_CLEARED").hello, false, "/clear 뒤에도 지난 말이 실림");
     assert.ok(await until(() => dom().title === "STREAM_CLEARED 새로", 50), "새 대화의 첫 말이 이름이 안 됨: " + dom().title);
+
+    // /resume: 이 폴더의 지난 대화 목록에서 /clear 앞의 대화를 골라 그 대화로 다시 연다. 목록은 보여 주기만 하고
+    // 고르는 것은 사람이다. 지금 대화에는 "지금"이 붙는다.
+    const afterClear = saved().streams?.["%1"]?.session;
+    commands.push({ send: "/resume" });
+    assert.ok(await until(() => dom().value === "/resume " && dom().palette.length >= 2 && dom().palette.some(t => t.includes("지금")), 100),
+      "지난 대화 목록이 안 뜸: " + JSON.stringify(dom().palette));
+    shot("resume-list");
+    const older = dom().palette.findIndex(t => !t.includes("지금"));
+    for (let i = 0; i < older; i++) commands.push({ key: "ArrowDown" });
+    commands.push({ key: "Enter" });
+    assert.ok(await until(() => saved().streams?.["%1"]?.session === sid, 100), "고른 지난 대화로 안 바뀜: " + JSON.stringify(saved().streams));
+    assert.ok(await until(() => dom().mine.some(t => t.includes("STREAM_HELLO")) && !dom().theirs.some(t => t.includes("STREAM_CLEARED")), 200),
+      "고른 대화를 안 그림: " + JSON.stringify(dom()));
+    assert.ok(await until(() => !dom().inputDisabled, 200), "고른 대화의 claude 가 안 켜짐");
+    assert.ok(await until(() => streamProcs(sid) > 0, 80), "고른 대화로 claude 가 안 떴음");
+    assert.notEqual(afterClear, sid);
 
     // 폴더 칩: 한 단계 위(..)를 고르면, 주고받은 말이 있으니 먼저 묻는다. 새로 시작하면 그 폴더의 새 대화로 다시 연다.
     // claude 는 대화를 폴더별로 적어 같은 대화를 다른 폴더로 옮겨 이어 갈 수 없다.

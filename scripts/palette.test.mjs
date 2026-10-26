@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentCommands, barCommands, choose, complete, mergeCommands, paletteView } from "../ui/palette.ts";
+import { agentCommands, ago, barCommands, choose, complete, mergeCommands, paletteView } from "../ui/palette.ts";
 
 const field = (value, values, calls) => ({ value, choices: values.map((v) => ({ value: v, label: v.toUpperCase() })), onChange: (v) => calls.push(v) });
 
@@ -74,4 +74,27 @@ test("앱이 하지 않는 명령은 보낸다 — 꼭 써야 하는 인자가 �
   assert.deepEqual(choose(paletteView("/context", list), 0), { kind: "send", text: "/context" });
   assert.equal(complete(paletteView("/comp", list), 0), "/compact ", "Tab 은 보내지 않고 채우기만");
   assert.equal(paletteView("/compact 남길 것", list), null, "인자를 쓰는 중에는 목록이 없다");
+});
+
+test("고르는 순간 불러오는 목록은 불러오는 동안·비었을 때도 자리를 띄우고, Enter 는 아무것도 보내지 않는다", async () => {
+  let ran = null;
+  const resume = { name: "resume", hint: "지난 대화", empty: "지난 대화가 없다", load: async () => [], run: (v) => (ran = v) };
+  assert.deepEqual(choose(paletteView("/resume", [resume]), 0), { kind: "fill", text: "/resume " }, "불러올 목록이 있으면 먼저 그 목록으로");
+  const loading = paletteView("/resume ", [resume]);
+  assert.equal(loading.note, "불러오는 중");
+  assert.equal(choose(loading, 0), null, "불러오는 중에 Enter 가 /resume 을 claude 에 보내면 안 된다");
+  assert.equal(paletteView("/resume ", [{ ...resume, choices: [] }]).note, "지난 대화가 없다");
+  const loaded = { ...resume, choices: [{ value: "a1", label: "로그 찾기" }, { value: "b2", label: "배포" }] };
+  assert.deepEqual(paletteView("/resume 배", [loaded]).items.map((c) => c.value), ["b2"]);
+  assert.equal(paletteView("/resume 없는말", [loaded]).note, "맞는 것 없음");
+  choose(paletteView("/resume 로그", [loaded]), 0).run();
+  assert.equal(ran, "a1");
+});
+
+test("목록의 언제는 하루 안이면 몇 분·시간 전, 그보다 오래면 날짜", () => {
+  const now = new Date(2026, 9, 26, 12, 0).getTime();
+  assert.equal(ago(now - 20 * 1000, now), "방금");
+  assert.equal(ago(now - 5 * 60000, now), "5분 전");
+  assert.equal(ago(now - 3 * 3600000, now), "3시간 전");
+  assert.equal(ago(new Date(2026, 9, 20, 9, 0).getTime(), now), "10월 20일");
 });

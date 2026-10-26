@@ -15,13 +15,17 @@ export type PaletteCommand = {
   args?: string;
   /** 고르면 이어서 뜨는 목록. */
   choices?: PaletteChoice[];
+  /** 고르는 순간 불러오는 목록(지난 대화처럼 미리 들고 있을 수 없는 것). 불러오면 부른 쪽이 `choices` 로 채워 다시 준다. */
+  load?: () => Promise<PaletteChoice[]>;
+  /** 목록이 비었을 때 보일 말. */
+  empty?: string;
   /** 앱이 직접 한다. 없으면 `/이름` 이나 `/이름 값` 을 보낼 말로 보낸다. */
   run?: (value?: string) => void;
 };
 
 export type PaletteView =
   | { stage: "commands"; items: PaletteCommand[] }
-  | { stage: "choices"; command: PaletteCommand; items: PaletteChoice[] };
+  | { stage: "choices"; command: PaletteCommand; items: PaletteChoice[]; note?: string };
 
 export type PaletteAction = { kind: "fill"; text: string } | { kind: "run"; run: () => void } | { kind: "send"; text: string };
 
@@ -54,24 +58,29 @@ export function paletteView(text: string, commands: PaletteCommand[]): PaletteVi
   const arg = /^\/(\S+) (.*)$/.exec(text);
   if (!arg) return null;
   const command = commands.find((c) => names(c).includes(lower(arg[1])));
-  if (!command?.choices?.length) return null;
+  if (!command) return null;
+  // 불러오는 목록은 비어도 목록 자리를 띄워 까닭을 보인다. 안 띄우면 Enter 가 "/resume" 을 claude 에 보낸다.
+  if (command.load && !command.choices) return { stage: "choices", command, items: [], note: "불러오는 중" };
+  if (!command.choices?.length) return command.load ? { stage: "choices", command, items: [], note: command.empty ?? "없음" } : null;
   const q = lower(arg[2].trim());
   const items = command.choices.filter((c) => !q || lower(c.label).includes(q) || lower(c.value).includes(q));
-  return items.length ? { stage: "choices", command, items } : null;
+  if (items.length) return { stage: "choices", command, items };
+  return command.load ? { stage: "choices", command, items: [], note: "맞는 것 없음" } : null;
 }
 
 /** 꼭 써야 하는 인자. `[이름]`·`<optional …>` 처럼 빼도 되는 것은 고르면 바로 보낸다. */
 const needsArgs = (args?: string) => !!args && !args.startsWith("[") && !/optional/i.test(args);
 
-/** Enter 로 고를 때. */
-export function choose(view: PaletteView, index: number): PaletteAction {
+/** Enter 로 고를 때. 고를 것이 없는 목록(불러오는 중·빈 목록)이면 아무 일도 안 한다. */
+export function choose(view: PaletteView, index: number): PaletteAction | null {
   if (view.stage === "commands") {
     const c = view.items[index];
-    if (c.choices?.length || needsArgs(c.args)) return { kind: "fill", text: `/${c.name} ` };
+    if (c.choices?.length || c.load || needsArgs(c.args)) return { kind: "fill", text: `/${c.name} ` };
     if (c.run) return { kind: "run", run: () => c.run!() };
     return { kind: "send", text: `/${c.name}` };
   }
   const choice = view.items[index];
+  if (!choice) return null;
   const c = view.command;
   if (c.run) return { kind: "run", run: () => c.run!(choice.value) };
   return { kind: "send", text: `/${c.name} ${choice.value}` };
@@ -79,9 +88,9 @@ export function choose(view: PaletteView, index: number): PaletteAction {
 
 /** Tab 으로 채울 때. 보내지 않고 입력바에만 둔다. */
 export function complete(view: PaletteView, index: number): string {
-  if (view.stage === "choices") return `/${view.command.name} ${view.items[index].value}`;
+  if (view.stage === "choices") return `/${view.command.name} ${view.items[index]?.value ?? ""}`;
   const c = view.items[index];
-  return c.choices?.length || c.args ? `/${c.name} ` : `/${c.name}`;
+  return c.choices?.length || c.load || c.args ? `/${c.name} ` : `/${c.name}`;
 }
 
 type Field = { value: string; choices: { value: string; label: string; title?: string }[]; onChange: (value: string) => void; disabled?: boolean };
@@ -115,4 +124,14 @@ export function agentCommands(list: { name: string; description?: string; argume
 export function mergeCommands(app: PaletteCommand[], agent: PaletteCommand[]): PaletteCommand[] {
   const taken = new Set(app.flatMap(names));
   return [...app, ...agent.filter((c) => !names(c).some((n) => taken.has(n)))];
+}
+
+/** 목록의 "언제". 하루 안이면 몇 분·몇 시간 전, 그보다 오래면 날짜 — 지난 대화를 고를 때 기억을 되짚는 손잡이다. */
+export function ago(ms: number, now = Date.now()): string {
+  const m = Math.floor((now - ms) / 60000);
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분 전`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}시간 전`;
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }

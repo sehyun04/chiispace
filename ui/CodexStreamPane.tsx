@@ -6,17 +6,21 @@ import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { titleFrom } from "./claude-stream";
 import { approvalOptions, blockingPrompt, codexItems, initialCodex, questionAnswer, reduceCodex, resumedCodex, type CodexStream, type Data, type Request } from "./codex-stream";
 import { missingUnstarted, type StreamChat } from "./stream-session";
-import { barCommands, mergeCommands, type PaletteCommand } from "./palette";
+import { ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
 
 type Session = Extract<StreamChat, { agent: "codex" }>;
 type Event = { id: string; run: string; message: Data };
-export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy, onChange, onFolder }: {
+export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy, onChange, onFolder, onResume, onTerminal }: {
   id: string; chat: Session; slug?: string; name?: string; focused: boolean;
   onTitle: (id: string, title: string) => void;
   onBusy: (id: string, busy: boolean) => void;
   onChange: (id: string, patch: Partial<Session>) => void;
   /** 폴더 칩에서 다른 폴더를 골랐다. 부른 쪽이 그 폴더의 새 대화로 칸을 다시 연다. */
   onFolder: (id: string, agent: "codex", cwd: string) => void;
+  /** `/resume` 에서 사용자가 고른 지난 대화로 이 칸을 다시 연다. */
+  onResume: (id: string, session: string) => void;
+  /** 로그인처럼 터미널이 꼭 필요한 일을 새 탭의 터미널에서 돌린다. */
+  onTerminal: (cmd: string, title: string) => void;
 }) {
   const [state, setState] = useState<CodexStream>(initialCodex);
   const latest = useRef(state);
@@ -202,7 +206,38 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     ],
   };
   const toolbar = <StreamBar {...bar} />;
-  const commands = mergeCommands(barCommands({ ...bar, onNew: () => { void transport.send("/new").catch(() => {}); }, busy: disabled }), CODEX_COMMANDS);
+  // 지난 대화는 서버가 준 목록에서 사용자가 고른다. 서버가 준 id 라 그대로 thread/resume 한다(CLAUDE.md "새 Codex 칸은 서버가 준 ID만").
+  const titles = useRef(new Map<string, string>());
+  const folderKey = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  const same = (a: string, b: string) => folderKey(a) === folderKey(b);
+  const paneCommands: PaletteCommand[] = [
+    ...(disabled ? [] : [{
+      name: "resume",
+      hint: "지난 대화 고르기 — 이 폴더",
+      empty: "이 폴더에 지난 대화가 없다",
+      // 서버의 폴더 거르기는 경로 표기(빗금 방향)가 같아야 맞으므로 받아서 여기서 거른다. 출처를 안 주면 서버는
+      // 대화형(CLI)만 돌려줘 이 칸들(app-server)에서 한 대화가 빠진다.
+      load: async () => {
+        const page = await request("thread/list", { limit: 100, sortKey: "updated_at", sourceKinds: ["cli", "vscode", "appServer"] });
+        return (page.data ?? [] as Data[])
+          .filter((t: Data) => !t.parentThreadId && (!chat.cwd || same(String(t.cwd ?? ""), chat.cwd)))
+          .slice(0, 30)
+          .map((t: Data) => {
+            const title = String(t.name || t.preview || "").split(/\r?\n/)[0].slice(0, 60);
+            titles.current.set(t.id, title);
+            return { value: t.id, label: title || "이름 없는 대화", hint: ago(Number(t.updatedAt) * 1000), current: t.id === state.thread };
+          });
+      },
+      run: (v?: string) => {
+        if (!v || v === state.thread) return;
+        onTitle(id, titles.current.get(v) || "지난 대화");
+        onResume(id, v);
+      },
+    }]),
+    { name: "login", hint: "로그인 — 새 탭의 터미널에서 codex login", run: () => onTerminal("codex login", "로그인") },
+    { name: "logout", hint: "로그아웃 — 새 탭의 터미널에서 codex logout", run: () => onTerminal("codex logout", "로그아웃") },
+  ];
+  const commands = mergeCommands(barCommands({ ...bar, onNew: () => { void transport.send("/new").catch(() => {}); }, busy: disabled }), [...paneCommands, ...CODEX_COMMANDS]);
   return <>
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}

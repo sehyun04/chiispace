@@ -57,8 +57,9 @@ fn write(proc: &mut Proc, value: &Value) -> Result<(), String> {
     bytes.push(b'\n');
     proc.stdin.write_all(&bytes).and_then(|_| proc.stdin.flush()).map_err(|e| format!("Codex에 보내지 못했다: {e}"))
 }
+// thread/list 는 /resume 에서 사용자가 고를 지난 대화 목록을 읽기만 한다. 고르는 것은 사람이고, 고른 id 는 thread/resume 으로 연다.
 fn permitted(method: &str) -> bool {
-    matches!(method, "initialize" | "thread/start" | "thread/resume" | "thread/read"
+    matches!(method, "initialize" | "thread/start" | "thread/resume" | "thread/read" | "thread/list"
         | "thread/compact/start" | "turn/start" | "turn/steer" | "turn/interrupt"
         | "model/list" | "account/read" | "account/rateLimits/read")
 }
@@ -215,6 +216,6 @@ mod tests {
     #[test]
     fn chat_transport_cannot_execute_arbitrary_processes_or_write_config() {
         for method in ["process/spawn", "command/exec", "config/value/write", "account/login/start", "thread/name/set"] { assert!(!permitted(method)); }
-        for method in ["thread/start", "thread/resume", "turn/start", "turn/interrupt", "model/list"] { assert!(permitted(method)); }
+        for method in ["thread/start", "thread/resume", "thread/list", "turn/start", "turn/interrupt", "model/list"] { assert!(permitted(method)); }
     }
 }

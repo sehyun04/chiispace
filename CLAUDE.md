@@ -21,7 +21,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   자동 실행한다.
 - **대화창(터미널 없는 칸).** 옆칸 `새 대화` 에서 고른 상대. Claude 는 `claude -p` stream-json 통로(`claude_chat.rs`), Codex 는 로컬
   `codex app-server --listen stdio://`(`codex_stream.rs`)로 돈다. 권한·질문은 카드, 입력바 위 줄은 `StreamBar` 하나, `/` 명령 목록,
-  줄 오른쪽 폴더 칩. 켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 연다
+  줄 오른쪽 폴더 칩. TUI 에만 있던 `/resume`(지난 대화 고르기)·`/login`·`/logout` 은 앱이 만들었다(10월 26일).
+  켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 연다
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
 - **방향(사용자):** TUI 에만 있는 기능을 대화창으로 다 옮기면 대화창을 메인으로 한다. 새 기능은 대화창에 넣는다.
 
@@ -58,6 +59,9 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   새 대화창을 연다 — 옮길 말이 없으니 잃는 것이 없다. `--resume` 으로 열면 "No conversation found" 로 끝나 빈 셸만 남았다.
   `/clear` 로 claude 가 새 대화로 넘어가면 통로가 알려 준 그 id 를 따라 적는다(추측이 아니라 claude 의 답이다).
   대화창은 명부가 준 id 의 대화 파일을 **그리기만** 한다 — 파일을 뒤져 대화를 고르지 않는다.
+  **`/resume` 의 지난 대화 목록(`claude_conversations`·Codex `thread/list`)은 사람이 고르라고 보여 주기만 한다.** 앱은 그 목록에서
+  하나를 고르지 않는다 — 켤 때의 복원·머리줄 옮기기·폴더 칩 어디에도 이 목록을 쓰지 마라. 쓰는 순간 옛 "가장 최근 대화" 고르기가
+  되살아나 사용자가 쓰던 대화를 칸이 뺏는다. 사용자가 누른 id 만 `--resume`·`thread/resume` 으로 연다.
   직접 지정한 attach·기타 수동 명령은 그대로 둔다.
 - **새 Codex 칸은 서버가 준 ID만 `thread/resume`으로 복원한다.** 세션의 `agent`가 없는 구형 stream 기록은
   Claude로 읽는다. `unstarted`가 참이어도 먼저 저장 ID의 복원을 시도한다. 그 ID에 대해 정확히
@@ -71,6 +75,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   `--profile`·샌드박스·승인 옵션을 없애거나 권한을 넓히지 않는다. 원문·임의 MCP 인증은 저장하지 않는다.
   새 대화의 로컬 stdio app-server는 폐기한 원격 TUI 중계가 아니다. 설치된 CLI의 기존 인증·설정을 쓰며
   훅 신뢰 DB나 전역 설정을 고치지 않는다. 앱 종료 시 Job Object로 npm 실행기의 자식까지 거둔다.
+  app-server 로는 허용한 메서드만 보낸다(`codex_stream.rs` 의 `permitted`). 늘릴 때는 읽기만 하는지부터 본다 —
+  `thread/list`(지난 대화 목록)는 읽기만 해서 넣었고, 실행·설정 쓰기·로그인 메서드는 막아 둔다.
 - 칸에 대화 id 가 붙어 있으면 `--resume <id>` 로 그 대화를, 없으면 `--continue` 로 폴더의 최근
   대화를 연다. **둘째 칸부터 선택 목록으로 돌리던 가드는 다시 넣지 마라** — 사용자가 직접
   빼라고 했고, 넣으면 "이어가기가 또 안 된다"가 된다. id 가 없는 칸이 여럿이면 그 칸들이 같은
@@ -123,10 +129,11 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 
 ### 남은 범위
 
-- 터미널 없는 칸의 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력, 로그인·인증 UI.
-  `/config`·`/resume` 등 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를 터미널에서 연다.
-  이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다. 지난 대화 고르기(`/resume`)가 생기면 폴더를 바꿔
-  두고 온 대화로도 돌아갈 수 있다.
+- 터미널 없는 칸의 칸 사이 협업, Codex 서브에이전트 상세 화면, 이미지 입력.
+  `/config`·`/permissions`·`/memory`·`/export` 등 남은 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를
+  터미널에서 연다. 이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
+  로그인은 앱 안에 만들지 않는다 — 브라우저 인증을 앱이 받으면 인증 정보를 앱이 다뤄야 한다. `/login` 은 새 탭의 터미널에서
+  CLI 의 로그인(`claude auth login`·`codex login`)을 돌린다.
 - 실모델 자연어 위임, Claude 팀 연동, 에이전트 자동 생성·지속 작업은 별도 범위다.
 - 두 앱의 정확한 동시 기동 타임아웃은 미진단이다(검증은 한 번에 하나씩 돈다). 순차 기동 통과와 구별한다.
 - 창 분리·설정·테마 전환·터미널 검색은 미구현이다.
@@ -369,7 +376,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 |---|---|
 | `src-tauri/src/lib.rs` | PTY ↔ 웹뷰 다리, pane 상태, 검증 손잡이 |
 | `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
-| `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 |
+| `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |

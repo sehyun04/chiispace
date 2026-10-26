@@ -38,7 +38,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/CodexStreamPane.tsx`, `ui/codex-stream.ts` | Codex 대화·승인·질문·설정과 스트림 해석 |
 | `ui/stream-session.ts` | 터미널 없는 Claude·Codex 칸의 저장 구분·빈 대화 복원 경계 |
 | `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
-| `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 |
+| `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
 | `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
@@ -104,6 +104,11 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 대화창 입력바 위 줄 오른쪽의 폴더 칩을 누르면 한 단계 위(`..`), 바로 아래 폴더들, 다른 폴더 고르기가 뜬다. 고르면 그 폴더의
 새 대화로 다시 연다(claude 는 대화를 폴더별로 적어 같은 대화를 옮겨 갈 수 없다). 주고받은 말이 있으면 한 번 묻는다.
 새 대화는 `/clear` 다.
+
+`/resume` 은 이 폴더의 지난 대화를 최근 것부터 띄운다(이름은 `/rename` 으로 붙인 것 · claude 가 지은 것 · 마지막 말 순, Codex 는
+서버의 `thread/list`). 고르면 그 칸이 그 대화로 다시 열린다 — 폴더 칩으로 바꾸고 두고 온 대화로 돌아가는 길이기도 하다.
+목록은 보여 주기만 하고 고르는 것은 사람이다. `/login`·`/logout` 은 새 탭의 터미널에서 CLI 의 로그인을 돌린다
+(`claude auth login`·`codex login`). 브라우저 인증을 앱이 대신 받지 않는다.
 
 터미널 없는 칸은 아직 칸 사이 협업(다른 칸이 글을 넣거나 화면을 엿보는 것)을 받지 않는다. 목록 아래 `셸만` 은 명령 없이 셸로 열고,
 **이 컴퓨터에 실제로 있는 셸만** 뜬다(명령 프롬프트 · Windows PowerShell · PowerShell 7 · Git Bash). 목록을 앱에 박아 두면 없는 것을 골랐을 때 칸이
