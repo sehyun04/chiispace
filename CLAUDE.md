@@ -26,7 +26,7 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
 - **방향(사용자):** TUI 에만 있는 기능을 대화창으로 다 옮기면 대화창을 메인으로 한다. 새 기능은 대화창에 넣는다.
 
-- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 17일 01:44(`18b4665`, 3인방 아이콘판).
+- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 26일 14:15(`4d427af`, `/resume`·`/login` 판).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
 - **사용자 실사용 확인이 남은 것:** 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
   실제 모델 변경 뒤 연속 대화. 자동 검증 통과를 실사용 해결로 간주하지 않는다(9월 16일 사용자 재신고 뒤의 원칙).
