@@ -118,10 +118,45 @@ pub fn run_agent(name: &str, args: Vec<String>) -> Result<i32> {
     let args = append_args(defaults, args);
     // 대화 선택과 권한 적용은 설치된 CLI에 맡긴다. 로컬 실행을 원격 TUI로 바꾸지 않는다.
     let status = command.args(args).status().context("에이전트 시작 실패").map(|s| s.code().unwrap_or(1));
+    #[cfg(windows)]
+    settle_cursor();
     if injected {
         let _ = crate::rpc::collab("unregister", json!({"failed":status.as_ref().map_or(true, |code| *code != 0)}));
     }
     status
+}
+
+/// 에이전트가 끝난 뒤 커서 아래에 그린 것이 남아 있으면 그 아래 빈 줄로 내린다.
+///
+/// claude 는 그리는 동안 커서를 입력 자리(고르기 창에서는 고른 줄)에 세워 둔다. 보통의 끝내기는 커서를
+/// 그린 것 아래로 내리고 나가지만 `--resume` 고르기 창을 Esc 로 닫으면 그대로 나간다. 그러면 셸 프롬프트가
+/// 남은 목록 한가운데에 찍히고, 다음에 띄운 claude 는 아래가 빈 줄인 줄 알고 남은 글자 위에 겹쳐 그린다.
+/// 앱이 스크롤백을 살리려고 claude 를 대체 화면 없이 돌려서 드러나는 일이다(대체 화면이면 나갈 때 통째로 걷힌다).
+/// 웹뷰에서 xterm 커서만 옮기면 안 된다 — ConPTY 가 아는 커서와 어긋나 PowerShell 이 절대 좌표로 그리는
+/// 입력줄이 엉뚱한 줄에 찍힌다. 그래서 같은 콘솔에 붙어 있는 래퍼가 콘솔 API 로 옮긴다.
+#[cfg(windows)]
+fn settle_cursor() {
+    use windows_sys::Win32::System::Console::*;
+    unsafe {
+        let out = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
+        // 출력이 파이프면(`claude -p ... | ...`) 콘솔이 아니라 여기서 끝난다.
+        if GetConsoleScreenBufferInfo(out, &mut info) == 0 {
+            return;
+        }
+        let width = info.dwSize.X.max(0) as usize;
+        let mut row = vec![0u16; width];
+        let last = (info.dwCursorPosition.Y + 1..=info.srWindow.Bottom).rev().find(|&y| {
+            let mut read = 0;
+            ReadConsoleOutputCharacterW(out, row.as_mut_ptr(), width as u32, COORD { X: 0, Y: y }, &mut read) != 0
+                && row[..read as usize].iter().any(|&c| c != b' ' as u16 && c != 0)
+        });
+        if let Some(y) = last {
+            SetConsoleCursorPosition(out, COORD { X: 0, Y: y });
+            let mut written = 0;
+            WriteConsoleW(out, [b'\r' as u16, b'\n' as u16].as_ptr(), 2, &mut written, std::ptr::null());
+        }
+    }
 }
 
 fn codex_interactive(args: &[String]) -> bool {

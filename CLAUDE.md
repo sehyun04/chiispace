@@ -247,6 +247,10 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
    확인은 `window.__terms[id].buffer.active.type` 으로 한다 — `normal` 이면 걸린 것이고
    `alternate` 면 안 걸린 것이다. `baseY` 만 보면 안 된다. 갓 복원한 칸은 claude 가
    화면 한 장만 다시 그리므로 제대로 걸려 있어도 0 이다.
+   그 값으로 claude 가 고르기 창(`--resume`)을 Esc·Ctrl+C 로 닫을 때 커서를 그린 것 아래로 내리지 않고 나가면
+   셸 프롬프트가 목록 한가운데에 찍혀 화면이 겹친다. claude 래퍼가 끝난 뒤 콘솔 API 로 커서를 내린다(`launch.rs` 의
+   `settle_cursor`, [작업 정리 29절](docs/WORKLOG.md#29-10월-26일-추가-claude-고르기-창을-닫은-뒤-터미널이-깨지던-것)).
+   **웹뷰에서 xterm 커서를 옮겨 고치지 마라** — ConPTY 가 아는 커서와 어긋나 PowerShell 이 절대 좌표로 그리는 입력줄이 엉뚱한 줄에 찍힌다.
 
 19. **복원 명령 앞에 빈 줄을 하나 던진다.** PowerShell 은 시작할 때
    `-NoExit -Command <프롬프트 심>` 을 먼저 도는데, 그게 끝나고 대화형 입력으로
@@ -380,6 +384,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
+| `src-tauri/src/launch.rs` · `src-tauri/src/bin/chiispace-cli.rs` | 칸 셸의 `claude`·`codex` 래퍼 — 실행별 MCP 연결, 끝난 뒤 커서 내리기(`settle_cursor`) |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 세션 저장/복원을 쥐고 아래를 조립한다 |
 | `ui/Pane.tsx` | 칸 하나 — 머리줄([터미널][대화창]), 터미널 또는 대화창 중 무엇을 그릴지 |

@@ -364,6 +364,8 @@ Claude는 `CHIISPACE_TEST_REAL_CLAUDE`에 설치된 exe를 지정한 뒤
 `node --test scripts/claude-continue.test.mjs`를 실행한다. 별도 `CLAUDE_CONFIG_DIR`에 합성 대화를 만들고
 구형 ID 복원 명령이 `--continue`로 바뀌어 실제 CLI에 이전 내용이 표시되는지 확인한다.
 테스트 프로젝트만 신뢰하고 가짜 인증 키·루프백 서버를 사용한다. CLI 연결 확인 외 모델 API 요청은 허용하지 않는다.
+같은 격리로 `scripts/claude-exit.test.mjs` 는 PowerShell 칸에서 `claude --resume` 고르기 창을 Esc·Ctrl+C 로 닫은 뒤 프롬프트가
+남은 목록 아래에 찍히는지, 다시 띄운 claude 가 남은 글자 위에 겹쳐 그리지 않는지 본다(claude 래퍼의 `settle_cursor`).
 
 백스페이스는 `node --test scripts/terminal-input.test.mjs`로 실제 WebView의 textarea에
 `KeyboardEvent`·조합·blur 이벤트를 보내고 실제 PTY 수신 바이트를 확인한다.
