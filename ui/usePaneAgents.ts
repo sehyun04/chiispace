@@ -127,7 +127,10 @@ export function usePaneAgents() {
     for (const [id, p] of Object.entries(stat)) {
       const name = restoreCmd(p, sessionOf.current[id]);
       if (name) {
-        procs.current[id] = name;
+        // cmd 셸은 제 폴더를 알려 주지 않아 폴링의 cwd 가 빈다. 그때 앞서 알던 자리(칸을 연 명령의 폴더)를 지우면
+        // 다음 복원과 [대화창] 옮기기가 탭 폴더로 떨어진다 — 폴더 칩으로 바꾼 대화가 원래 폴더로 돌아갔다.
+        const known = procs.current[id]?.cwd;
+        procs.current[id] = name.cwd || !known ? name : { ...name, cwd: known };
         sawRun.current[id] = true;
         idleRuns.current[id] = 0;
       } else {

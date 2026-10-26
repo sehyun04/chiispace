@@ -32,6 +32,13 @@ pub async fn fs_pick(app: AppHandle) -> Option<String> {
     Some(picked.into_path().ok()?.to_string_lossy().replace('\\', "/"))
 }
 
+/// 폴더 없이 연 대화창(`cwd` 빈 값)이 실제로 도는 자리. claude_chat.rs 가 그 칸의 claude 를 홈에서 띄우므로,
+/// 같은 대화를 터미널로 옮길 때도 홈에서 연다 — 셸은 폴더를 안 주면 앱 프로세스의 폴더(대개 exe 옆)에서 뜬다.
+#[tauri::command]
+pub fn home_dir() -> Option<String> {
+    std::env::var("USERPROFILE").ok().map(|p| p.replace('\\', "/"))
+}
+
 #[derive(serde::Serialize)]
 pub struct Dirs {
     parent: Option<String>,

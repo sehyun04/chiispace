@@ -328,6 +328,7 @@ pub fn run() {
             workspace::initial_root,
             workspace::fs_pick,
             workspace::fs_dirs,
+            workspace::home_dir,
             workspace::git_status,
             claude_files::claude_session_of_pid,
             claude_files::claude_transcript_raw,

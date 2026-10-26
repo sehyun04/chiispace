@@ -32,7 +32,9 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
   const before = protectedFiles.map(hash);
   // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
   // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막는다.
-  const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
+  // 5단계는 폴더 칩으로 한 단계 위(root)로 옮겨 가므로 그 폴더도 신뢰해 둔다.
+  const trusted = Object.fromEntries([project, root].flatMap((p) => [[p, { hasTrustDialogAccepted: true }], [p.replaceAll("\\", "/"), { hasTrustDialogAccepted: true }]]));
+  const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: trusted, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
   for (const config of [path.join(home, ".claude.json"), home + ".json"]) writeFileSync(config, JSON.stringify(settings));
   writeFileSync(path.join(home, "settings.json"), JSON.stringify({ permissions: { defaultMode: "plan" } }));
   const state = path.join(root, "session.json");
@@ -86,13 +88,15 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
           buttons: [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].map(e => e.textContent),
           pressed: slot?.querySelector('.pane-head .mode button[aria-pressed="true"]')?.textContent ?? null,
           disabled: [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].filter(e => e.disabled).map(e => e.textContent),
+          folderMenu: over?.querySelector('.folder-menu')?.textContent ?? null,
           screen: b ? Array.from({length:b.length}, (_, y) => b.getLine(y)?.translateToString(true) ?? '').join('\\n') : '',
         };
       }
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({panes})});
       for (const c of await r.json()) {
         const slot = document.querySelector('[data-pane="' + c.id + '"]');
-        [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].find(e => e.textContent === c.button)?.click();
+        if (c.button) [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].find(e => e.textContent === c.button)?.click();
+        if (c.click) slot?.querySelector(c.click)?.click();
       }
     } finally { pending = false; }
   }, 150); return 'isolated restore test'; })()`;
@@ -169,6 +173,32 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
       assert.ok(await until(() => holders().join() === "stream", 80), "대화창으로 바꿨는데 터미널 claude 가 남음: " + holders());
       assert.ok(await until(() => !saved().keepTerminal?.includes("%0") && saved().streams?.["%0"]?.session === known, 50),
         "되돌린 표시가 안 걷힘: " + JSON.stringify(saved()));
+
+      // 5. 한 마디도 없는 대화도 두 방향으로 옮긴다 — 폴더 칩으로 폴더를 바꾼 직후가 늘 그렇다. 전에는 [터미널]이
+      //    `--resume` 으로 그 id 를 찾다 "No conversation found" 로 끝나 빈 셸만 남고, [대화창]은 아무 일도 안 했다.
+      const same = (a, b) => a.replaceAll("\\", "/").toLowerCase() === b.replaceAll("\\", "/").toLowerCase();
+      commands.push({ id: "%0", click: ".stream-bar .folder > button" });
+      assert.ok(await until(() => (pane("%0").folderMenu ?? "").includes(".."), 50), "폴더 칩 목록이 안 뜸: " + JSON.stringify(pane("%0")));
+      commands.push({ id: "%0", click: ".folder-row.up" });
+      assert.ok(await until(() => /새로 시작할까/.test(pane("%0").folderMenu ?? ""), 50), "이어 연 대화인데 묻지 않음");
+      commands.push({ id: "%0", click: ".folder-ask .ask-go" });
+      assert.ok(await until(() => same(saved().streams?.["%0"]?.cwd ?? "", root) && saved().streams["%0"].session !== known, 100),
+        "폴더를 바꿨는데 새 대화가 안 됨: " + JSON.stringify(saved().streams));
+      await until(() => pane("%0").stream && !pane("%0").disabled?.includes("터미널"), 100);
+      commands.push({ id: "%0", button: "터미널" });
+      assert.ok(await until(() => pane("%0").xterm && saved().procs?.["%0"], 100), "빈 대화를 터미널로 못 옮김: " + JSON.stringify(pane("%0")));
+      assert.ok(!saved().procs["%0"].cmd.includes("--resume"), "파일 없는 대화를 --resume 으로 열려 함: " + saved().procs["%0"].cmd);
+      assert.ok(same(saved().procs["%0"].cwd ?? "", root), "터미널이 바꾼 폴더에서 안 열림: " + saved().procs["%0"].cwd);
+      // 터미널 claude 가 명부로 대화를 알려 주면 [대화창]이 풀린다. 그 대화도 비어 있으니 그 폴더의 새 대화창으로 연다.
+      assert.ok(await until(() => pane("%0").pressed === "터미널" && !pane("%0").disabled?.includes("대화창"), 300),
+        "터미널에서 새 claude 가 안 떠 대화창으로 갈 길이 없음:\n" + (pane("%0").screen ?? "").slice(-600));
+      assert.ok(!/No conversation found/.test(pane("%0").screen ?? ""), "빈 대화를 찾다 실패함:\n" + pane("%0").screen.slice(-600));
+      for (let i = 0; i < 15 && !pane("%0").stream; i++) {
+        commands.push({ id: "%0", button: "대화창" });
+        await until(() => pane("%0").stream, 20);
+      }
+      assert.ok(await until(() => pane("%0").stream && !pane("%0").xterm && same(saved().streams?.["%0"]?.cwd ?? "", root), 100),
+        "빈 대화를 대화창으로 못 옮김: " + JSON.stringify({ pane: pane("%0").buttons, streams: saved().streams }));
     } finally {
       await close(app);
     }

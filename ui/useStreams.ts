@@ -59,24 +59,35 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   /** 터미널 없는 Claude 칸을 같은 대화의 터미널 칸으로 다시 연다. `/config` 같은 터미널 메뉴가 필요할 때의 길이다.
    *  같은 칸 자리에서 그리는 것만 바뀐다 — 통로는 그 칸이 내려가며 거두고, 터미널은 복원 명령으로 이어 연다.
    *  되돌린 칸은 다음에 켜도 터미널로 둔다. 어느 명령으로 열지는 부른 쪽(`seed`)이 건다. */
-  const toTerminal = useCallback((id: string, seed: (id: string, s: Seed) => void) => {
+  const toTerminal = useCallback(async (id: string, seed: (id: string, s: Seed) => void) => {
     const c = streamsNow.current[id];
     if (!c || c.agent !== "claude") return;
-    seed(id, { cmd: `claude --resume ${c.session}`, auto: true, cwd: c.cwd || undefined, claudeSession: c.session });
+    // 폴더 없이 연 대화창의 claude 는 홈에서 돈다(claude_chat.rs). 터미널도 거기서 열어야 같은 자리에서 일한다.
+    const cwd = c.cwd || ((await invoke<string | null>("home_dir").catch(() => null)) ?? "");
+    const size = await invoke<number>("claude_transcript_size", { root: c.cwd, id: c.session }).catch(() => 0);
+    if (streamsNow.current[id] !== c) return;
+    // 한 마디도 없는 대화는 파일이 아직 없어 `--resume` 이 "No conversation found" 로 끝나고, 칸은 빈 셸로 남아
+    // [대화창]으로 돌아갈 길도 없어진다(폴더 칩으로 바꾼 직후가 늘 그렇다). 옮길 말이 없으니 터미널에서 새로 연다 —
+    // 그 대화의 id 는 터미널 claude 가 명부로 알려 준다.
+    seed(id, size > 0
+      ? { cmd: `claude --resume ${c.session}`, auto: true, cwd: cwd || undefined, claudeSession: c.session }
+      : { cmd: "claude", auto: true, cwd: cwd || undefined });
     setStreams((st) => without(st, id));
     setKeepTerm((k) => ({ ...k, [id]: true }));
   }, []);
 
-  /** 터미널 Claude 칸을 같은 대화의 터미널 없는 칸으로 다시 연다. 대화 id 는 그 칸의 claude 가 명부에 쓴 값이고,
-   *  대화 파일이 있을 때만 옮긴다. 터미널은 칸에서 내려가며 닫힌다(`pty_close` 는 칸 종료 신호를 내지 않는다).
-   *  터미널 쪽에서 알던 것(복원 명령·명부 id·대화창 상태)은 `release` 가 같은 순간에 놓는다 — 한 번에
+  /** 터미널 Claude 칸을 같은 대화의 터미널 없는 칸으로 다시 연다. 대화 id 는 그 칸의 claude 가 명부에 쓴 값이다.
+   *  터미널은 칸에서 내려가며 닫힌다(`pty_close` 는 칸 종료 신호를 내지 않는다).
+   *  터미널 쪽에서 알던 것(복원 명령·명부 id)은 `release` 가 같은 순간에 놓는다 — 한 번에
    *  바뀌어야 칸이 터미널과 대화창 사이의 반쯤 걸친 모양으로 그려지지 않는다. */
   const toStream = useCallback(async (id: string, session: string, cwd: string, release: (id: string) => void) => {
     const size = await invoke<number>("claude_transcript_size", { root: cwd, id: session }).catch(() => 0);
-    if (!(size > 0)) return;
     release(id);
     setKeepTerm((k) => without(k, id));
-    setStreams((st) => ({ ...st, [id]: { agent: "claude", session, cwd } }));
+    // 대화 파일은 모든 프로젝트 폴더에서 id 로 찾는다(claude_files.rs). 어디에도 없으면 아직 한 마디도 없는 대화라
+    // 옮길 말이 없다 — 그 폴더의 새 대화창으로 연다. 전에는 아무 일도 안 해 단추가 먹통처럼 보였다.
+    // 켤 때 저절로 옮기는 것은 다르다(saved.ts) — 사용자가 고르지 않았으니 파일이 있을 때만 옮긴다.
+    setStreams((st) => ({ ...st, [id]: { agent: "claude", session: size > 0 ? session : crypto.randomUUID(), cwd } }));
   }, []);
 
   const paneView = useMemo(() => {
