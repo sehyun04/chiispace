@@ -394,7 +394,8 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/useShortcuts.ts` · `ui/useDrag.ts` · `ui/useTabCleanup.ts` | 단축키(캡처 단계) · 경계선·칸 끌기 · 칸이 사라질 때 배치 정리(부고 모으기) |
 | `ui/saved.ts` | 세션 파일 읽기·쓰기, 켤 때 옮길 칸 고르기 — 순수 함수, `saved.test.mjs` |
 | `ui/Sidebar.tsx` | 옆칸 — 탭 묶음과 칸 목록, 새 대화 상대(연락처) 목록. 그리기만 하고 판단은 App 이 준다 |
-| `ui/roster.tsx` | 치이카와 로스터와 얼굴 · 누가 어느 칸을 맡는가(`useCasting`) |
+| `ui/roster.tsx` · `ui/casting.ts` | 치이카와 로스터와 얼굴 · 누가 어느 칸을 맡는가(`useCasting`, 떠 있는 칸과 겹치지 않게 고르기는 `assign`) |
+| `ui/SplitPicker.tsx` | 칸 나누기(Ctrl+Shift+D·E)에서 새 칸에 Claude·Codex·터미널 중 누구를 부를지 고르는 창 |
 | `ui/session.ts` | 칸이 무엇을 돌고 있고 그것을 어떻게 되살리는가 |
 | `ui/layout.ts` | pane 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |

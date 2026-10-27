@@ -54,7 +54,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령 (React 없음, 단위 검증) |
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
-| `ui/roster.tsx` | 치이카와 로스터 · 누가 어느 칸을 맡는가 |
+| `ui/roster.tsx`, `ui/casting.ts` | 치이카와 로스터 · 누가 어느 칸을 맡는가(겹치지 않게 고르기는 단위 검증) |
+| `ui/SplitPicker.tsx` | 칸 나누기 단축키의 상대 고르기 창 |
 | `ui/layout.ts` | 칸 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |
 | `ui/app.css`, `ui/theme.css` | 치이카와 테마 |
@@ -163,8 +164,9 @@ CLI가 보내는 터미널 타이틀을 쓴다. 자동 이름도 `paneTitles`로
 이것은 칸의 마지막 표시 이름이지 continue가 원래 대화를 골랐다는 보장이 아니다.
 이전 버전에서 저장하지 않은 자동 이름은 CLI가 제목을 다시 보낼 때부터 보존한다.
 
-**캐릭터** — 칸마다 로스터에서 한 명이 맡는다. 옆칸에서 얼굴을 누르면 누가 맡을지 고를 수
-있고, 배정은 세션에 남아 다시 켜도 같은 얼굴이 같은 칸에 붙는다. 그림이 들어온 사람만
+**캐릭터** — 칸마다 로스터에서 한 명이 맡는다. 새 칸은 떠 있는 칸과 겹치지 않는 아이를 받고(`casting.ts`),
+옆칸에서 얼굴을 누르면 누가 맡을지 고를 수 있다. 배정은 세션에 남아 다시 켜도 같은 얼굴이 같은 칸에 붙는다.
+일하는 동안은 칸 테두리를 따라 하치와레·치이카와·우사기 세 빛깔 띠가 돈다. 그림이 들어온 사람만
 세운다 — 스무 명을 다 세우면 색 동그라미가 섞여 나와 들어온 그림이 묻힌다.
 `ui/assets/faces/<slug>.png` 를 넣으면 그때부터 그 얼굴이 붙고(vite 가 모아 준다),
 `scripts/make-motion.py` 가 그 한 장에서 "일하는 중" 움직임을 구워 준다. 앱 아이콘(작업 표시줄·제목줄)은
@@ -231,7 +233,7 @@ OpenAI Docs의 [실행별 MCP 설정](https://developers.openai.com/codex/mcp/)�
 
 | | |
 |---|---|
-| `Ctrl+Shift+D` / `E` | 좌우 / 상하 분할 |
+| `Ctrl+Shift+D` / `E` | 좌우 / 상하 분할 — 새 칸에 누구를 부를지 묻는다(1 Claude · 2 Codex · 3 터미널, 방향키·Enter, Esc 취소) |
 | `Ctrl+Shift+W` | 칸 닫기 |
 | `Ctrl+Shift+←↑↓→` | 포커스 이동 |
 | `Ctrl+Shift+T` | 새 탭 (묻지 않고 지금 탭과 같은 셸로) |

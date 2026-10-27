@@ -17,6 +17,7 @@ import {
 import { Pane } from "./Pane";
 import { savedStreams } from "./stream-session";
 import { Sidebar, type AgentKind } from "./Sidebar";
+import { SplitPicker, type SplitChoice } from "./SplitPicker";
 import { useGit } from "./git";
 import * as L from "./layout";
 import { usePaneBridge } from "./bridge";
@@ -92,9 +93,14 @@ export default function App() {
     setPaneTitles((t) => (t[id] === title ? t : { ...t, [id]: title }));
   }, []);
 
+  const openStream = streams.open;
   const split = useCallback(
-    (dir: L.Dir) => {
+    (dir: L.Dir, kind: SplitChoice = "shell") => {
       const id = `%${nextPane.current++}`;
+      if (kind !== "shell") {
+        openStream(id, kind, cur?.root ?? "");
+        setPaneTitles((t) => ({ ...t, [id]: "새 대화" }));
+      }
       patch((t) => ({
         ...t,
         // 나눈 뒤 전체를 고르게 편다. 안 그러면 새 칸에 포커스가 가고 거기서
@@ -103,8 +109,10 @@ export default function App() {
         focus: id,
       }));
     },
-    [patch],
+    [patch, cur?.root, openStream],
   );
+  // 단축키로 나누면 새 칸에 누구를 부를지 먼저 묻는다(SplitPicker).
+  const [splitAsk, setSplitAsk] = useState<L.Dir | null>(null);
 
   const closePane = useCallback(
     (id: string) => {
@@ -115,7 +123,6 @@ export default function App() {
 
   /** 셸을 안 주면 지금 탭과 같은 것으로 연다. 단축키(Ctrl+Shift+T)가 그 길로 오는데,
    *  거기서 매번 고르게 하면 손이 키보드에서 떨어져 단축키를 쓰는 뜻이 없어진다. */
-  const openStream = streams.open;
   const newTab = useCallback(
     (shell?: string, agent?: AgentKind) => {
       const id = `%${nextPane.current++}`;
@@ -297,7 +304,7 @@ export default function App() {
 
   useTabCleanup(tabs, tabsNow, setTabs, setActive);
   useShortcuts(cur, tabs.length, chats, {
-    split, closePane, newTab, pick, patch, setFontSize, setSideOpen, setActive,
+    split: setSplitAsk, closePane, newTab, pick, patch, setFontSize, setSideOpen, setActive,
   });
   const startSeam = useSeamDrag(active, setTabs);
 
@@ -487,6 +494,18 @@ export default function App() {
             ))}
         </div>
       </div>
+
+      {splitAsk ? (
+        <SplitPicker
+          dir={splitAsk}
+          folder={curRoot?.split(/[\\/]/).filter(Boolean).pop()}
+          onPick={(kind) => {
+            setSplitAsk(null);
+            split(splitAsk, kind);
+          }}
+          onClose={() => setSplitAsk(null)}
+        />
+      ) : null}
     </div>
   );
 }
