@@ -1176,6 +1176,26 @@ Codex도 머리줄 [터미널][대화창]을 쓴다. 전송한 대화는 서버�
 발생하므로 이 검증은 한 칸씩 연다. `codex-switch`·`stream-restore`·`chat-stream`·`claude-stream`·`palette`의
 검증 21개가 건너뜀 없이 통과했다. 배포 파일은 교체하지 않았다.
 
+## 32. 10월 30일 추가: 터미널 Codex 현재 대화 ID 조사
+
+설치된 0.164.0과 같은 공식 태그 `rust-v0.164.0`(커밋 `6aaac694803004a63c6f393d153c96d22521a6b9`)의 소스를 확인했다.
+현재 대화를 프로세스별로 계속 알려 주는 명부를 찾지 못해, 터미널 → 대화창과 켤 때의 Codex 자동 전환은 구현하지 않는다.
+
+- MCP 초기화(`codex-mcp/src/rmcp_client.rs`의 `mcp_initialize_request_params`)에는 클라이언트 정보·기능만 있다.
+  `core/src/mcp_tool_call.rs`의 `with_mcp_tool_call_ids_meta`는 각 도구 호출의 `_meta.threadId`에 현재 ID를 넣는다.
+  그러나 도구를 부르지 않은 `/new`·`/resume`·`/fork` 뒤에는 새 ID가 오지 않아 앞 ID를 현재 대화로 붙일 수 없다.
+- `CODEX_THREAD_ID`는 실행 도구의 자식 환경(`core/src/exec_env.rs`)에 넣는 값이다. TUI 자체의 PID별 대화 명부가 아니다.
+- `hooks/src/legacy_notify.rs`는 답을 마친 뒤 thread ID와 입력·답 원문을 보낸다. 기존 사용자 notify를 덮거나 원문을
+  저장하지 않았고, 다음 답이 끝나기 전의 전환 공백을 해소하지 못하므로 중계를 추가하지 않았다.
+- 터미널 상태 OSC 7501·21337(`tui/src/terminal_program_status.rs`)는 상태·활동 문구를 보낸다. 제목의 `session-id`는
+  `chatwidget/status_surfaces.rs`에서 32자로 줄여 36자 UUID 전체를 제공하지 않는다. 제목·화면 조각으로 ID를 복원하지 않는다.
+- 31절에서 앱이 알고 연 ID도 TUI 안에서 대화가 바뀌면 낡는다. `thread/list`나 rollout 검색으로 보충하지 않는다.
+
+공식 근거: [MCP 초기화](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/codex-mcp/src/rmcp_client.rs),
+[도구 호출 메타데이터](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/mcp_tool_call.rs),
+[터미널 표시](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/tui/src/chatwidget/status_surfaces.rs).
+역방향 단추는 까닭을 풀이에 보여 주며 잠근다. 추후 칸의 현재 ID와 대화 변경을 함께 알리는 경로가 생겨야 다시 진행한다.
+
 ## 문서별 역할
 
 - 이 문서: 지금까지 무엇을 만들고 고쳤으며 어디까지 검증했는지 보는 누적 작업 정리.
