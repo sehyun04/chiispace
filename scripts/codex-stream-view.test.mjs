@@ -20,7 +20,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(s => path.join(process.env.APPDATA, s, "session.json"))];
   const guard = watchUserFiles(protectedFiles, { root, exe });
   const probe = "/" + randomUUID(), commands = [], requests = [], observations = [], apps = [];
-  let latest = {}, slow;
+  let latest = {}, slow, finishChild;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", c => body += c);
@@ -40,13 +40,16 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       const emit = (type, rest) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...rest })}\n\n`);
       emit("response.created", { response: { id, status: "in_progress", output: [] } });
-      if (!afterTool && ["CS_ALLOW", "CS_DENY", "CS_ASK"].includes(mark)) {
+      if (!afterTool && ["CS_ALLOW", "CS_DENY", "CS_ASK", "CS_SUB"].includes(mark)) {
         const names = (data.tools ?? []).map(t => t.name);
-        const name = mark === "CS_ASK" ? "request_user_input" : names.includes("exec_command") ? "exec_command" : "shell_command";
+        const spawnTool = (data.tools ?? []).flatMap(t => t.type === "namespace" ? (t.tools ?? []).map(x => ({ ...x, namespace: t.name })) : [t]).find(t => t.name === "spawn_agent");
+        if (mark === "CS_SUB") assert.ok(spawnTool, "격리 Codex에 spawn_agent가 없음");
+        const name = mark === "CS_SUB" ? spawnTool.name : mark === "CS_ASK" ? "request_user_input" : names.includes("exec_command") ? "exec_command" : "shell_command";
         const dir = mark === "CS_ALLOW" ? "allowed_dir" : "denied_dir";
-        const args = mark === "CS_ASK" ? { questions: [{ id: "direction", header: "방향", question: "어느 쪽으로 갈까?", options: [{ label: "왼쪽", description: "첫 선택" }, { label: "오른쪽", description: "둘째 선택" }] }] }
+        const args = mark === "CS_SUB" ? { message: "CS_CHILD 맡긴 일 — 합성 답만 반환" }
+          : mark === "CS_ASK" ? { questions: [{ id: "direction", header: "방향", question: "어느 쪽으로 갈까?", options: [{ label: "왼쪽", description: "첫 선택" }, { label: "오른쪽", description: "둘째 선택" }] }] }
           : { [name === "exec_command" ? "cmd" : "command"]: `New-Item -ItemType Directory -Path ${dir}`, workdir: project, sandbox_permissions: "require_escalated", justification: "격리 테스트 폴더 생성 허락" };
-        const item = { id: `fn_${n}`, type: "function_call", call_id: `call_${n}`, name, arguments: JSON.stringify(args), status: "completed" };
+        const item = { id: `fn_${n}`, type: "function_call", call_id: `call_${n}`, name, ...(mark === "CS_SUB" ? { namespace: spawnTool.namespace } : {}), arguments: JSON.stringify(args), status: "completed" };
         emit("response.output_item.added", { output_index: 0, item: { ...item, arguments: "", status: "in_progress" } });
         emit("response.function_call_arguments.delta", { item_id: item.id, output_index: 0, delta: item.arguments });
         emit("response.output_item.done", { output_index: 0, item });
@@ -59,6 +62,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
       emit("response.content_part.added", { item_id: item.id, output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } });
       emit("response.output_text.delta", { item_id: item.id, output_index: 0, content_index: 0, delta: mark + "_" });
       if (mark === "CS_SLOW") { slow = res; return; }
+      if (mark === "CS_CHILD") await new Promise(resolve => { finishChild = resolve; });
       await delay(600);
       if (res.destroyed) return;
       emit("response.output_text.delta", { item_id: item.id, output_index: 0, content_index: 0, delta: afterTool ? "AFTER_TOOL" : "REPLY" });
@@ -71,7 +75,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
   await new Promise(r => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${server.address().port}`;
   // 실제 모델·사용자 인증 없이 설치된 CLI의 승인·질문 프로토콜을 구동한다.
-  writeFileSync(path.join(home, "config.toml"), `model = "gpt-5.4"\nmodel_provider = "local_test"\napproval_policy = "on-request"\nsandbox_mode = "read-only"\ncheck_for_update_on_startup = false\n[features]\ndefault_mode_request_user_input = true\n[model_providers.local_test]\nname = "Local stream fixture"\nbase_url = "${base}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
+  writeFileSync(path.join(home, "config.toml"), `model = "gpt-5.4"\nmodel_provider = "local_test"\napproval_policy = "on-request"\nsandbox_mode = "read-only"\ncheck_for_update_on_startup = false\n[features]\ndefault_mode_request_user_input = true\nmulti_agent = true\n[model_providers.local_test]\nname = "Local stream fixture"\nbase_url = "${base}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
   writeFileSync(state, JSON.stringify({ tabs: [{ key: "t0", focus: "%0", root: project.replaceAll("\\", "/"), shell: path.join(process.env.SystemRoot, "System32", "cmd.exe"), layout: { kind: "leaf", id: "%0" } }], active: 0, nextPane: 1, nextTab: 1, procs: {}, restoreMode: "native-continue" }));
   const pane = (id = "%1") => latest.panes?.[id] ?? {};
   const saved = () => { try { return JSON.parse(readFileSync(state, "utf8")); } catch { return {}; } };
@@ -93,7 +97,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
         const side = document.querySelector('.side'), panes = {};
         for (const slot of document.querySelectorAll('[data-pane]')) {
           const over = slot.querySelector('.chat-over'), input = over?.querySelector('.composer textarea');
-          const texts = sel => [...(over?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
+          const texts = sel => [...(over?.querySelector('.chat')?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
           panes[slot.dataset.pane] = { over: !!over, xterm: !!slot.querySelector('.xterm'), termButton: !!slot.querySelector('.composer-term'),
             input: !!input, disabled: input?.disabled, value: input?.value, focused: input === document.activeElement,
             mine: texts('.msg.mine:not(.sending) .bubble'), theirs: texts('.msg:not(.mine) .bubble'), sending: texts('.msg.sending .bubble'),
@@ -102,6 +106,9 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
             models: [...(over?.querySelectorAll('select[aria-label="Codex 모델"] option') ?? [])].map(o => o.value),
             model: over?.querySelector('select[aria-label="Codex 모델"]')?.value, title: slot.querySelector('.pane-head .title')?.textContent,
             palette: texts('.palette-row') };
+          panes[slot.dataset.pane].subs = texts('.subs .sub');
+          const v = over?.querySelector('.subview');
+          panes[slot.dataset.pane].view = v ? { task: v.querySelector('.subview-task')?.textContent, text: v.textContent } : null;
         }
         const r = await fetch(${JSON.stringify(base + probe)}, {method:'POST', body:JSON.stringify({panes, picker: !!side?.querySelector('.contacts')})});
         for (const c of await r.json()) {
@@ -118,6 +125,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
           }
           if (c.model) { const sel = over?.querySelector('select[aria-label="Codex 모델"]'); sel.value = c.model; sel.dispatchEvent(new Event('change', {bubbles:true})); }
           if (c.close) slot?.querySelector('.pane-head .x')?.click();
+          if (c.esc) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
         }
       } finally { pending = false; }
     }, 100); return 'isolated codex stream'; })()`;
@@ -180,6 +188,27 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     commands.push({ id: "%2", click: ".ask.choose .ask-go" });
     await until(() => pane("%2").theirs?.includes("CS_ASK_AFTER_TOOL") && !pane("%2").stop, "질문 답변");
     assert.ok(requests.some(r => r.mark === "CS_ASK" && JSON.stringify(r.input).includes("오른쪽")), "질문 답 유실");
+
+    commands.push({ id: "%2", send: "CS_SUB" });
+    await until(() => pane("%2").theirs?.includes("CS_SUB_AFTER_TOOL") && !pane("%2").stop && pane("%2").subs?.length, "본 대화 완료 뒤 자식 진행 줄 유지");
+    assert.ok(!pane("%2").theirs.some(t => t.includes("CS_CHILD")), "자식 말이 본 대화에 섞임");
+    commands.push({ id: "%2", send: "CS_SLOW" });
+    await until(() => pane("%2").stop, "서브에이전트와 본 대화 동시 진행");
+    commands.push({ id: "%2", click: ".subs .sub" });
+    await until(() => pane("%2").view?.task?.includes("CS_CHILD"), "자식 thread/read 상세 보기");
+    shot(app, "subagent");
+    commands.push({ id: "%2", esc: true });
+    await until(() => !pane("%2").view, "상세 화면 Esc 닫기");
+    assert.ok(pane("%2").stop, "상세 화면 Esc가 본 대화를 중단함");
+    commands.push({ id: "%2", click: ".composer-stop" });
+    await until(() => !pane("%2").stop, "본 대화 중단"); slow?.destroy();
+    assert.ok(finishChild, "자식 모델 요청 없음"); finishChild();
+    await until(() => !pane("%2").subs?.length, "자식 완료 뒤 진행 줄 걷기");
+    commands.push({ id: "%2", click: ".note.launch" });
+    await until(() => pane("%2").view?.text?.includes("CS_CHILD_REPLY"), "완료 뒤 부름 줄의 자식 대화");
+    commands.push({ id: "%2", esc: true });
+    await until(() => !pane("%2").view, "자식 대화 닫기");
+    assert.ok(!pane("%2").theirs.some(t => t.includes("CS_CHILD")), "완료한 자식 말이 본 대화에 섞임");
     commands.push({ id: "%2", send: "CS_SLOW" });
     await until(() => pane("%2").stop && pane("%2").theirs?.includes("CS_SLOW_"), "느린 답");
     commands.push({ id: "%2", click: ".composer-stop" });
@@ -253,7 +282,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, requests, observations })); throw e;
   } finally {
     for (const app of apps) await close(app).catch(() => app.kill());
-    slow?.destroy(); server.closeAllConnections(); await new Promise(r => server.close(r));
+    finishChild?.(); slow?.destroy(); server.closeAllConnections(); await new Promise(r => server.close(r));
     guard("사용자 세션·설정 변경");
     console.log("Codex stream 검증:", root);
   }

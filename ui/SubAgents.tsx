@@ -31,10 +31,16 @@ function SubRow({ sub, onOpen }: { sub: Sub; onOpen?: () => void }) {
   }
   // 요청이 흐르는 중이면 쓰는 중, 도구를 부른 뒤 조용하면 그 도구가 도는 중이다.
   const state = subStreaming(sub) ? "쓰는 중" : step?.kind === "tool" ? "도는 중" : "";
+  return <SubAgentRow label={sub.label} tool={tool ?? undefined} what={what} state={state} onOpen={onOpen} />;
+}
+
+export function SubAgentRow({ label, tool, what, state, onOpen }: {
+  label: string; tool?: string; what: string; state?: string; onOpen?: () => void;
+}) {
   const body = (
     <>
       <span className="sub-dot" aria-hidden="true" />
-      <span className="sub-label">{sub.label}</span>
+      <span className="sub-label">{label}</span>
       {tool && <span className="tool-name">{tool}</span>}
       <span className="sub-what">{what}</span>
       {state && <span className="tool-stat">{state}</span>}

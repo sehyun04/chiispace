@@ -1,0 +1,241 @@
+{
+  "version": "0.164.0",
+  "source": "isolated app-server with local Responses fixture; synthetic messages only",
+  "parent": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+  "child": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+  "events": [
+    {
+      "method": "turn/started",
+      "params": {
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turn": {
+          "id": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "rootTurnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": 1793356728,
+          "completedAt": null,
+          "durationMs": null
+        }
+      },
+      "emittedAtMs": 1793356728631
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "collabAgentToolCall",
+          "id": "c1",
+          "tool": "spawnAgent",
+          "status": "inProgress",
+          "senderThreadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+          "receiverThreadIds": [],
+          "prompt": "SUB_FIXTURE_TASK: inspect nothing and report SUB_FIXTURE_REPLY",
+          "model": "",
+          "reasoningEffort": "medium",
+          "agentsStates": {}
+        },
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+        "startedAtMs": 1793356728778
+      },
+      "emittedAtMs": 1793356728779
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "collabAgentToolCall",
+          "id": "c1",
+          "tool": "spawnAgent",
+          "status": "completed",
+          "senderThreadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+          "receiverThreadIds": [
+            "01a18c64-09cd-70c2-a044-5c75a1cc8382"
+          ],
+          "prompt": "SUB_FIXTURE_TASK: inspect nothing and report SUB_FIXTURE_REPLY",
+          "model": "gpt-5.4",
+          "reasoningEffort": "medium",
+          "agentsStates": {
+            "01a18c64-09cd-70c2-a044-5c75a1cc8382": {
+              "status": "pendingInit",
+              "message": null
+            }
+          }
+        },
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+        "completedAtMs": 1793356728816
+      },
+      "emittedAtMs": 1793356728835
+    },
+    {
+      "method": "turn/started",
+      "params": {
+        "threadId": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+        "turn": {
+          "id": "01a18c64-09ed-7a30-89c3-7ffedcde7ca9",
+          "rootTurnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "inProgress",
+          "error": null,
+          "startedAt": 1793356728,
+          "completedAt": null,
+          "durationMs": null
+        }
+      },
+      "emittedAtMs": 1793356728842
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg2",
+          "text": "",
+          "phase": null,
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+        "startedAtMs": 1793356728903
+      },
+      "emittedAtMs": 1793356728904
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": {
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+        "itemId": "msg2",
+        "delta": "PARENT_FIXTURE_REPLY"
+      },
+      "emittedAtMs": 1793356728904
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg2",
+          "text": "PARENT_FIXTURE_REPLY",
+          "phase": null,
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+        "completedAtMs": 1793356728904
+      },
+      "emittedAtMs": 1793356728917
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a18c64-07c4-7873-a58e-31d6dd40b617",
+        "turn": {
+          "id": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "rootTurnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "items": [
+            {
+              "type": "agentMessage",
+              "id": "msg2",
+              "text": "PARENT_FIXTURE_REPLY",
+              "phase": null,
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "summary",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1793356728,
+          "completedAt": 1793356728,
+          "durationMs": 505
+        }
+      },
+      "emittedAtMs": 1793356728970
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg3",
+          "text": "",
+          "phase": null,
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+        "turnId": "01a18c64-09ed-7a30-89c3-7ffedcde7ca9",
+        "startedAtMs": 1793356730744
+      },
+      "emittedAtMs": 1793356730744
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": {
+        "threadId": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+        "turnId": "01a18c64-09ed-7a30-89c3-7ffedcde7ca9",
+        "itemId": "msg3",
+        "delta": "SUB_FIXTURE_REPLY"
+      },
+      "emittedAtMs": 1793356730744
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "type": "agentMessage",
+          "id": "msg3",
+          "text": "SUB_FIXTURE_REPLY",
+          "phase": null,
+          "memoryCitation": null,
+          "delivery": null,
+          "questions": null
+        },
+        "threadId": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+        "turnId": "01a18c64-09ed-7a30-89c3-7ffedcde7ca9",
+        "completedAtMs": 1793356730744
+      },
+      "emittedAtMs": 1793356730758
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a18c64-09cd-70c2-a044-5c75a1cc8382",
+        "turn": {
+          "id": "01a18c64-09ed-7a30-89c3-7ffedcde7ca9",
+          "rootTurnId": "01a18c64-0838-7831-b3c3-878e31d9a585",
+          "items": [
+            {
+              "type": "agentMessage",
+              "id": "msg3",
+              "text": "SUB_FIXTURE_REPLY",
+              "phase": null,
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            }
+          ],
+          "itemsView": "summary",
+          "status": "completed",
+          "error": null,
+          "startedAt": 1793356728,
+          "completedAt": 1793356730,
+          "durationMs": 1981
+        }
+      },
+      "emittedAtMs": 1793356730805
+    }
+  ]
+}

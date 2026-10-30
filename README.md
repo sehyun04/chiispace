@@ -422,6 +422,9 @@ Anthropic 서버를 두고 실제 claude 를 `-p` stream-json 통로로 띄워, 
 `default_mode_request_user_input`을 켠다. 제품은 이 기능이나 샌드박스를 강제로 바꾸지 않는다.
 `CHIISPACE_TEST_CODEX_PATH=inherited`로 npm/Node 경로도 확인하며, `CHIISPACE_TEST_SCREENSHOT=1`은 테스트 창만 캡처한다.
 상태 해석·복원 경계 단위 테스트는 `scripts/codex-stream.test.mjs`다. 유료 모델·사용자 인증을 가져오지 않는다.
+이 검증은 격리 설정에만 `multi_agent`를 켜서 실제 자식을 만들고 진행 줄, 부모 완료 뒤 유지, 자식 완료 뒤 걷기,
+상세 이력과 완료 후 다시 보기, Esc의 본 대화 중단 방지도 본다. 0.164.0에서 채취한 합성 이벤트는
+`scripts/fixtures/codex-collab-0.164.json`에 있다. 제품은 사용자 feature 설정을 바꾸지 않는다.
 
 새 대화 목록은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`(있으면 `CHIISPACE_TEST_REAL_CODEX`)로
 `node --test scripts/contacts.test.mjs`를 실행한다. 목록을 눌러 새 탭에서 실제 claude·codex 가 켜지는지,

@@ -4,7 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { titleFrom } from "./claude-stream";
-import { approvalOptions, blockingPrompt, codexItems, initialCodex, questionAnswer, reduceCodex, resumedCodex, type CodexStream, type Data, type Request } from "./codex-stream";
+import { agentActive, approvalOptions, blockingPrompt, codexItems, hydrateCodexAgent, initialCodex, questionAnswer, reduceCodex, resumedCodex, type CodexStream, type Data, type Request } from "./codex-stream";
+import { CodexSubagents, CodexSubagentView } from "./CodexSubagents";
 import { missingUnstarted, type StreamChat } from "./stream-session";
 import { ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
 
@@ -109,13 +110,26 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     // 서버가 발급한 대화 ID를 저장해도 현재 프로세스를 다시 띄우지 않는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, boot]);
-  useEffect(() => { onBusy(id, state.busy || dispatching); }, [id, state.busy, dispatching, onBusy]);
+  const agentsBusy = state.agents.some(agentActive);
+  useEffect(() => { onBusy(id, state.busy || dispatching || agentsBusy); }, [id, state.busy, dispatching, agentsBusy, onBusy]);
+  const unknownAgents = state.agents.filter(a => a.status === "unknown").map(a => a.thread).join(",");
+  useEffect(() => {
+    let active = true;
+    for (const threadId of unknownAgents.split(",").filter(Boolean)) {
+      void request("thread/read", { threadId, includeTurns: true }).then(r => {
+        if (active && r.thread) put(hydrateCodexAgent(latest.current, r.thread));
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+    // 목록이 같으면 다시 읽지 않는다. 폴링이나 답 조각마다 이력을 다시 읽으면 요청이 계속 취소된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unknownAgents]);
   useEffect(() => {
     if (ready && focused) (window as unknown as { __chats?: Record<string, HTMLTextAreaElement | null> }).__chats?.[id]?.focus();
   }, [ready, focused, id]);
 
   const fresh = async () => {
-    if (latest.current.busy) throw new Error("진행 중인 답을 먼저 멈춰 줘");
+    if (latest.current.busy || latest.current.agents.some(agentActive)) throw new Error("진행 중인 답과 서브에이전트가 끝난 뒤 새 대화를 열어 줘");
     const result = await request("thread/start", { ...(chat.cwd ? { cwd: chat.cwd } : {}), model: settingsRef.current.model });
     applyThread(result, true); titled.current = false; onTitle(id, "새 대화");
   };
@@ -168,7 +182,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     finally { setAnswering(null); }
   };
   const selected = models.find(m => m.model === settings.model || m.id === settings.model);
-  const disabled = !ready || state.busy || dispatching;
+  const disabled = !ready || state.busy || dispatching || agentsBusy;
   const rendered = codexItems(state.entries);
   // 입력바 위 줄은 Claude 칸과 같은 부품(StreamBar)이다. 항목·순서·상태 표가 두 칸에서 같아야 한다.
   const policy = typeof settings.approvalPolicy === "string" ? settings.approvalPolicy : "custom";
@@ -243,6 +257,8 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}
       live={ready && !dispatching} working={state.busy || dispatching} waiting={state.prompts.some(blockingPrompt)}
       fresh={!state.entries.length} transport={transport} content={rendered} toolbar={toolbar} commands={commands}
+      activity={<CodexSubagents agents={state.agents} />}
+      subagentView={(target, close) => <CodexSubagentView target={target} entries={state.entries} agents={state.agents} request={request} onClose={close} slug={slug} />}
       extra={<>
         {state.prompts.map(p => <RequestCard key={p.id} prompt={p} item={state.entries.find(i => i.id === p.params.itemId && i._turn === p.params.turnId)} disabled={answering === p.id} answer={(result, error) => void answer(p, result, error)} />)}
         {(failure || state.error) && <div className="note bad" role="alert">{failure || state.error}</div>}

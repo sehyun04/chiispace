@@ -18,6 +18,7 @@ struct Proc {
     pending: Pending,
     questions: Arc<Mutex<HashMap<String, Value>>>,
     thread: Arc<Mutex<Option<String>>>,
+    readable: Arc<Mutex<HashMap<String, String>>>,
     _job: Job,
 }
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -67,6 +68,31 @@ fn current<'a>(map: &'a mut HashMap<String, Proc>, id: &str, run: &str) -> Resul
     map.get_mut(id).filter(|p| p.run == run).ok_or_else(|| "Codex 실행이 바뀌었거나 종료됐다".into())
 }
 
+fn record_children(message: &Value, root: Option<&str>, readable: &mut HashMap<String, String>) {
+    let Some(root) = root else { return };
+    let p = &message["params"];
+    let thread = &p["thread"];
+    let parent = thread["parentThreadId"].as_str()
+        .or_else(|| thread["source"]["subAgent"]["thread_spawn"]["parent_thread_id"].as_str())
+        .or_else(|| p["threadId"].as_str());
+    if !parent.is_some_and(|p| p == root || readable.get(p).is_some_and(|r| r == root)) { return }
+    let item = &p["item"];
+    let ids: Vec<&str> = if message["method"] == "thread/started" {
+        thread["id"].as_str().into_iter().collect()
+    } else if matches!(message["method"].as_str(), Some("item/started" | "item/completed")) {
+        match item["type"].as_str() {
+            Some("collabAgentToolCall") => item["receiverThreadIds"].as_array().into_iter().flatten().filter_map(Value::as_str).collect(),
+            Some("subAgentActivity") => item["agentThreadId"].as_str().into_iter().collect(),
+            _ => vec![],
+        }
+    } else { vec![] };
+    for child in ids { if child != root { readable.insert(child.into(), root.into()); } }
+}
+
+fn can_target(method: &str, target: &str, root: Option<&str>, readable: &HashMap<String, String>) -> bool {
+    root == Some(target) || (method == "thread/read" && root.is_some_and(|r| readable.get(target).is_some_and(|v| v == r)))
+}
+
 #[tauri::command]
 pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: String, cwd: String) -> Result<String, String> {
     let mut map = streams.0.lock().unwrap();
@@ -87,6 +113,7 @@ pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: Stri
     let pending: Pending = Arc::default();
     let questions = Arc::new(Mutex::new(HashMap::new()));
     let thread = Arc::new(Mutex::new(None));
+    let readable = Arc::new(Mutex::new(HashMap::new()));
     let errors = Arc::new(Mutex::new(String::new()));
     let sink = errors.clone();
     std::thread::spawn(move || {
@@ -99,7 +126,7 @@ pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: Stri
             *tail = tail.chars().rev().take(2000).collect::<String>().chars().rev().collect();
         }
     });
-    map.insert(id.clone(), Proc { run: run.clone(), stdin, child, pending: pending.clone(), questions: questions.clone(), thread: thread.clone(), _job: job });
+    map.insert(id.clone(), Proc { run: run.clone(), stdin, child, pending: pending.clone(), questions: questions.clone(), thread: thread.clone(), readable: readable.clone(), _job: job });
     let token = run.clone();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -124,6 +151,7 @@ pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: Stri
             if message["method"] == "serverRequest/resolved" {
                 questions.lock().unwrap().remove(&message["params"]["requestId"].to_string());
             }
+            record_children(&message, thread.lock().unwrap().as_deref(), &mut readable.lock().unwrap());
             let _ = app.emit("codex:stream", Event { id: id.clone(), run: token.clone(), message });
         }
         for (_, tx) in pending.lock().unwrap().drain() { let _ = tx.send(Err("Codex 연결이 종료됐다".into())); }
@@ -148,12 +176,14 @@ pub async fn codex_stream_request(app: AppHandle, id: String, run: String, metho
         let key = format!("request-{}", NEXT.fetch_add(1, Ordering::Relaxed));
         let (tx, rx) = mpsc::channel();
         let state = app.state::<CodexStreams>();
-        let (pending, thread) = {
+        let (pending, thread, readable) = {
             let mut map = state.0.lock().unwrap();
             let proc = current(&mut map, &id, &run)?;
             if method != "thread/resume" {
                 if let Some(t) = params.get("threadId").and_then(Value::as_str) {
-                    if proc.thread.lock().unwrap().as_deref() != Some(t) { return Err("다른 칸의 대화에는 보낼 수 없다".into()); }
+                    if !can_target(&method, t, proc.thread.lock().unwrap().as_deref(), &proc.readable.lock().unwrap()) {
+                        return Err("다른 칸의 대화에는 보낼 수 없다".into());
+                    }
                 }
             }
             proc.pending.lock().unwrap().insert(key.clone(), tx);
@@ -161,13 +191,23 @@ pub async fn codex_stream_request(app: AppHandle, id: String, run: String, metho
                 proc.pending.lock().unwrap().remove(&key);
                 return Err(e);
             }
-            (proc.pending.clone(), proc.thread.clone())
+            (proc.pending.clone(), proc.thread.clone(), proc.readable.clone())
         };
         let result = rx.recv_timeout(Duration::from_secs(60)).map_err(|_| "Codex 응답을 기다리다 연결이 끝났다".to_string());
         pending.lock().unwrap().remove(&key);
         let value = result??;
         if matches!(method.as_str(), "thread/start" | "thread/resume") {
             *thread.lock().unwrap() = value["thread"]["id"].as_str().map(String::from);
+            readable.lock().unwrap().clear();
+        }
+        if matches!(method.as_str(), "thread/resume" | "thread/read") {
+            let root = thread.lock().unwrap().clone();
+            let mut scope = readable.lock().unwrap();
+            for turn in value["thread"]["turns"].as_array().into_iter().flatten() {
+                for item in turn["items"].as_array().into_iter().flatten() {
+                    record_children(&json!({"method":"item/completed","params":{"threadId":value["thread"]["id"],"item":item}}), root.as_deref(), &mut scope);
+                }
+            }
         }
         if method == "initialize" {
             let mut map = state.0.lock().unwrap();
@@ -217,5 +257,17 @@ mod tests {
     fn chat_transport_cannot_execute_arbitrary_processes_or_write_config() {
         for method in ["process/spawn", "command/exec", "config/value/write", "account/login/start", "thread/name/set"] { assert!(!permitted(method)); }
         for method in ["thread/start", "thread/resume", "thread/list", "turn/start", "turn/interrupt", "model/list"] { assert!(permitted(method)); }
+    }
+    #[test]
+    fn only_announced_children_of_the_current_thread_can_be_read() {
+        let mut readable = HashMap::new();
+        let notice = json!({"method":"item/completed","params":{"threadId":"main","item":{"type":"collabAgentToolCall","receiverThreadIds":["child"]}}});
+        record_children(&notice, Some("main"), &mut readable);
+        assert!(can_target("thread/read", "child", Some("main"), &readable));
+        for method in ["turn/start", "turn/interrupt", "thread/compact/start"] { assert!(!can_target(method, "child", Some("main"), &readable)); }
+        assert!(!can_target("thread/read", "other", Some("main"), &readable));
+        assert!(!can_target("thread/read", "child", Some("new-main"), &readable));
+        record_children(&json!({"method":"item/completed","params":{"threadId":"other","item":{"type":"subAgentActivity","agentThreadId":"foreign"}}}), Some("main"), &mut readable);
+        assert!(!readable.contains_key("foreign"));
     }
 }

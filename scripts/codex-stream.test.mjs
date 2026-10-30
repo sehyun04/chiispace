@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initialCodex, resumedCodex, reduceCodex, codexItems, approvalOptions, questionAnswer, blockingPrompt } from "../ui/codex-stream.ts";
+import { readFileSync } from "node:fs";
+import { initialCodex, resumedCodex, reduceCodex, codexItems, approvalOptions, questionAnswer, blockingPrompt, agentActive, hydrateCodexAgent } from "../ui/codex-stream.ts";
 import { savedStreams, missingUnstarted } from "../ui/stream-session.ts";
 
 const opened = () => resumedCodex({ id: "thread-a", turns: [] });
@@ -93,4 +94,50 @@ test("Codex 도구 결과·실패와 공개 요약만 표시한다", () => {
   assert.equal(items[1].pair.toolResult.is_error, true);
   assert.equal(items[1].pair.toolResult.content, "실패 원인");
   assert.equal(items[2].toolUse.name, "apply_patch");
+});
+
+const collab = JSON.parse(readFileSync(new URL("./fixtures/codex-collab-0.164.json", import.meta.url), "utf8"));
+test("실제 Codex 서브에이전트는 부모 완료 뒤에도 남고 자식 완료 때만 걷힌다", () => {
+  let s = resumedCodex({ id: collab.parent, turns: [] });
+  let parentEnded = false;
+  for (const e of collab.events) {
+    s = reduceCodex(s, e);
+    if (e.method === "turn/completed" && e.params.threadId === collab.parent) {
+      parentEnded = true;
+      assert.equal(s.busy, false);
+      assert.equal(s.agents.filter(agentActive).length, 1, "본 대화가 끝나자 자식도 걷힘");
+    }
+  }
+  assert.ok(parentEnded);
+  assert.equal(s.agents[0].thread, collab.child);
+  assert.equal(s.agents.filter(agentActive).length, 0);
+  assert.ok(codexItems(s.entries).some(i => i.kind === "launch"));
+  assert.ok(!JSON.stringify(codexItems(s.entries).filter(i => i.kind === "bubble")).includes("SUB_FIXTURE_REPLY"), "자식 답이 본 대화에 섞임");
+  const late = { method: "item/agentMessage/delta", params: { threadId: collab.child, turnId: s.agents[0].settled[0], itemId: "late", delta: "뒤늦은 답" } };
+  assert.equal(reduceCodex(s, late), s);
+  assert.equal(reduceCodex(s, { method: "turn/started", params: { threadId: "unrelated", turn: { id: "other" } } }), s);
+});
+
+test("서브에이전트 상태·활동은 끝난 호출과 끝난 에이전트를 구분한다", () => {
+  const notice = (item) => event("item/completed", { turnId: "turn-a", item });
+  let s = start(opened());
+  s = reduceCodex(s, notice({ id: "spawn", type: "collabAgentToolCall", tool: "spawnAgent", status: "completed", receiverThreadIds: ["child"], agentsStates: { child: { status: "running" } } }));
+  assert.equal(s.agents.filter(agentActive).length, 1);
+  s = done(s);
+  s = reduceCodex(s, notice({ id: "activity", type: "subAgentActivity", agentThreadId: "child", agentPath: "검토", kind: "completed" }));
+  assert.equal(s.agents.filter(agentActive).length, 0);
+  s = reduceCodex(s, notice({ id: "resume", type: "collabAgentToolCall", tool: "resumeAgent", receiverThreadIds: ["child"], agentsStates: { child: { status: "running" } } }));
+  assert.equal(s.agents.filter(agentActive).length, 1);
+  s = reduceCodex(s, { method: "item/tool/requestUserInput", id: 99, params: { threadId: "child", questions: [] } });
+  assert.equal(s.prompts.length, 0, "자식 질문이 본 대화의 질문으로 들어옴");
+});
+
+test("복원된 서브에이전트는 읽어 확인하며 늦은 이력 읽기가 현재 진행 상태를 덮지 않는다", () => {
+  let s = resumedCodex({ id: "thread-a", turns: [{ id: "old", status: "completed", items: [{ id: "spawn", type: "collabAgentToolCall", receiverThreadIds: ["child"], agentsStates: { child: { status: "pendingInit" } } }] }] });
+  assert.equal(s.agents[0].status, "unknown");
+  s = reduceCodex(s, { method: "turn/started", params: { threadId: "child", turn: { id: "new" } } });
+  s = hydrateCodexAgent(s, { id: "child", agentNickname: "검토자", turns: [] });
+  assert.equal(s.agents[0].label, "검토자");
+  assert.equal(s.agents[0].turn, "new");
+  assert.equal(s.agents[0].status, "running");
 });

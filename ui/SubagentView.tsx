@@ -36,9 +36,6 @@ export function SubagentView({
 }) {
   const [info, setInfo] = useState<Info | null>(null);
   const [raw, setRaw] = useState<string | null>(null);
-  const scroll = useRef<HTMLDivElement>(null);
-  const atEnd = useRef(true);
-  const back = useRef<HTMLButtonElement>(null);
 
   // 어느 파일인지 찾는다. 막 불린 서브에이전트는 파일이 조금 늦게 생기므로 찾을 때까지 다시 본다.
   useEffect(() => {
@@ -90,7 +87,25 @@ export function SubagentView({
     };
   }, [root, session, info]);
 
-  // Esc 는 이 화면만 닫는다. 입력바가 아래에 깔려 있어 그대로 두면 Esc 가 claude 로 가서
+  const items = useMemo(() => {
+    if (!raw) return [] as Item[];
+    const events = parseJsonl(raw);
+    // 서브에이전트 원문은 레코드가 전부 사이드체인이다. 기본 규칙대로 거르면 통째로 빈다.
+    return toItems(events, buildToolMap(events), true);
+  }, [raw]);
+
+  return <SubagentPanel title={info?.description ?? target.label} name={info?.agentType ?? "서브에이전트"}
+    items={items} loading={!info || raw === null} onClose={onClose} renderRow={renderRow} taskLabel="claude 가 맡긴 일" />;
+}
+
+export function SubagentPanel({ title, name, items, loading, error, onClose, renderRow, taskLabel }: {
+  title: string; name: string; items: Item[]; loading: boolean; error?: string; onClose: () => void;
+  renderRow: (item: Item, o: RowOpts) => ReactNode; taskLabel: string;
+}) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const atEnd = useRef(true);
+  const back = useRef<HTMLButtonElement>(null);
+  // Esc 는 이 화면만 닫는다. 입력바가 아래에 깔려 있어 그대로 두면 Esc 가 에이전트로 가서
   // 하던 일을 멈춘다 — 보려고 연 화면을 닫다가 작업을 끊으면 안 된다.
   // 한 번만 건다. 부른 쪽이 그릴 때마다 새 onClose 를 주는데, 그때마다 다시 걸면 포커스도
   // 매번 여기로 끌려온다.
@@ -108,20 +123,11 @@ export function SubagentView({
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  const items = useMemo(() => {
-    if (!raw) return [] as Item[];
-    const events = parseJsonl(raw);
-    // 서브에이전트 원문은 레코드가 전부 사이드체인이다. 기본 규칙대로 거르면 통째로 빈다.
-    return toItems(events, buildToolMap(events), true);
-  }, [raw]);
-
   useLayoutEffect(() => {
     const el = scroll.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [items]);
 
-  const name = info?.agentType ?? "서브에이전트";
-  const title = info?.description ?? target.label;
   // 첫 사용자 말은 맡긴 일이다. 그 뒤의 사용자 말(드물다)은 그대로 둔다.
   const task = items.findIndex((it) => it.kind === "bubble" && it.role === "user");
 
@@ -145,7 +151,8 @@ export function SubagentView({
           if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
       >
-        {!info || raw === null ? (
+        {error && <div className="note bad" role="alert">{error}</div>}
+        {loading ? (
           <div className="chat-empty">서브에이전트 기록을 찾는 중</div>
         ) : items.length === 0 ? (
           <div className="chat-empty">아직 적힌 것이 없다</div>
@@ -154,7 +161,7 @@ export function SubagentView({
             if (i === task) {
               return (
                 <div className="subview-task" key={i}>
-                  <div className="tool-label">claude 가 맡긴 일</div>
+                  <div className="tool-label">{taskLabel}</div>
                   <Markdown text={(item as Bubble).text} />
                 </div>
               );

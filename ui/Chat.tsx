@@ -50,6 +50,8 @@ type ChatProps = {
   transport: Transport;
   /** 대화 끝에 붙는 것 — 통로로 온 권한 묻기·질문 카드. */
   extra?: ReactNode;
+  activity?: ReactNode;
+  subagentView?: (target: SubTarget, close: () => void) => ReactNode;
   /** 입력바 위에 붙는 것 — 모델·권한 모드. */
   toolbar?: ReactNode;
   /** 입력바에서 `/` 를 치면 띄울 명령. */
@@ -75,6 +77,7 @@ export function Chat({
   working = false,
   transport,
   extra,
+  activity,
   toolbar,
   commands,
   fresh = false,
@@ -281,7 +284,7 @@ export function Chat({
               </div>
             ))}
             {stream && <LiveRows live={stream} slug={slug} name={name} showFace={!lastIsAgent} />}
-            {agent === "claude" && <SubAgents session={id} />}
+            {activity ?? (agent === "claude" && <SubAgents session={id} />)}
             {agent === "codex" && working && !waiting && <div className="note" role="status">Codex 작업 중</div>}
           </>
         )}
@@ -330,7 +333,7 @@ export function ChatPane(props: ChatProps) {
       <OpenSubContext.Provider value={setOpenSub}>
         <Chat {...props} />
         {openSub && (
-          <SubagentView
+          props.subagentView ? props.subagentView(openSub, () => setOpenSub(null)) : <SubagentView
             root={props.root}
             session={props.id}
             target={openSub}
