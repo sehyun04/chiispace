@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
-const hash = (file) => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
 test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고, 권한·질문·중단·모델·이어가기를 카드로 다룬다", { skip: !exe || !claude, timeout: 300000 }, async () => {
   // 실제 claude 를 `-p` stream-json 통로로 띄우고, 앱 프록시 뒤에 가짜 Anthropic 서버를 둔다.
@@ -21,7 +21,7 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
   const home = path.join(root, "claude-state");
   mkdirSync(home);
   const protectedFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json"));
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
   // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막아 대화창에서 보낸 말이 제출되지 않는다.
   const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
@@ -374,5 +374,5 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     server.close();
   }
   if (process.env.CHIISPACE_TEST_SCREENSHOT === "1") console.log("screenshots:", root);
-  assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션 파일이 바뀜");
+  guard("사용자 세션 파일 보호");
 });
