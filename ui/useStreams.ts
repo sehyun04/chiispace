@@ -68,14 +68,24 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
     if (Object.keys(moved).length) setStreams((st) => ({ ...st, ...moved }));
   }, []);
 
-  /** 터미널 없는 Claude 칸을 같은 대화의 터미널 칸으로 다시 연다. `/config` 같은 터미널 메뉴가 필요할 때의 길이다.
+  /** 터미널 없는 칸을 같은 대화의 터미널 칸으로 다시 연다. `/config` 같은 터미널 메뉴가 필요할 때의 길이다.
    *  같은 칸 자리에서 그리는 것만 바뀐다 — 통로는 그 칸이 내려가며 거두고, 터미널은 복원 명령으로 이어 연다.
    *  되돌린 칸은 다음에 켜도 터미널로 둔다. 어느 명령으로 열지는 부른 쪽(`seed`)이 건다. */
   const toTerminal = useCallback(async (id: string, seed: (id: string, s: Seed) => void) => {
     const c = streamsNow.current[id];
-    if (!c || c.agent !== "claude") return;
-    // 폴더 없이 연 대화창의 claude 는 홈에서 돈다(claude_chat.rs). 터미널도 거기서 열어야 같은 자리에서 일한다.
+    if (!c || streamBusy[id]) return;
+    // 두 통로 모두 폴더 없이 연 대화창은 홈에서 돈다. 터미널도 같은 자리에서 열어야 한다.
     const cwd = c.cwd || ((await invoke<string | null>("home_dir").catch(() => null)) ?? "");
+    if (!cwd) return;
+    if (c.agent === "codex") {
+      // 서버가 준 ID만 명령줄에 쓴다. 전송한 대화의 ID가 깨졌다면 새 대화로 바꿔 열지 않는다.
+      if (!c.unstarted && c.session && !isSessionId(c.session)) return;
+      if (streamsNow.current[id] !== c) return;
+      seed(id, { cmd: !c.unstarted && isSessionId(c.session) ? `codex resume ${c.session}` : "codex", auto: true, cwd });
+      setStreams((st) => without(st, id));
+      setKeepTerm((k) => ({ ...k, [id]: true }));
+      return;
+    }
     const size = await invoke<number>("claude_transcript_size", { root: c.cwd, id: c.session }).catch(() => 0);
     if (streamsNow.current[id] !== c) return;
     // 한 마디도 없는 대화는 파일이 아직 없어 `--resume` 이 "No conversation found" 로 끝나고, 칸은 빈 셸로 남아
@@ -86,7 +96,7 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
       : { cmd: "claude", auto: true, cwd: cwd || undefined });
     setStreams((st) => without(st, id));
     setKeepTerm((k) => ({ ...k, [id]: true }));
-  }, []);
+  }, [streamBusy]);
 
   /** 터미널 Claude 칸을 같은 대화의 터미널 없는 칸으로 다시 연다. 대화 id 는 그 칸의 claude 가 명부에 쓴 값이다.
    *  터미널은 칸에서 내려가며 닫힌다(`pty_close` 는 칸 종료 신호를 내지 않는다).

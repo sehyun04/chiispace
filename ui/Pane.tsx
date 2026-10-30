@@ -5,7 +5,7 @@
  *  자리(`.slot`)와 키는 App 이 잡는다. 결정 1번 — 칸을 배치 트리대로 중첩하지 않는다. */
 import { useRef } from "react";
 import { bySlug, DanceFace, Face, faceUrl } from "./roster";
-import { isAgentWorking, type PaneStat, type Seed } from "./session";
+import { isAgentWorking, isSessionId, type PaneStat, type Seed } from "./session";
 import type { StreamChat } from "./stream-session";
 import { Term } from "./Term";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
@@ -96,12 +96,18 @@ export function Pane(p: PaneProps) {
           </span>
         )}
         {view?.agent ? <span className="chip">{view.agent}</span> : null}
-        {p.stream?.agent === "claude" || (!p.stream && stat?.agent === "claude") ? (
+        {p.stream?.agent === "claude" || p.stream?.agent === "codex" || (!p.stream && (stat?.agent === "claude" || stat?.agent === "codex")) ? (
           <ModeSwitch
             chat={!!p.stream}
-            toTerminal={p.streamBusy ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다" : null}
+            toTerminal={p.streamBusy
+              ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다"
+              : p.stream?.agent === "codex" && !p.stream.unstarted && p.stream.session && !isSessionId(p.stream.session)
+                ? "Codex가 준 대화 ID를 확인할 수 없어 터미널로 옮기지 않는다"
+                : null}
             toChat={
-              !p.chatId
+              stat?.agent === "codex"
+                ? "Codex가 이 터미널 칸의 현재 대화 ID를 아직 알려 주지 않아 옮길 수 없다"
+                : !p.chatId
                 ? "claude 가 이 대화를 아직 알려 주지 않았다 — 첫 말을 주고받으면 옮길 수 있다"
                 : isAgentWorking(stat)
                   ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다"
