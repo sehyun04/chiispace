@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hash = (file) => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 const leaves = (node) => node.kind === "leaf" ? [node.id] : [...leaves(node.a), ...leaves(node.b)];
 function list(pid) {
   return new Promise((resolve, reject) => {
@@ -32,7 +31,7 @@ test("복원 배치의 독립 실행에서 앱 생존과 세션 보존", { skip:
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-startup-"));
   const userState = path.join(process.env.APPDATA, "com.sehyun.chiispace", "session.json");
   const protectedFiles = [userState, path.join(process.env.APPDATA, "com.sehyun.kasaspace", "session.json")];
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   const original = process.env.CHIISPACE_TEST_LAYOUT ? JSON.parse(readFileSync(process.env.CHIISPACE_TEST_LAYOUT, "utf8")) : {
     tabs: [{ key: "t0", focus: "%0", layout: { kind: "leaf", id: "%0" } }], active: 0, nextPane: 1, nextTab: 1,
   };
@@ -70,7 +69,7 @@ test("복원 배치의 독립 실행에서 앱 생존과 세션 보존", { skip:
       if (app.exitCode === null) app.kill();
     }
     writeFileSync(path.join(root, "stderr.txt"), stderr);
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션 변경");
+    guard("사용자 세션 보호");
     console.log(`시작 검증 파일: ${root}`);
   }
 });

@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const delay = ms => new Promise(r => setTimeout(r, ms));
-const hash = file => { try { return createHash("sha256").update(readFileSync(file)).digest("hex"); } catch (e) { if (e.code === "ENOENT") return null; throw e; } };
 async function until(fn) {
   for (let i = 0; i < 150; i++) { if (await fn()) return; await delay(100); }
   throw new Error("pane 이름 검증 대기 시간 초과");
@@ -36,7 +36,7 @@ test("실제 pane 자동 이름의 저장·재시작·숨긴 탭·수동 이름 
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-pane-titles-"));
   const file = path.join(root, "session.json");
   const protectedFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(id => path.join(process.env.APPDATA, id, "session.json"));
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   writeFileSync(file, JSON.stringify({ tabs: [0, 1, 2].map(i => ({ key: `t${i}`, focus: `%${i}`, root,
     shell: path.join(process.env.SystemRoot, "System32", "cmd.exe"), layout: { kind: "leaf", id: `%${i}` } })),
     active: 0, nextPane: 3, nextTab: 3, procs: {}, restoreMode: "native-continue",
@@ -138,6 +138,6 @@ test("실제 pane 자동 이름의 저장·재시작·숨긴 탭·수동 이름 
     await close();
     server.closeAllConnections();
     await new Promise(r => server.close(r));
-    assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션 변경");
+    guard("사용자 세션 보호");
   }
 });

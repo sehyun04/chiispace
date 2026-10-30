@@ -1,18 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hash = (file) => {
-  try { return createHash("sha256").update(readFileSync(file)).digest("hex"); }
-  catch (error) { if (error.code === "ENOENT") return null; throw error; }
-};
 
 async function until(fn, timeout = 15000) {
   const deadline = Date.now() + timeout;
@@ -48,7 +44,7 @@ test("실제 앱 두 개에서 칸 연결과 세션 격리", { skip: !exe, timeo
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-bridge-"));
   const userFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) =>
     path.join(process.env.APPDATA, id, "session.json"));
-  const before = userFiles.map(hash);
+  const guard = watchUserFiles(userFiles, { root, exe });
   const apps = [];
   const start = (name) => {
     const folder = path.join(root, name);
@@ -114,7 +110,7 @@ test("실제 앱 두 개에서 칸 연결과 세션 격리", { skip: !exe, timeo
     await assert.rejects(() => peek(id), /없는 칸/);
     await assert.rejects(() => call("surface.send_key", { surface_id: "%0", key: "Ctrl+Enter" }), /지원하지 않는 키/);
     await until(() => JSON.parse(readFileSync(a.state, "utf8")).tabs[1].layout.kind === "leaf");
-    assert.deepEqual(userFiles.map(hash), before, "사용자 세션 파일 해시 변경");
+    guard("사용자 세션 파일 보호");
   } finally {
     for (const child of apps) {
       const close = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
@@ -122,7 +118,7 @@ test("실제 앱 두 개에서 칸 연결과 세션 격리", { skip: !exe, timeo
       if (close.status !== 0) console.error(close.stderr);
       await until(() => child.exitCode !== null, 5000).catch(() => child.kill());
     }
-    assert.deepEqual(userFiles.map(hash), before, "검증 종료 후 사용자 세션 파일 해시 변경");
+    guard("검증 종료 후 사용자 세션 파일 보호");
     console.log(`검증 세션: ${root}`);
   }
 });

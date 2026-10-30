@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { watchUserFiles } from "./user-files.mjs";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
-const hash = (file) => existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null;
 
 test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 두 방향으로 같은 대화를 오간다", { skip: !exe || !claude, timeout: 240000 }, async () => {
   // 터미널 Claude 칸의 복원 정보에 명부의 대화 id 가 있고 그 대화 파일이 있으면 터미널 없는 칸으로 연다.
@@ -29,7 +29,7 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
     { ...common, type: "assistant", uuid: randomUUID(), parentUuid: userId, message: { id: "msg_" + randomUUID(), type: "message", role: "assistant", model: "claude-sonnet-4-6", content: [{ type: "text", text: "RESTORE_MARK" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 3 } } },
   ].map(v => JSON.stringify(v)).join("\n") + "\n");
   const protectedFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json"));
-  const before = protectedFiles.map(hash);
+  const guard = watchUserFiles(protectedFiles, { root, exe });
   // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
   // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막는다.
   // 5단계는 폴더 칩으로 한 단계 위(root)로 옮겨 가므로 그 폴더도 신뢰해 둔다.
@@ -206,5 +206,5 @@ test("켤 때 대화 id 가 확실한 Claude 칸은 터미널 없이 열리고, 
     server.closeAllConnections();
     server.close();
   }
-  assert.deepEqual(protectedFiles.map(hash), before, "사용자 세션 파일이 바뀜");
+  guard("사용자 세션 파일 보호");
 });
