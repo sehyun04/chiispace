@@ -1169,5 +1169,7 @@ TUI 에만 있는 메뉴는 받지 않는다. 다 만들 필요는 없고 쓸모
 - [README](../README.md): 현재 기능·사용법·구조·빌드·검증 실행법.
 - [CLAUDE.md](../CLAUDE.md): 다음 작업자가 먼저 읽는 현재 상태·안전 규칙·회귀 방지 결정.
 - [배포 기록](DEPLOYS.md): 고정 경로 exe 를 바꾼 이력 한 표.
-- [Codex 대화창 핸드오프](HANDOFF-CODEX-CHAT.md): 최신 새 Codex 칸 구현·검증·배포 범위와 이전 훅 인계.
+- [AGENTS.md](../AGENTS.md): Codex 가 저절로 읽는 입구. 규칙은 CLAUDE.md 로 보낸다.
+- [Codex 대화창 따라잡기 인계](HANDOFF-CODEX-PARITY.md): 지금 Codex 에 맡긴 작업 지시(옮기기·서브에이전트·`/` 명령).
+- [Codex 대화창 핸드오프](HANDOFF-CODEX-CHAT.md): 9월 새 Codex 칸 구현·검증·배포 범위와 이전 훅 인계. 이력이다.
 - [핸드오프 이력](HANDOFF-ARCHIVE.md): 당시 진단·시행착오·원복 기록의 원문 보관. 현재 작업 지시는 아님.
