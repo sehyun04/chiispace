@@ -4,13 +4,27 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{atomic::{AtomicU64, Ordering}, mpsc, Arc, Mutex};
+use std::sync::{atomic::{AtomicU64, Ordering}, mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 type Pending = Arc<Mutex<HashMap<String, mpsc::Sender<Result<Value, String>>>>>;
+/// 떠 있는 app-server 와, 칸마다 마지막으로 거두는 중인 app-server.
 #[derive(Default)]
-pub struct CodexStreams(Mutex<HashMap<String, Proc>>);
+pub struct CodexStreams(Mutex<HashMap<String, Proc>>, Mutex<HashMap<String, Arc<Leaving>>>);
+
+#[derive(Default)]
+struct Leaving { gone: Mutex<bool>, signal: Condvar }
+impl Leaving {
+    fn done(&self) {
+        *self.gone.lock().unwrap() = true;
+        self.signal.notify_all();
+    }
+    fn wait(&self, limit: Duration) {
+        let gone = self.gone.lock().unwrap();
+        let _ = self.signal.wait_timeout_while(gone, limit, |g| !*g);
+    }
+}
 struct Proc {
     run: String,
     stdin: ChildStdin,
@@ -93,8 +107,24 @@ fn can_target(method: &str, target: &str, root: Option<&str>, readable: &HashMap
     root == Some(target) || (method == "thread/read" && root.is_some_and(|r| readable.get(target).is_some_and(|v| v == r)))
 }
 
+/// 같은 칸을 다른 대화로 다시 열면(`/resume`) 앞 app-server 가 아직 내려가는 중일 수 있다. 그것이 대화를 쥔 채면
+/// 새 app-server 의 `thread/resume` 이 "already has an active writer" 로 거절된다 — `/new` 뒤 바로 전 대화로 돌아갈 때가
+/// 그렇다. 그래서 앞 것이 다 내려간 뒤에 띄운다. 기다리는 동안 웹뷰가 멈추지 않게 이 명령은 비동기다.
 #[tauri::command]
-pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: String, cwd: String) -> Result<String, String> {
+pub async fn codex_stream_start(app: AppHandle, id: String, cwd: String) -> Result<String, String> {
+    let leaving = app.state::<CodexStreams>().1.lock().unwrap().get(&id).cloned();
+    if let Some(prev) = leaving {
+        let wait = prev.clone();
+        tauri::async_runtime::spawn_blocking(move || wait.wait(Duration::from_secs(5))).await.map_err(|e| e.to_string())?;
+        let state = app.state::<CodexStreams>();
+        let mut left = state.1.lock().unwrap();
+        if left.get(&id).is_some_and(|p| Arc::ptr_eq(p, &prev)) { left.remove(&id); }
+    }
+    start(app, id, cwd)
+}
+
+fn start(app: AppHandle, id: String, cwd: String) -> Result<String, String> {
+    let streams = app.state::<CodexStreams>();
     let mut map = streams.0.lock().unwrap();
     if map.contains_key(&id) { return Err("이 칸의 Codex가 이미 실행 중이다".into()); }
     let dir = if cwd.is_empty() { std::env::var("USERPROFILE").map_err(|e| e.to_string())? } else { cwd };
@@ -128,6 +158,7 @@ pub fn codex_stream_start(app: AppHandle, streams: State<CodexStreams>, id: Stri
     });
     map.insert(id.clone(), Proc { run: run.clone(), stdin, child, pending: pending.clone(), questions: questions.clone(), thread: thread.clone(), readable: readable.clone(), _job: job });
     let token = run.clone();
+    let app = app.clone();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
@@ -238,6 +269,8 @@ pub fn codex_stream_stop(streams: State<CodexStreams>, id: String, run: String) 
         if map.get(&id).is_some_and(|p| p.run == run) { map.remove(&id) } else { None }
     };
     if let Some(Proc { stdin, mut child, pending, _job, .. }) = own {
+        let leaving = Arc::new(Leaving::default());
+        streams.1.lock().unwrap().insert(id, leaving.clone());
         drop(stdin);
         for (_, tx) in pending.lock().unwrap().drain() { let _ = tx.send(Err("Codex 칸이 닫혔다".into())); }
         std::thread::spawn(move || {
@@ -246,6 +279,7 @@ pub fn codex_stream_stop(streams: State<CodexStreams>, id: String, run: String) 
             let _ = child.kill();
             let _ = child.wait();
             drop(_job);
+            leaving.done();
         });
     }
 }
@@ -257,6 +291,19 @@ mod tests {
     fn chat_transport_cannot_execute_arbitrary_processes_or_write_config() {
         for method in ["process/spawn", "command/exec", "config/value/write", "config/batchWrite", "skills/config/write", "mcpServer/oauth/login", "account/login/start", "thread/name/set", "review/start", "thread/fork"] { assert!(!permitted(method)); }
         for method in ["thread/start", "thread/resume", "thread/list", "turn/start", "turn/interrupt", "model/list", "mcpServerStatus/list", "skills/list"] { assert!(permitted(method)); }
+    }
+    #[test]
+    fn reopening_waits_until_the_previous_server_is_gone() {
+        let leaving = Arc::new(Leaving::default());
+        let signal = leaving.clone();
+        let started = Instant::now();
+        std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(150)); signal.done(); });
+        leaving.wait(Duration::from_secs(5));
+        assert!(started.elapsed() >= Duration::from_millis(150) && started.elapsed() < Duration::from_secs(2));
+        let stuck = Leaving::default();
+        let started = Instant::now();
+        stuck.wait(Duration::from_millis(100));
+        assert!(started.elapsed() >= Duration::from_millis(100));
     }
     #[test]
     fn only_announced_children_of_the_current_thread_can_be_read() {

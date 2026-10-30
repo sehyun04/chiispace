@@ -71,6 +71,8 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   Claude로 읽는다. `unstarted`가 참이어도 먼저 저장 ID의 복원을 시도한다. 그 ID에 대해 정확히
   `no rollout found`를 받고 한 번도 전송하지 않은 칸일 때만 새 빈 대화로 연다. 첫 전송 전에 이 표시를 끈다.
   전송한 대화의 복원 실패·인증 오류·시간 초과를 새 대화로 덮지 않는다. PTY의 `resume --last`와 별개다.
+  같은 칸을 다른 대화로 다시 열 때(`/resume`)는 앞 app-server 가 다 내려간 뒤에 새로 띄운다(`codex_stream_start`) —
+  앞 것이 대화를 쥔 채면 새 쪽 `thread/resume` 이 "already has an active writer" 로 거절된다.
 - **새 Codex 칸의 이름은 앱의 `paneTitles`에 저장한다.** `turn/start` 응답 직후의 rollout은 아직 비어 있을 수 있다.
   자동 이름과 `/rename`에서 `thread/name/set`을 보내지 않는다. 수동 이름은 첫 메시지의 자동 이름보다 우선한다.
   승인 답에는 칸·실행 세대·요청 ID·대화 ID를 맞추며, CLI가 제공한 선택지만 보낸다.
