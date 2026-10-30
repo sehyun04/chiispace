@@ -1215,6 +1215,53 @@ Codex도 머리줄 [터미널][대화창]을 쓴다. 전송한 대화는 서버�
 본 대화가 답하는 동안 상세를 Esc로 닫아도 답이 중단되지 않는지를 확인했다. 캡처도 확인했다.
 자식의 모든 승인 변형을 처리했다고 확대하지 않는다. feature는 격리 설정에서만 켰고 배포하지 않았다.
 
+## 34. 10월 30일 추가: Codex TUI 명령과 대화창 경로 대조
+
+설치된 0.164.0 생성 스키마와 [같은 태그의 TUI 명령](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/tui/src/slash_command.rs)을
+대조했다. 구현 전에 정한 경로는 다음과 같다. 목록에는 실제 연결한 명령만 올린다.
+
+| TUI 명령 | 대화창 경로·판단 |
+|---|---|
+| model · permissions · status · new/clear · rename · compact · resume · logout | 기존 줄·통로·로그인 터미널 유지. login·effort는 앱 명령 |
+| mcp | `mcpServerStatus/list`로 현재 thread의 서버·도구 목록 조회. OAuth·설정 변경 제외 |
+| skills | `skills/list`로 활성·비활성 스킬과 읽기 오류 조회. 설치·설정 쓰기 제외 |
+| diff | 작업 폴더의 고정 읽기 전용 Git 경로. tracked HEAD 차이와 untracked 포함. `turn/diff/updated`로 대체하지 않음 |
+| pwd/cwd · usage · warnings | 폴더·`account/rateLimits/read`·이 실행에 온 경고 조회 |
+| agents/subagents | 서버가 알려 준 자식 목록에서 사용자가 상세 대화 선택 |
+| copy | 마지막 답의 텍스트를 사용자가 클립보드로 복사 |
+| init · recap | 기존 `turn/start`의 일반 요청으로 AGENTS.md 작성·현재 대화 요약. TUI recap의 별도 내부 실행과는 구별 |
+| review · fork | `review/start`·`thread/fork`는 실행·대화 생성이라 별도 사용자 확인 대기 |
+| config · presets · daybreak · keymap · vim · setup-default-sandbox · experimental · memories · import · hooks · title · statusline · theme · pets · tui | 설정·신뢰·권한 쓰기 또는 TUI 표시 설정. 이번에 연결하지 않음 |
+| archive · delete · worktree · side/btw · app · voice · goal · approve · stop/clean | 대화 수명·작업 실행·중단을 바꾸는 기능. 기존 허용 목록 밖 메서드를 임의로 추가하지 않음 |
+| ide · mention · export · raw · daemon · debug-config · ps · apps · plugins · feedback · quit/exit | 전용 UI·도구·로그 전송·파일 저장이 더 필요한 범위. 현재 지원하지 않음 |
+| rollout · test-approval · debug-m-drop · debug-m-update | TUI 디버그 명령. 사용자 목록에 넣지 않음 |
+
+조회 결과는 대화 아래의 닫을 수 있는 표시 영역에서 보인다. 설정·인증 원문 전체를 출력하지 않고 서버·도구 이름,
+스킬 이름·설명·사용 여부, 한도·사용률 같은 표시 필드만 쓴다. `/agents`는 완료한 자식도 목록에서 골라 상세를 연다.
+`/init`·`/recap`은 기존 `turn/start`로 요청하므로 별도 실행 메서드를 열지 않는다. 추가 요청 인자도 보존한다.
+
+새 허용 메서드는 `mcpServerStatus/list`·`skills/list` 두 조회뿐이다. `/mcp login` 같은 추가 동작은 실행하지 않고
+초안을 되돌린다. `review/start`·`thread/fork`, 설정 쓰기·OAuth 로그인 메서드는 계속 차단돼 있다.
+`/diff`는 서버의 턴별 diff가 아니라 로컬 작업 폴더의 HEAD 대비 변경과 새 파일을 읽는다. 외부 diff·textconv·fsmonitor는
+끄고, 심볼릭 링크·폴더 밖 파일을 따라가지 않으며 큰 파일·긴 출력에는 한도를 둔다. Git 수정 명령을 받는 API는 만들지 않았다.
+
+검증: `codex-commands`·`palette`와 실제 `codex-stream-view` 14개가 건너뜀 없이 통과했다. 격리 MCP 서버·스킬을
+실제 CLI로 조회하고 모델 요청 수가 늘지 않는지, tracked·untracked 변경을 함께 보이는지, 명령으로 고른 자식 상세,
+같은 대화의 일반 턴 요청과 격리 config 파일 불변을 확인했다. 조회 화면 캡처도 확인했다.
+
+최초 전체 실행은 JS 154개 중 153개 통과·1개 실패·건너뜀 0이었다. 실패는 `chat-stream`의 기능 단계가 아니라
+마지막 사용자 세션 바이트 비교였다. 고정 경로 사용자 앱이 실행 중이었고 정상 저장을 해 해시가 바뀌었으며,
+그 파일에 검증 임시 폴더·검증 빌드 경로가 새어 들어가지 않은 것을 확인했다. 이 테스트도 다른 실앱 검증과 같은
+`watchUserFiles`를 써 사용자 앱이 꺼져 있으면 바이트 비교, 켜져 있으면 새 검증 흔적 검사를 하도록 맞췄다.
+사용자 앱을 끄거나 보호 검사를 없애지 않았고 Claude 제품 동작은 바꾸지 않았다.
+두 번째 전체 실행에서는 `chat-stream`이 통과했고 같은 구형 검사가 남은 `stream-restore`만 세션 해시로 실패했다.
+남은 같은 패턴의 `bridge`·`pane-titles`·`startup`·`stream-restore`도 공용 검사로 맞췄고 네 검증 단독 실행이 모두 통과했다.
+
+최종 `node scripts/test.mjs --build` 전체 실행은 JS 154개 모두 통과했다(실패·건너뜀 0).
+Rust release 검증도 lib 36개·CLI 10개, 합계 46개 통과했다. 기준선 JS 145개·Rust 44개에서
+새 동작·경계 검증이 각각 9개·2개 늘었다. `git diff --check`도 통과했다. 검증 빌드만 만들었으며 사용자용
+고정 경로 exe·배포 기록은 교체·수정하지 않았다. 사용자 실사용 확인은 배포 후 별개로 남는다.
+
 ## 문서별 역할
 
 - 이 문서: 지금까지 무엇을 만들고 고쳤으며 어디까지 검증했는지 보는 누적 작업 정리.

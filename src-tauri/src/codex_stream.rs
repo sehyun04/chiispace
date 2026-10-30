@@ -58,11 +58,11 @@ fn write(proc: &mut Proc, value: &Value) -> Result<(), String> {
     bytes.push(b'\n');
     proc.stdin.write_all(&bytes).and_then(|_| proc.stdin.flush()).map_err(|e| format!("Codex에 보내지 못했다: {e}"))
 }
-// thread/list 는 /resume 에서 사용자가 고를 지난 대화 목록을 읽기만 한다. 고르는 것은 사람이고, 고른 id 는 thread/resume 으로 연다.
+// 목록 조회는 이 칸의 연결·스킬을 보여 주기만 한다. 설정·인증을 바꾸는 메서드는 열지 않는다.
 fn permitted(method: &str) -> bool {
     matches!(method, "initialize" | "thread/start" | "thread/resume" | "thread/read" | "thread/list"
         | "thread/compact/start" | "turn/start" | "turn/steer" | "turn/interrupt"
-        | "model/list" | "account/read" | "account/rateLimits/read")
+        | "model/list" | "account/read" | "account/rateLimits/read" | "mcpServerStatus/list" | "skills/list")
 }
 fn current<'a>(map: &'a mut HashMap<String, Proc>, id: &str, run: &str) -> Result<&'a mut Proc, String> {
     map.get_mut(id).filter(|p| p.run == run).ok_or_else(|| "Codex 실행이 바뀌었거나 종료됐다".into())
@@ -255,8 +255,8 @@ mod tests {
     use super::*;
     #[test]
     fn chat_transport_cannot_execute_arbitrary_processes_or_write_config() {
-        for method in ["process/spawn", "command/exec", "config/value/write", "account/login/start", "thread/name/set"] { assert!(!permitted(method)); }
-        for method in ["thread/start", "thread/resume", "thread/list", "turn/start", "turn/interrupt", "model/list"] { assert!(permitted(method)); }
+        for method in ["process/spawn", "command/exec", "config/value/write", "config/batchWrite", "skills/config/write", "mcpServer/oauth/login", "account/login/start", "thread/name/set", "review/start", "thread/fork"] { assert!(!permitted(method)); }
+        for method in ["thread/start", "thread/resume", "thread/list", "turn/start", "turn/interrupt", "model/list", "mcpServerStatus/list", "skills/list"] { assert!(permitted(method)); }
     }
     #[test]
     fn only_announced_children_of_the_current_thread_can_be_read() {

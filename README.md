@@ -87,7 +87,9 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 - **Codex도 터미널 없이 연다.** 설치된 CLI의 로컬 `app-server`를 칸마다 독립 실행한다. 새 훅을 주입하거나
   `/hooks` 신뢰를 요구하지 않는다. 답변은 실시간으로 흐르고 승인·질문은 카드로, 모델·추론·승인은 입력바 위에서
   고른다. `/model`은 모델 선택으로, `/status`·`/permissions`는 상태 표시로 연결된다.
-  `/new`·`/clear`·`/rename`·`/compact`도 지원한다. 나머지 명령은 안내하고 입력 초안을 보존한다.
+  `/new`·`/clear`·`/rename`·`/compact`도 지원한다. 지원 범위 밖 명령은 안내하고 입력 초안을 보존한다.
+  `/mcp`·`/skills`·`/diff`·`/pwd`(`/cwd`)·`/usage`·`/warnings`는 조회, `/agents`(`/subagents`)는 자식 대화 고르기,
+  `/copy`는 마지막 답 복사다. `/init`·`/recap`은 같은 대화에서 일반 요청 턴으로 처리한다.
   첫 메시지의 자동 이름과 `/rename` 이름은 앱 세션에 저장한다. 첫 턴 직후에는 Codex의 대화 파일이
   아직 비어 있을 수 있으므로 서버의 `thread/name/set`에 의존하지 않는다.
   서버가 발급한 ID를 저장해 `thread/resume`으로 이어 연다. 한 번도 전송하지 않아 CLI가 이력을 만들지 않은 칸은
@@ -101,6 +103,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 대화창으로 연다(`--continue` 로 돌던 칸이나 파일을 못 찾는 칸은 예전처럼 터미널로). Claude 칸 머리줄의 **[터미널][대화창]** 이
 같은 대화를 두 방식 사이에서 옮긴다. [터미널]로 옮긴 칸은 다음에 켜도 터미널로 남는다 — `/config` 같은 터미널 메뉴가 필요할
 때의 길이다. [대화창]은 claude 가 일하는 중이거나 아직 대화 id 를 알려 주지 않았으면 잠기고, 까닭을 풀이에 보인다.
+Codex 대화창도 [터미널]로 같은 대화를 옮긴다. 터미널 Codex의 현재 ID를 계속 확인할 근거는 없어 돌아오는 쪽은 잠겨 있다.
 
 대화창 입력바 위 줄 오른쪽의 폴더 칩을 누르면 한 단계 위(`..`), 바로 아래 폴더들, 다른 폴더 고르기가 뜬다. 고르면 그 폴더의
 새 대화로 다시 연다(claude 는 대화를 폴더별로 적어 같은 대화를 옮겨 갈 수 없다). 주고받은 말이 있으면 한 번 묻는다.
@@ -425,6 +428,9 @@ Anthropic 서버를 두고 실제 claude 를 `-p` stream-json 통로로 띄워, 
 이 검증은 격리 설정에만 `multi_agent`를 켜서 실제 자식을 만들고 진행 줄, 부모 완료 뒤 유지, 자식 완료 뒤 걷기,
 상세 이력과 완료 후 다시 보기, Esc의 본 대화 중단 방지도 본다. 0.164.0에서 채취한 합성 이벤트는
 `scripts/fixtures/codex-collab-0.164.json`에 있다. 제품은 사용자 feature 설정을 바꾸지 않는다.
+MCP·스킬 조회는 격리된 서버·스킬을 실제로 읽고, `/diff`는 tracked·untracked 변경을 함께 보이며 모델 요청이 없는지 본다.
+`/init`·`/recap`은 새 대화를 만들지 않고 같은 대화에 요청하는지, `/agents`는 고른 자식의 상세를 여는지 확인한다.
+명령·조회 표시와 공용 목록은 `codex-commands`·`palette` 단위 검증, Git의 staged·unstaged·untracked와 외부 diff 차단은 Rust 검증이다.
 
 새 대화 목록은 `CHIISPACE_TEST_EXE`·`CHIISPACE_TEST_REAL_CLAUDE`(있으면 `CHIISPACE_TEST_REAL_CODEX`)로
 `node --test scripts/contacts.test.mjs`를 실행한다. 목록을 눌러 새 탭에서 실제 claude·codex 가 켜지는지,

@@ -14,6 +14,7 @@ export type CodexStream = {
   agents: CodexAgent[];
   error?: string;
   tokens?: number;
+  warnings?: string[];
 };
 export const initialCodex: CodexStream = { thread: "", turn: null, busy: false, entries: [], prompts: [], settled: [], agents: [] };
 export function resumedCodex(thread: Data): CodexStream {
@@ -120,6 +121,7 @@ export function reduceCodex(s: CodexStream, message: Data): CodexStream {
   }
   if (method === "thread/tokenUsage/updated") return { ...s, tokens: p.tokenUsage?.total?.totalTokens };
   if (method === "error") return { ...s, error: p.error?.message ?? "Codex 요청이 실패했다" };
+  if (method === "warning" && typeof p.message === "string") return { ...s, warnings: [...new Set([...(s.warnings ?? []), p.message])].slice(-50) };
   return s;
 }
 export function codexItems(entries: Data[]): Item[] {

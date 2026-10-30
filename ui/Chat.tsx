@@ -52,6 +52,7 @@ type ChatProps = {
   extra?: ReactNode;
   activity?: ReactNode;
   subagentView?: (target: SubTarget, close: () => void) => ReactNode;
+  subagent?: SubTarget;
   /** 입력바 위에 붙는 것 — 모델·권한 모드. */
   toolbar?: ReactNode;
   /** 입력바에서 `/` 를 치면 띄울 명령. */
@@ -315,6 +316,7 @@ export function ChatPane(props: ChatProps) {
   useEffect(() => {
     setOpenSub(null);
   }, [props.id]);
+  useEffect(() => { if (props.subagent) setOpenSub(props.subagent); }, [props.subagent]);
   // 재기 전의 0 은 화면에 나가지 않는다 — layout effect 가 그리기 전에 고쳐 놓는다.
   const [top, setTop] = useState(0);
   useLayoutEffect(() => {

@@ -7,6 +7,7 @@
 
 mod shells;
 mod workspace;
+mod git_diff;
 mod claude_files;
 mod bridge;
 mod collab;
@@ -330,6 +331,7 @@ pub fn run() {
             workspace::fs_dirs,
             workspace::home_dir,
             workspace::git_status,
+            git_diff::git_diff,
             claude_files::claude_session_of_pid,
             claude_files::claude_transcript_raw,
             claude_files::claude_transcript_size,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { titleFrom } from "./claude-stream";
@@ -8,6 +9,8 @@ import { agentActive, approvalOptions, blockingPrompt, codexItems, hydrateCodexA
 import { CodexSubagents, CodexSubagentView } from "./CodexSubagents";
 import { missingUnstarted, type StreamChat } from "./stream-session";
 import { ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
+import { CODEX_COMMANDS, codexCommand, codexPrompt, mcpReport, skillsReport, usageReport } from "./codex-commands";
+import type { SubTarget } from "./SubagentView";
 
 type Session = Extract<StreamChat, { agent: "codex" }>;
 type Event = { id: string; run: string; message: Data };
@@ -38,6 +41,8 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     onChange(id, patch);
   };
   const [status, setStatus] = useState(false);
+  const [inspection, setInspection] = useState<{ title: string; text: string } | null>(null);
+  const [subagent, setSubagent] = useState<SubTarget>();
   const [answering, setAnswering] = useState<string | number | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const sending = useRef(false);
@@ -47,6 +52,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
   const report = (error: unknown) => setFailure(String(error));
   const request = (method: string, params: Data = {}) => invoke<Data>("codex_stream_request", { id, run: run.current, method, params });
   const applyThread = (result: Data, unstarted: boolean) => {
+    setInspection(null);
     put(resumedCodex(result.thread));
     const options = { model: result.model, effort: chat.effort ?? result.reasoningEffort,
       approvalPolicy: chat.approvalPolicy ?? result.approvalPolicy, sandbox: chat.sandbox ?? result.sandbox };
@@ -139,7 +145,11 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
       if (!ready || sending.current) throw new Error("Codex 연결을 기다려 줘");
       sending.current = true; setDispatching(true); setFailure("");
       try {
-        const [command, ...args] = text.split(/\s+/);
+        const [rawCommand, ...args] = text.split(/\s+/);
+        const command = rawCommand.startsWith("/") ? codexCommand(rawCommand) : rawCommand;
+        if (args.length && ["/mcp", "/skills", "/diff", "/pwd", "/usage", "/warnings", "/copy", "/agents"].includes(command)) {
+          throw new Error("이 조회 명령은 추가 인자를 받지 않아. 인자를 지우고 다시 보내 줘.");
+        }
         if (command === "/model") { modelSelect.current?.focus(); return; }
         if (command === "/status" || command === "/permissions") { setStatus(true); return; }
         if (command === "/new" || command === "/clear") { await fresh(); return; }
@@ -150,12 +160,40 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
           titled.current = true;
           onTitle(id, args.join(" ")); return;
         }
-        if (command.startsWith("/")) throw new Error("이 명령은 지원하지 않아. 모델·권한·상태는 입력바 위에서 고를 수 있어.");
+        if (command === "/mcp") {
+          const servers: Data[] = [];
+          let cursor: string | null = null;
+          do {
+            const page = await request("mcpServerStatus/list", { threadId: latest.current.thread, cursor, limit: 100, detail: "toolsAndAuthOnly" });
+            servers.push(...(page.data ?? [])); cursor = page.nextCursor;
+          } while (cursor);
+          setInspection({ title: "MCP 서버와 도구", text: mcpReport(servers) }); return;
+        }
+        if (command === "/skills") {
+          const result = await request("skills/list", { cwds: chat.cwd ? [chat.cwd] : [], forceReload: false });
+          setInspection({ title: "스킬", text: skillsReport(result.data ?? []) }); return;
+        }
+        if (command === "/diff") {
+          const root = chat.cwd || await invoke<string>("home_dir");
+          setInspection({ title: "작업 폴더의 Git 변경", text: await invoke<string>("git_diff", { root }) }); return;
+        }
+        if (command === "/pwd") { setInspection({ title: "작업 폴더", text: chat.cwd || await invoke<string>("home_dir") }); return; }
+        if (command === "/usage") { setInspection({ title: "사용 한도", text: usageReport(await request("account/rateLimits/read")) }); return; }
+        if (command === "/warnings") { setInspection({ title: "경고", text: latest.current.warnings?.join("\n\n") || "이 실행에서 받은 경고가 없다" }); return; }
+        if (command === "/copy") {
+          const last = [...codexItems(latest.current.entries)].reverse().find(i => i.kind === "bubble" && i.role === "assistant");
+          if (!last || last.kind !== "bubble") throw new Error("복사할 답이 아직 없어");
+          await writeText(last.text); setInspection({ title: "복사", text: "마지막 답을 복사했어" }); return;
+        }
+        if (command === "/agents") { setInspection({ title: "서브에이전트", text: latest.current.agents.map(a => `${a.label} · ${a.status}`).join("\n") || "이 대화에서 부른 서브에이전트가 없다" }); return; }
+        const prompt = codexPrompt(command, args);
+        if (prompt && latest.current.busy) throw new Error("진행 중인 답을 먼저 멈춰 줘");
+        if (command.startsWith("/") && !prompt) throw new Error("이 명령은 아직 대화창에서 지원하지 않아. 머리줄의 [터미널]에서 같은 대화로 열 수 있어.");
         const current = latest.current;
         if (current.prompts.some(blockingPrompt)) throw new Error("기다리는 질문에 먼저 답해 줘");
         // 응답을 받기 전에 앱이 닫혀도 이미 보낸 대화를 빈 칸으로 바꿔 버리지 않는다.
         onChange(id, { unstarted: false });
-        const input = [{ type: "text", text, text_elements: [] }];
+        const input = [{ type: "text", text: prompt ?? text, text_elements: [] }];
         const result = current.busy && current.turn
           ? await request("turn/steer", { threadId: current.thread, expectedTurnId: current.turn, input })
           : await request("turn/start", { threadId: current.thread, input, model: settingsRef.current.model,
@@ -251,15 +289,24 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     { name: "login", hint: "로그인 — 새 탭의 터미널에서 codex login", run: () => onTerminal("codex login", "로그인") },
     { name: "logout", hint: "로그아웃 — 새 탭의 터미널에서 codex logout", run: () => onTerminal("codex logout", "로그아웃") },
   ];
-  const commands = mergeCommands(barCommands({ ...bar, onNew: () => { void transport.send("/new").catch(() => {}); }, busy: disabled }), [...paneCommands, ...CODEX_COMMANDS]);
+  const extraCommands = CODEX_COMMANDS.filter(c => !disabled || !["compact", "init", "recap"].includes(c.name)).map(c => c.name === "agents"
+    ? { ...c, empty: "이 대화에서 부른 서브에이전트가 없다", load: async () => latest.current.agents.map(a => ({ value: a.thread, label: a.label, hint: a.status })),
+      run: (value?: string) => { const a = latest.current.agents.find(a => a.thread === value); if (a) setSubagent({ agent: a.thread, label: a.label }); } }
+    : c);
+  const commands = mergeCommands(barCommands({ ...bar, onNew: () => { void transport.send("/new").catch(() => {}); }, busy: disabled }), [...paneCommands, ...extraCommands]);
   return <>
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}
       live={ready && !dispatching} working={state.busy || dispatching} waiting={state.prompts.some(blockingPrompt)}
       fresh={!state.entries.length} transport={transport} content={rendered} toolbar={toolbar} commands={commands}
       activity={<CodexSubagents agents={state.agents} />}
+      subagent={subagent}
       subagentView={(target, close) => <CodexSubagentView target={target} entries={state.entries} agents={state.agents} request={request} onClose={close} slug={slug} />}
       extra={<>
+        {inspection && <section className="codex-report" role="region" aria-label={inspection.title}>
+          <div className="codex-report-head"><strong>{inspection.title}</strong><button className="ask-no" onClick={() => setInspection(null)}>닫기</button></div>
+          <pre>{inspection.text}</pre>
+        </section>}
         {state.prompts.map(p => <RequestCard key={p.id} prompt={p} item={state.entries.find(i => i.id === p.params.itemId && i._turn === p.params.turnId)} disabled={answering === p.id} answer={(result, error) => void answer(p, result, error)} />)}
         {(failure || state.error) && <div className="note bad" role="alert">{failure || state.error}</div>}
         {!ready && failure && <button className="ask-go" onClick={async () => {
@@ -272,12 +319,6 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
       </>} />
   </>;
 }
-
-/** 줄에 없는데 이 칸이 받는 명령(위 `transport.send` 가 맡는다). */
-const CODEX_COMMANDS: PaletteCommand[] = [
-  { name: "compact", hint: "지난 대화를 줄여 문맥 비우기" },
-  { name: "rename", hint: "대화 이름 바꾸기", args: "<이름>" },
-];
 
 /** Codex 승인 정책. 줄에서는 Claude 의 권한 모드와 같은 "권한" 자리에 선다. */
 const APPROVALS: [string, string][] = [

@@ -1258,3 +1258,12 @@ button.note.launch::after {
 .stream-status + .composer {
   border-top: 0;
 }
+.codex-report {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.codex-report-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.codex-report pre { margin: 8px 0 0; max-height: 45vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }

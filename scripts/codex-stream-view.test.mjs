@@ -16,6 +16,16 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-codex-stream-"));
   const home = path.join(root, "codex-state"), project = path.join(root, "project"), state = path.join(root, "session.json");
   mkdirSync(home); mkdirSync(project);
+  const git = (...args) => {
+    const r = spawnSync("git", ["-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "-C", project, ...args], { windowsHide: true, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  git("init"); writeFileSync(path.join(project, "tracked.txt"), "BASE\n"); git("add", "tracked.txt");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture");
+  writeFileSync(path.join(project, "tracked.txt"), "TRACKED_CMD_MARK\n");
+  writeFileSync(path.join(project, "untracked.txt"), "UNTRACKED_CMD_MARK\n");
+  const skillDir = path.join(home, "skills", "parity"); mkdirSync(skillDir, { recursive: true });
+  writeFileSync(path.join(skillDir, "SKILL.md"), "---\nname: parity-fixture\ndescription: Isolated skill inventory fixture\n---\nReturn synthetic text only.\n");
   const protectedFiles = [path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".codex", "hooks.json"),
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(s => path.join(process.env.APPDATA, s, "session.json"))];
   const guard = watchUserFiles(protectedFiles, { root, exe });
@@ -76,6 +86,9 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
   const base = `http://127.0.0.1:${server.address().port}`;
   // 실제 모델·사용자 인증 없이 설치된 CLI의 승인·질문 프로토콜을 구동한다.
   writeFileSync(path.join(home, "config.toml"), `model = "gpt-5.4"\nmodel_provider = "local_test"\napproval_policy = "on-request"\nsandbox_mode = "read-only"\ncheck_for_update_on_startup = false\n[features]\ndefault_mode_request_user_input = true\nmulti_agent = true\n[model_providers.local_test]\nname = "Local stream fixture"\nbase_url = "${base}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
+  const configBefore = readFileSync(path.join(home, "config.toml"), "utf8") +
+    `\n[mcp_servers.parity_fixture]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(path.resolve("scripts/fixtures/codex-mcp-server.mjs"))}]\n`;
+  writeFileSync(path.join(home, "config.toml"), configBefore);
   writeFileSync(state, JSON.stringify({ tabs: [{ key: "t0", focus: "%0", root: project.replaceAll("\\", "/"), shell: path.join(process.env.SystemRoot, "System32", "cmd.exe"), layout: { kind: "leaf", id: "%0" } }], active: 0, nextPane: 1, nextTab: 1, procs: {}, restoreMode: "native-continue" }));
   const pane = (id = "%1") => latest.panes?.[id] ?? {};
   const saved = () => { try { return JSON.parse(readFileSync(state, "utf8")); } catch { return {}; } };
@@ -106,6 +119,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
             models: [...(over?.querySelectorAll('select[aria-label="Codex 모델"] option') ?? [])].map(o => o.value),
             model: over?.querySelector('select[aria-label="Codex 모델"]')?.value, title: slot.querySelector('.pane-head .title')?.textContent,
             palette: texts('.palette-row') };
+          panes[slot.dataset.pane].report = over?.querySelector('.codex-report')?.textContent ?? null;
           panes[slot.dataset.pane].subs = texts('.subs .sub');
           const v = over?.querySelector('.subview');
           panes[slot.dataset.pane].view = v ? { task: v.querySelector('.subview-task')?.textContent, text: v.textContent } : null;
@@ -164,9 +178,25 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.ok(observations.some(o => o.panes?.["%1"]?.theirs.includes("CS_FIRST_")), "실시간 조각 누락");
     await until(() => saved().streams?.["%1"]?.session, "대화 ID 저장");
     const first = saved().streams["%1"].session;
+    const queriesBefore = requests.length;
+    for (const [command, mark] of [["/mcp", "fixture_tool"], ["/skills", "parity-fixture"], ["/diff", "UNTRACKED_CMD_MARK"], ["/cwd", project], ["/warnings", "경고"]]) {
+      commands.push({ send: command });
+      await until(() => pane().report?.includes(mark), command + " 조회 결과");
+    }
+    assert.ok(pane().report?.includes("경고"));
+    assert.equal(requests.length, queriesBefore, "조회 명령이 모델 턴을 열었음");
+    commands.push({ send: "/diff" }); await until(() => pane().report?.includes("TRACKED_CMD_MARK"), "tracked Git 변경");
+    shot(app, "commands");
+    commands.push({ send: "/recap CS_RECAP" });
+    await until(() => pane().theirs?.includes("CS_RECAP_REPLY") && !pane().stop, "일반 턴 대화 요약");
+    assert.ok(JSON.stringify(requests.find(r => r.mark === "CS_RECAP").input).includes("파일을 변경하지 말고"));
+    commands.push({ send: "/init CS_INIT" });
+    await until(() => pane().theirs?.includes("CS_INIT_REPLY") && !pane().stop, "일반 턴 프로젝트 지침 요청");
+    assert.ok(JSON.stringify(requests.find(r => r.mark === "CS_INIT").input).includes("AGENTS.md"));
+    assert.equal(saved().streams["%1"].session, first, "조회·일반 턴 명령이 새 대화를 만듦");
     await pick(); await reply("CS_SECOND", "%2");
     assert.notEqual(saved().streams["%2"].session, first);
-    assert.deepEqual(pane("%1").mine, ["CS_FIRST 한글\n다음 줄"]);
+    assert.ok(pane("%1").mine.includes("CS_FIRST 한글\n다음 줄"));
     assert.deepEqual(pane("%2").mine, ["CS_SECOND 한글\n다음 줄"]);
 
     commands.push({ id: "%2", send: "CS_ALLOW" });
@@ -208,6 +238,12 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await until(() => pane("%2").view?.text?.includes("CS_CHILD_REPLY"), "완료 뒤 부름 줄의 자식 대화");
     commands.push({ id: "%2", esc: true });
     await until(() => !pane("%2").view, "자식 대화 닫기");
+    commands.push({ id: "%2", send: "/agents" });
+    await until(() => pane("%2").value === "/agents " && pane("%2").palette?.length, "서브에이전트 명령 목록");
+    commands.push({ id: "%2", key: "Enter" });
+    await until(() => pane("%2").view?.text?.includes("CS_CHILD_REPLY"), "명령에서 고른 자식 대화");
+    commands.push({ id: "%2", esc: true });
+    await until(() => !pane("%2").view, "명령으로 연 자식 대화 닫기");
     assert.ok(!pane("%2").theirs.some(t => t.includes("CS_CHILD")), "완료한 자식 말이 본 대화에 섞임");
     commands.push({ id: "%2", send: "CS_SLOW" });
     await until(() => pane("%2").stop && pane("%2").theirs?.includes("CS_SLOW_"), "느린 답");
@@ -277,6 +313,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await until(() => pane("%3").title === "수동 이름" && !pane("%3").disabled, "수동 이름 재시작 복원");
     assert.equal(saved().streams["%3"].session, renamedThread);
     assert.equal(existsSync(path.join(home, "hooks.json")), false, "추가 훅 신뢰 요구");
+    assert.equal(readFileSync(path.join(home, "config.toml"), "utf8"), configBefore, "대화창 명령이 설정 파일을 고침");
     console.log("터미널·훅 없이 두 칸 대화, 실승인·거절·질문·중단·모델·상태·복원·종료 확인");
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, requests, observations })); throw e;

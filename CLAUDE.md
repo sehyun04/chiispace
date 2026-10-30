@@ -16,6 +16,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 칸은 두 방식이다. 머리줄의 **[터미널][대화창]** 으로 같은 대화를 오간다(Claude 칸). Codex 대화창도 터미널로 옮길 수 있다.
 Codex 터미널에서 돌아오는 쪽은 현재 대화 ID를 확인할 근거가 생길 때까지 잠근다(작업 정리 31절).
 Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(33절). 부모 완료와 자식 완료는 따로 처리한다.
+조회 명령과 일반 턴 명령도 넓혔다(34절). 설정 쓰기·별도 검토 실행·대화 복제는 허용 목록에 넣지 않았다.
+최종 격리 검증은 실제 앱 포함 JS 154개·Rust 46개 전부 통과했다. 이번 따라잡기 소스는 아직 배포본에 반영하지 않았다.
 
 - **터미널.** xterm + `kasa-pty` ConPTY 로 셸·Claude TUI·Codex CLI 를 그대로 돌린다. 터미널 위에 대화창을 덮지 않는다
   (덮개는 10월 17일 걷었다, [작업 정리 25절](docs/WORKLOG.md#25-10월-17일-추가-칸은-터미널대화창-둘--덮개-걷기와-폴더-칩)).
@@ -79,6 +81,8 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   훅 신뢰 DB나 전역 설정을 고치지 않는다. 앱 종료 시 Job Object로 npm 실행기의 자식까지 거둔다.
   app-server 로는 허용한 메서드만 보낸다(`codex_stream.rs` 의 `permitted`). 늘릴 때는 읽기만 하는지부터 본다 —
   `thread/list`(지난 대화 목록)는 읽기만 해서 넣었고, 실행·설정 쓰기·로그인 메서드는 막아 둔다.
+  `mcpServerStatus/list`와 `skills/list`도 현재 연결·스킬 조회만 허용한다. `/diff`는 고정된 로컬 Git 조회이며
+  임의 명령 실행 API를 열지 않는다. 외부 diff·textconv·fsmonitor를 끄고 새 파일도 한도 안에서 읽는다.
   자식 `thread/read`는 같은 실행의 서버가 현재 대화의 자식으로 알려 준 ID에만 허용한다. 자식 읽기를 허용했다고
   그 ID로 턴을 보내거나 중단할 수 있는 것은 아니다. 부모 대화가 바뀌면 앞 자식의 읽기 범위도 끝난다.
 - 칸에 대화 id 가 붙어 있으면 `--resume <id>` 로 그 대화를, 없으면 `--continue` 로 폴더의 최근
@@ -134,8 +138,8 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
 ### 남은 범위
 
 - 터미널 없는 칸의 칸 사이 협업, 이미지 입력.
-  Codex 대화창을 Claude 만큼 쓰게 하는 일(옮기기·켤 때 옮기기·서브에이전트·`/` 명령)은 Codex 에 맡겼다 —
-  [Codex 대화창 따라잡기 인계](docs/HANDOFF-CODEX-PARITY.md). 그쪽이 만지는 파일은 그 문서의 "만질 파일"에 있다.
+  Codex 역방향·자동 전환은 현재 ID 근거가 없어 보류했다. `/review`·`/fork`는 별도 사용자 선택을 기다린다 —
+  [Codex 대화창 남은 인계](docs/HANDOFF-CODEX-PARITY.md). 완료한 전환·자식 화면·명령은 WORKLOG 31~34절을 본다.
   `/config`·`/permissions`·`/memory`·`/export` 등 남은 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를
   터미널에서 연다. 이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
   로그인은 앱 안에 만들지 않는다 — 브라우저 인증을 앱이 받으면 인증 정보를 앱이 다뤄야 한다. `/login` 은 새 탭의 터미널에서
@@ -389,6 +393,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
+| `src-tauri/src/git_diff.rs` | `/diff`의 고정 읽기 전용 Git 경로 — tracked·untracked, 외부 diff 차단·출력 한도 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
 | `src-tauri/src/launch.rs` · `src-tauri/src/bin/chiispace-cli.rs` | 칸 셸의 `claude`·`codex` 래퍼 — 실행별 MCP 연결, 끝난 뒤 커서 내리기(`settle_cursor`) |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 있는 셸 찾기 |
@@ -410,6 +415,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·추론·권한 모드, 통로 해석(단위 검증) |
 | `ui/CodexStreamPane.tsx` · `ui/codex-stream.ts` | 터미널 없는 Codex 칸 — 승인·질문·설정, 스트림 해석 |
 | `ui/CodexSubagents.tsx` | Codex 자식 진행 줄·서버가 알려 준 자식 대화 읽기. 행·상세 틀은 Claude와 공유 |
+| `ui/codex-commands.ts` | Codex의 실제 연결한 명령 목록·일반 턴 요청·조회 결과 표시 |
 | `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·폴더·상태 · 폴더 칩(`fs_dirs`) |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |

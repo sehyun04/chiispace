@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { agentCommands, ago, barCommands, choose, complete, mergeCommands, paletteView } from "../ui/palette.ts";
+import { CODEX_COMMANDS } from "../ui/codex-commands.ts";
 
 const field = (value, values, calls) => ({ value, choices: values.map((v) => ({ value: v, label: v.toUpperCase() })), onChange: (v) => calls.push(v) });
 
@@ -97,4 +98,13 @@ test("목록의 언제는 하루 안이면 몇 분·시간 전, 그보다 오래
   assert.equal(ago(now - 5 * 60000, now), "5분 전");
   assert.equal(ago(now - 3 * 3600000, now), "3시간 전");
   assert.equal(ago(new Date(2026, 9, 20, 9, 0).getTime(), now), "10월 20일");
+});
+test("Codex 조회 명령도 공용 팔레트를 거치고 줄의 선택지는 따로 복제하지 않는다", () => {
+  const calls = [];
+  const bar = barCommands({ model: field("m1", ["m1", "m2"], calls), permission: field("never", ["never"], calls), onStatus() {}, onNew() {}, busy: false });
+  const list = mergeCommands(bar, CODEX_COMMANDS);
+  assert.equal(list.filter(c => c.name === "model").length, 1);
+  assert.equal(paletteView("/cwd", list).items[0].name, "pwd");
+  assert.equal(paletteView("/subagents", list).items[0].name, "agents");
+  assert.equal(paletteView("/review", list), null);
 });
