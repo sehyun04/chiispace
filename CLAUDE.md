@@ -17,8 +17,8 @@ PTY 는 만들지 않는다 — kasaterm 의 `kasa-pty` 를 git 의존성으로 
 `/quit`을 보내 CLI의 종료 요약이 준 현재 ID로 연다. 별도 실행 옵션·다른 상태 폴더는 설정 보존을 위해 전환하지 않는다(작업 정리 36절).
 Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(33절). 부모 완료와 자식 완료는 따로 처리한다.
 조회 명령과 일반 턴 명령도 넓혔다(34절). 설정 쓰기·별도 검토 실행·대화 복제는 허용 목록에 넣지 않았다.
-11월 2일 작업본은 전체 JS 154개 중 152개 통과 후, 실패한 둘과 Codex 왕복을 재검증해 3개 모두 통과했다.
-Rust는 49개 통과했다. 이번 수정은 아직 배포하지 않았으며 사용자용 마지막은 10월 31일 20:54(`41a4bc2`)다.
+11월 2일 14:07에 `0505a95`를 고정 경로 앱·CLI로 교체했다. 배포할 파일 자체로 전체 JS 154개·Rust 49개 모두 통과했다
+(실패·건너뜀 0). 교체 당시 앱은 꺼져 있었다. 새로 실행하면 이번 수정이 적용된다.
 
 - **터미널.** xterm + `kasa-pty` ConPTY 로 셸·Claude TUI·Codex CLI 를 그대로 돌린다. 터미널 위에 대화창을 덮지 않는다
   (덮개는 10월 17일 걷었다, [작업 정리 25절](docs/WORKLOG.md#25-10월-17일-추가-칸은-터미널대화창-둘--덮개-걷기와-폴더-칩)).
@@ -31,9 +31,9 @@ Rust는 49개 통과했다. 이번 수정은 아직 배포하지 않았으며 �
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
 - **방향(사용자):** TUI 에만 있는 기능을 대화창으로 다 옮기면 대화창을 메인으로 한다. 새 기능은 대화창에 넣는다.
 
-- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 10월 31일 20:54(`41a4bc2`, Codex 대화창 따라잡기 판).
+- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 2일 14:07(`0505a95`, Codex 연결 안내·터미널 왕복 수정판).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
-- **사용자 실사용 확인이 남은 것:** 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
+- **사용자 실사용 확인이 남은 것:** 이번 Codex 첫 연결 안내와 터미널 왕복, 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
   실제 모델 변경 뒤 연속 대화. 자동 검증 통과를 실사용 해결로 간주하지 않는다(9월 16일 사용자 재신고 뒤의 원칙).
 - **10월 16일 리팩터링:** 동작은 그대로 두고 `App.tsx`·`Chat.tsx`·`workspace.rs` 를 나눴고, 쓰이지 않던 대화 고르기
   명령 넷을 걷었다([작업 정리 23절](docs/WORKLOG.md#23-10월-16일-추가-리팩터링--큰-파일-나누기와-검증배포-스크립트)).
@@ -146,7 +146,7 @@ Rust는 49개 통과했다. 이번 수정은 아직 배포하지 않았으며 �
 
 - 터미널 없는 칸의 칸 사이 협업, 이미지 입력.
   Codex의 켤 때 자동 전환은 계속 보류한다. 역방향 수동 전환의 제한은 위와 같다. `/review`·`/fork`는 별도 사용자 선택을 기다린다 —
-  [Codex 대화창 남은 인계](docs/HANDOFF-CODEX-PARITY.md). 완료한 전환·자식 화면·명령은 WORKLOG 31~34절을 본다.
+  [Codex 대화창 남은 인계](docs/HANDOFF-CODEX-PARITY.md). 완료한 전환·자식 화면·명령은 WORKLOG 31~36절을 본다.
   `/config`·`/permissions`·`/memory`·`/export` 등 남은 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를
   터미널에서 연다. 이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
   로그인은 앱 안에 만들지 않는다 — 브라우저 인증을 앱이 받으면 인증 정보를 앱이 다뤄야 한다. `/login` 은 새 탭의 터미널에서
@@ -400,6 +400,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
+| `src-tauri/src/codex_switch.rs` | 터미널 Codex의 새 종료 요약으로 현재 ID 확인·대화창 복귀 |
 | `src-tauri/src/git_diff.rs` | `/diff`의 고정 읽기 전용 Git 경로 — tracked·untracked, 외부 diff 차단·출력 한도 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
 | `src-tauri/src/launch.rs` · `src-tauri/src/bin/chiispace-cli.rs` | 칸 셸의 `claude`·`codex` 래퍼 — 실행별 MCP 연결, 끝난 뒤 커서 내리기(`settle_cursor`) |
