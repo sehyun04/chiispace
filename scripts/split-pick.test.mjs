@@ -57,7 +57,10 @@ test("칸 나누기 단축키는 상대를 먼저 묻고, 새 칸의 아이는 �
   const pathKey = Object.keys(env).find(k => k.toLowerCase() === "path");
   env[pathKey] = path.dirname(claude) + ";" + env[pathKey];
   env.CHIISPACE_PROBE_MS = "500";
-  env.CHIISPACE_PROBE = `(() => { let pending = false; setInterval(async () => {
+  // OS 커서가 창이 생긴 자리에 있어도 mouseenter가 키보드 선택을 바꾸지 않게 격리한다.
+  env.CHIISPACE_PROBE = `(() => {
+    const style = document.createElement('style'); style.textContent = '.split-opt { pointer-events: none; }'; document.head.append(style);
+    let pending = false; setInterval(async () => {
     if (pending) return; pending = true;
     try {
       const dom = {

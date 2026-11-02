@@ -20,6 +20,7 @@ mod pane_agent;
 mod proxy;
 mod claude_chat;
 mod codex_stream;
+mod codex_switch;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -125,6 +126,7 @@ fn pty_write(
     data: String,
 ) -> Result<(), String> {
     let mut queue = collab.0.lock().unwrap();
+    if !queue.allows_input(&id, data.as_bytes()) { return Err("대화창으로 옮기는 중이다".into()); }
     let map = panes.0.lock().unwrap();
     let Some(s) = map.get(&id) else {
         return Err(format!("없는 pane: {id}"));
@@ -149,6 +151,7 @@ fn pty_resize(panes: State<Panes>, id: String, cols: u16, rows: u16) -> Result<(
 #[tauri::command]
 fn pty_close(collab: State<collab::Collab>, panes: State<Panes>, turns: State<AgentTurns>, id: String) {
     let mut queue = collab.0.lock().unwrap();
+    queue.finish_switch(&id);
     queue.closed(&id);
     // Arc 를 떨구면 PTY 도 닫힌다. 리더 스레드는 채널이 끊기며 스스로 끝난다.
     panes.0.lock().unwrap().remove(&id);
@@ -346,6 +349,7 @@ pub fn run() {
             codex_stream::codex_stream_request,
             codex_stream::codex_stream_answer,
             codex_stream::codex_stream_stop,
+            codex_switch::codex_to_stream,
             workspace::state_save,
             workspace::state_load,
         ])

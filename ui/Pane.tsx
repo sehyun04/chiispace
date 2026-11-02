@@ -32,6 +32,8 @@ export type PaneProps = {
   renaming: boolean;
   stream?: StreamChat;
   streamBusy: boolean;
+  switching?: boolean;
+  switchError?: string;
   /** 같은 폴더의 다른 대화로 다시 연 횟수(`/resume`). 칸 키에 넣어 통로를 새로 연다. */
   streamEpoch: number;
   /** 명부가 알려 준 이 칸 claude 의 대화 id. 있어야 같은 대화를 대화창으로 옮길 수 있다. */
@@ -105,12 +107,14 @@ export function Pane(p: PaneProps) {
                 ? "Codex가 준 대화 ID를 확인할 수 없어 터미널로 옮기지 않는다"
                 : null}
             toChat={
-              stat?.agent === "codex"
-                ? "Codex가 이 터미널 칸의 현재 대화 ID를 아직 알려 주지 않아 옮길 수 없다"
-                : !p.chatId
-                ? "claude 가 이 대화를 아직 알려 주지 않았다 — 첫 말을 주고받으면 옮길 수 있다"
+              p.switching
+                ? "현재 대화를 확인하고 대화창으로 옮기는 중"
                 : isAgentWorking(stat)
                   ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다"
+                : stat?.agent === "codex" && stat.codex?.launch?.args?.some(s => s !== "--no-alt-screen")
+                  ? "별도 실행 옵션을 준 Codex는 설정을 보존하기 위해 터미널에서 이어 쓴다"
+                : stat?.agent !== "codex" && !p.chatId
+                ? "claude 가 이 대화를 아직 알려 주지 않았다 — 첫 말을 주고받으면 옮길 수 있다"
                   : null
             }
             onTerminal={p.onToTerminal}
@@ -125,6 +129,9 @@ export function Pane(p: PaneProps) {
           ×
         </button>
       </header>
+      {!p.stream && (p.switching || p.switchError) && <div className="mode-note note" role={p.switching ? "status" : "alert"}>
+        {p.switching ? "현재 대화를 확인하고 대화창으로 옮기는 중" : p.switchError}
+      </div>}
       {/* 일하는 동안 칸 테두리를 따라 3인방 색(하치와레·치이카와·우사기)이 줄지어 돈다. 머리줄 밑의
           가는 띠는 여러 칸을 띄워 두면 곁눈으로 잘 안 보였다 — 테두리는 칸 어디를 보고 있어도 눈에 걸린다.
           정말 일하는 중일 때만 돈다. 에이전트는 프롬프트 앞에 가만히 서 있어도 자기가 전경 작업이라

@@ -21,6 +21,13 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   /** 칸을 같은 폴더의 다른 대화로 다시 연 횟수. 칸이 이것을 키에 넣어 통로를 새로 연다 — 대화 id 만 바뀌는 것은
    *  `/clear` 처럼 claude 가 스스로 넘어간 것이라 다시 띄우면 안 되므로, 다시 열 때를 따로 센다. */
   const [epoch, setEpoch] = useState<Record<string, number>>({});
+  const [switching, setSwitching] = useState<Record<string, true>>({});
+  const [switchError, setSwitchError] = useState<Record<string, string>>({});
+  const pending = useRef(new Set<string>());
+  const livePanes = useRef(new Set<string>());
+  livePanes.current = new Set(tabs.flatMap(t => t.layout ? L.leaves(t.layout) : []));
+  const statNow = useRef(stat);
+  statNow.current = stat;
   const streamsNow = useRef(streams);
   streamsNow.current = streams;
 
@@ -103,6 +110,22 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
    *  터미널 쪽에서 알던 것(복원 명령·명부 id)은 `release` 가 같은 순간에 놓는다 — 한 번에
    *  바뀌어야 칸이 터미널과 대화창 사이의 반쯤 걸친 모양으로 그려지지 않는다. */
   const toStream = useCallback(async (id: string, session: string, cwd: string, release: (id: string) => void) => {
+    if (pending.current.has(id)) return;
+    if (statNow.current[id]?.agent === "codex") {
+      pending.current.add(id);
+      setSwitching(s => ({ ...s, [id]: true }));
+      setSwitchError(s => without(s, id));
+      try {
+        const result = await invoke<{ session: string; cwd: string; unstarted: boolean }>("codex_to_stream", { id });
+        if (!livePanes.current.has(id) || streamsNow.current[id]) return;
+        // TUI가 소유권을 놓은 뒤에 열어야 같은 대화를 두 실행이 동시에 쓰지 않는다.
+        release(id);
+        setKeepTerm(k => without(k, id));
+        setStreams(st => ({ ...st, [id]: { agent: "codex", ...result } }));
+      } catch (e) { if (livePanes.current.has(id)) setSwitchError(s => ({ ...s, [id]: String(e) })); }
+      finally { pending.current.delete(id); setSwitching(s => without(s, id)); }
+      return;
+    }
     const size = await invoke<number>("claude_transcript_size", { root: cwd, id: session }).catch(() => 0);
     release(id);
     setKeepTerm((k) => without(k, id));
@@ -121,7 +144,7 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   }, [stat, streams, streamBusy]);
 
   return {
-    streams, streamBusy, keepTerm, setKeepTerm, paneView, epoch,
+    streams, streamBusy, keepTerm, setKeepTerm, paneView, epoch, switching, switchError,
     open, adopt, resume, onSession, onBusy, onCodexChange, toTerminal, toStream,
   };
 }

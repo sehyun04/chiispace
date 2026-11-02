@@ -414,6 +414,8 @@ export default function App() {
                         renaming={renaming === s.id}
                         stream={streamMap[s.id]}
                         streamBusy={!!streams.streamBusy[s.id]}
+                        switching={!!streams.switching[s.id]}
+                        switchError={streams.switchError[s.id]}
                         streamEpoch={streams.epoch[s.id] ?? 0}
                         chatId={chatIds[s.id]}
                         seed={agents.seeds[s.id]}

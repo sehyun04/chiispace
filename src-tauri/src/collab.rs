@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -54,6 +54,7 @@ pub struct Queue {
     tasks: VecDeque<Task>,
     inputs: HashMap<String, Input>,
     pub codex: HashMap<String, CodexBinding>,
+    switching: HashSet<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -118,6 +119,21 @@ fn terminal_reply(bytes: &[u8]) -> bool {
 }
 
 impl Queue {
+    pub fn allows_input(&self, pane: &str, bytes: &[u8]) -> bool {
+        !self.switching.contains(pane) || terminal_reply(bytes)
+    }
+
+    pub fn begin_switch(&mut self, pane: &str) -> Result<()> {
+        if self.switching.contains(pane) || !self.input_ready(pane)
+            || self.tasks.iter().any(|t| t.to == pane && matches!(t.status.as_str(), "delivered" | "running")) {
+            bail!("입력 중인 말을 보내거나 취소하고, 작업이 끝난 뒤 대화창으로 옮겨 줘");
+        }
+        self.switching.insert(pane.into());
+        Ok(())
+    }
+
+    pub fn finish_switch(&mut self, pane: &str) { self.switching.remove(pane); }
+
     fn next(&mut self, prefix: &str) -> String {
         self.serial += 1;
         format!("{prefix}-{}-{}", std::process::id(), self.serial)
@@ -212,7 +228,7 @@ impl Queue {
     }
 
     fn input_ready(&self, pane: &str) -> bool {
-        self.inputs
+        !self.switching.contains(pane) && self.inputs
             .get(pane)
             .is_none_or(|i| !i.draft && i.touched.elapsed() >= Duration::from_secs(2))
     }
@@ -542,6 +558,27 @@ mod tests {
             );
         }
         q
+    }
+
+    #[test]
+    fn switching_blocks_drafts_and_delivery_but_keeps_terminal_reports() {
+        let mut q = queue();
+        q.input("b", b"draft");
+        q.inputs.get_mut("b").unwrap().touched -= Duration::from_secs(3);
+        assert!(q.begin_switch("b").is_err());
+        q.input("b", b"\x03");
+        q.inputs.get_mut("b").unwrap().touched -= Duration::from_secs(3);
+        q.begin_switch("b").unwrap();
+        assert!(!q.allows_input("b", b"new draft"));
+        assert!(q.allows_input("b", b"\x1b[12;3R"));
+        assert!(!q.input_ready("b"));
+        assert!(q.begin_switch("b").is_err());
+        // CLI의 unregister는 전환 완료가 아니다. 웹뷰가 PTY를 거둘 때까지 잠가야 셸에 입력이 새지 않는다.
+        q.closed("b");
+        assert!(!q.allows_input("b", b"shell command\r"));
+        q.finish_switch("b");
+        assert!(q.allows_input("b", b"draft"));
+        assert!(q.input_ready("b"));
     }
 
     #[test]

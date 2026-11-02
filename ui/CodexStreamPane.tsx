@@ -82,7 +82,8 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
         run.current = token;
         await request("initialize", { clientInfo: { name: "chiispace", title: "치이스페", version: "0.1.0" }, capabilities: { experimentalApi: true } });
         if (!active) return;
-        const options = { ...(chat.cwd ? { cwd: chat.cwd } : {}), ...(chat.model ? { model: chat.model } : {}) };
+        // 터미널의 /resume·/cd로 폴더도 달라질 수 있다. 복원은 서버가 저장한 현재 폴더를 따른다.
+        const options = { ...(!chat.session && chat.cwd ? { cwd: chat.cwd } : {}), ...(chat.model ? { model: chat.model } : {}) };
         let unstarted = !chat.session;
         let result: Data;
         try {
@@ -90,7 +91,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
         } catch (e) {
           // 첫 전송 직후 앱 저장이 늦어져도 실제 대화를 먼저 찾는다. 미전송·이력 없음이 함께 확인돼야 새로 연다.
           if (!missingUnstarted(chat, e)) throw e;
-          result = await request("thread/start", options);
+          result = await request("thread/start", { ...options, ...(chat.cwd ? { cwd: chat.cwd } : {}) });
           unstarted = true;
         }
         if (!active) return;
@@ -117,7 +118,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, boot]);
   const agentsBusy = state.agents.some(agentActive);
-  useEffect(() => { onBusy(id, state.busy || dispatching || agentsBusy); }, [id, state.busy, dispatching, agentsBusy, onBusy]);
+  useEffect(() => { onBusy(id, (!ready && !failure) || state.busy || dispatching || agentsBusy); }, [id, ready, failure, state.busy, dispatching, agentsBusy, onBusy]);
   const unknownAgents = state.agents.filter(a => a.status === "unknown").map(a => a.thread).join(",");
   useEffect(() => {
     let active = true;
@@ -298,6 +299,7 @@ export function CodexStreamPane({ id, chat, slug, name, focused, onTitle, onBusy
     <div className="pane-body stream-body" />
     <ChatPane agent="codex" root={chat.cwd} id={state.thread} paneId={id} slug={slug} name={name}
       live={ready && !dispatching} working={state.busy || dispatching} waiting={state.prompts.some(blockingPrompt)}
+      unavailable={dispatching ? "메시지 보내는 중" : failure || state.error ? "Codex 연결 실패 · 오류를 확인하고 다시 연결해 줘" : "Codex 연결 중 · 잠시 기다려 줘"}
       fresh={!state.entries.length} transport={transport} content={rendered} toolbar={toolbar} commands={commands}
       activity={<CodexSubagents agents={state.agents} />}
       subagent={subagent}

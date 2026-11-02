@@ -44,6 +44,7 @@ type ChatProps = {
   refreshMs?: number;
   /** claude 가 지금 그 칸에서 돌고 있는가. 아니면 입력을 막는다. */
   live?: boolean;
+  unavailable?: string;
   /** 일하는 중인가. */
   working?: boolean;
   /** 입력바에 쓴 말을 보낼 길. */
@@ -75,6 +76,7 @@ export function Chat({
   name = "에이전트",
   refreshMs = 1000,
   live = true,
+  unavailable,
   working = false,
   transport,
   extra,
@@ -298,6 +300,7 @@ export function Chat({
           agent={agent}
           waiting={waiting}
           live={live}
+          unavailable={unavailable}
           busy={working || streaming}
           onSent={onSent}
           transport={transport}

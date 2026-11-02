@@ -17,6 +17,7 @@ export function Composer({
   waiting,
   transport,
   commands,
+  unavailable,
 }: {
   paneId: string;
   live: boolean;
@@ -27,6 +28,7 @@ export function Composer({
   transport: Transport;
   /** `/` 를 치면 띄울 명령. 없으면 고르기 목록을 띄우지 않는다. */
   commands?: PaletteCommand[];
+  unavailable?: string;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -123,7 +125,7 @@ export function Composer({
         rows={1}
         value={text}
         disabled={!live || waiting}
-        placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : `${agent} 가 떠 있지 않다`}
+        placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : unavailable ?? `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           // 조합 중인 Enter 는 글자를 확정하는 키지 보내는 키가 아니다.
