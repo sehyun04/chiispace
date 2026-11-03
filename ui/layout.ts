@@ -91,6 +91,25 @@ export function splitLeaf(n: Node, target: string, dir: Dir, newId: string): Nod
   return { ...n, a: splitLeaf(n.a, target, dir, newId), b: splitLeaf(n.b, target, dir, newId) };
 }
 
+/** `parent` 칸에 딸린 칸(`id`)을 붙인다. 처음 것은 오른쪽에 붙이고 다음부터는 마지막 것 아래로 쌓는다.
+ *
+ *  `balance` 로 전체를 펴지 않는 이유: 딸린 칸이 늘 때마다 본 칸이 1/n 로 줄어, 정작 지시하는
+ *  대화가 가장 좁아진다. 쌓인 칸들끼리만 고르게 편다. 사용자가 끌어 옮겨 흩어 놓았으면 그 무리가
+ *  한 덩어리가 아니므로 붙이기만 한다. */
+export function attach(n: Node, parent: string, siblings: string[], id: string): Node {
+  const have = leaves(n);
+  const kin = siblings.filter((s) => have.includes(s));
+  if (!kin.length) return splitLeaf(n, parent, "h", id);
+  return balanceGroup(splitLeaf(n, kin[kin.length - 1], "v", id), [...kin, id]);
+}
+
+function balanceGroup(n: Node, ids: string[]): Node {
+  if (n.kind === "leaf") return n;
+  const own = leaves(n);
+  if (own.length === ids.length && ids.every((i) => own.includes(i))) return balance(n);
+  return { ...n, a: balanceGroup(n.a, ids), b: balanceGroup(n.b, ids) };
+}
+
 /** 지운 자리는 형제가 통째로 물려받는다. 마지막 하나를 지우면 null. */
 export function removeLeaf(n: Node, target: string): Node | null {
   if (n.kind === "leaf") return n.id === target ? null : n;

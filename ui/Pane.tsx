@@ -10,6 +10,8 @@ import type { StreamChat } from "./stream-session";
 import { Term } from "./Term";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { CodexStreamPane } from "./CodexStreamPane";
+import { SubPane } from "./SubPane";
+import type { SubPaneInfo } from "./saved";
 
 type CodexChat = Extract<StreamChat, { agent: "codex" }>;
 
@@ -31,6 +33,8 @@ export type PaneProps = {
   fallback: string;
   renaming: boolean;
   stream?: StreamChat;
+  /** 본 대화가 부른 서브에이전트를 보이는 칸이면 그 서브에이전트(useSubPanes). 읽기만 한다. */
+  sub?: SubPaneInfo;
   streamBusy: boolean;
   switching?: boolean;
   switchError?: string;
@@ -97,7 +101,7 @@ export function Pane(p: PaneProps) {
             {p.name || p.autoName || p.fallback}
           </span>
         )}
-        {view?.agent ? <span className="chip">{view.agent}</span> : null}
+        {p.sub ? <span className="chip sub-chip">서브에이전트</span> : view?.agent ? <span className="chip">{view.agent}</span> : null}
         {p.stream?.agent === "claude" || p.stream?.agent === "codex" || (!p.stream && (stat?.agent === "claude" || stat?.agent === "codex")) ? (
           <ModeSwitch
             chat={!!p.stream}
@@ -132,12 +136,12 @@ export function Pane(p: PaneProps) {
       {!p.stream && (p.switching || p.switchError) && <div className="mode-note note" role={p.switching ? "status" : "alert"}>
         {p.switching ? "현재 대화를 확인하고 대화창으로 옮기는 중" : p.switchError}
       </div>}
-      {/* 일하는 동안 칸 테두리를 따라 3인방 색(하치와레·치이카와·우사기)이 줄지어 돈다. 머리줄 밑의
-          가는 띠는 여러 칸을 띄워 두면 곁눈으로 잘 안 보였다 — 테두리는 칸 어디를 보고 있어도 눈에 걸린다.
+      {/* 일하는 동안 칸 테두리를 따라 그 칸 아이 색 띠가 돈다. 머리줄 밑의 가는 띠는 여러 칸을 띄워 두면
+          곁눈으로 잘 안 보였다 — 테두리는 칸 어디를 보고 있어도 눈에 걸린다.
           정말 일하는 중일 때만 돈다. 에이전트는 프롬프트 앞에 가만히 서 있어도 자기가 전경 작업이라
           `busy` 가 내내 참이고, 그대로 두면 영영 돌아 "일하는 중"이라는 뜻을 잃는다. 셸은 스피너를
           판정할 길이 없으니 전경 명령이 도는 동안(=`busy`)이 곧 작업 중이다. */}
-      {(view?.agent ? working : view?.busy) ? <WorkRing /> : null}
+      {(view?.agent ? working : view?.busy) ? <WorkRing who={slug} /> : null}
 
       {/* 맡은 아이를 칸 안에 세워 둔다. 헤더의 작은 얼굴만으로는
           누가 일하는 중인지 눈에 잘 안 들어온다. 마우스는 통과시켜
@@ -149,7 +153,9 @@ export function Pane(p: PaneProps) {
           <img className="buddy" src={faceUrl(slug)} alt="" draggable={false} />
         )
       ) : null}
-      {p.stream?.agent === "codex" ? (
+      {p.sub ? (
+        <SubPane sub={p.sub} slug={slug} />
+      ) : p.stream?.agent === "codex" ? (
         // 폴더를 바꾸거나(새 대화) /resume 으로 다른 대화를 고르면 칸을 새로 그려 통로도 새로 연다.
         <CodexStreamPane key={`${p.stream.cwd}#${p.streamEpoch}`} id={id} chat={p.stream as CodexChat}
           slug={slug} name={who}
@@ -224,18 +230,15 @@ function RenameInput({ name, onCommit, onCancel }: {
   );
 }
 
-/** 일하는 중 테두리. 둘레를 100 으로 재고(`pathLength`) 세 빛깔 조각과 반짝이를 돌린다 — 칸이 넓든 좁든 같은
- *  빠르기로 둘레를 탄다. 원뿔 그라데이션을 돌리는 흔한 방식은 긴 변 가운데서 느려지고 모서리에서 튄다. */
-function WorkRing() {
+/** 일하는 중 테두리 — 그 칸 아이 색 크레용 띠 하나가 둘레를 돈다. 빛 번짐 대신 같은 띠를 갈색으로 살짝 어긋나게
+ *  깔아 종이에 그린 그림자로 보인다(테마의 `--drop` 처럼 흐리지 않는다). 둘레를 100 으로 재므로(`pathLength`)
+ *  칸이 넓든 좁든 같은 빠르기로 돈다. 원뿔 그라데이션을 돌리는 흔한 방식은 긴 변 가운데서 느려지고 모서리에서 튄다. */
+function WorkRing({ who }: { who?: string }) {
   return (
-    <svg className="work-ring" aria-hidden="true">
-      <rect className="base" />
-      <rect className="run spark" pathLength={100} />
-      <rect className="run spark" pathLength={100} />
-      <rect className="run usagi" pathLength={100} />
-      <rect className="run chiikawa" pathLength={100} />
-      <rect className="run hachiware" pathLength={100} />
-      <rect className="run core" pathLength={100} />
+    <svg className="work-ring" data-who={who} aria-hidden="true">
+      <rect className="track" pathLength={100} />
+      <rect className="shade" pathLength={100} />
+      <rect className="band" pathLength={100} />
     </svg>
   );
 }

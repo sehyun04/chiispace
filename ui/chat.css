@@ -1275,3 +1275,15 @@ button.note.launch::after {
 }
 .codex-report-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .codex-report pre { margin: 8px 0 0; max-height: 45vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
+/* 서브에이전트 칸(SubPane). 대화 보기 화면과 같은 말풍선 목록을 칸 몸통에 바로 세운다 — 입력바가 없다. */
+.sub-body > .chat {
+  height: 100%;
+}
+.sub-done {
+  flex: none;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 12px;
+}

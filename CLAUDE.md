@@ -126,6 +126,11 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   서브에이전트의 생각이 본 대화의 답처럼 보인다. 서브에이전트 줄은 **마지막 답(`end_turn`)이 끝날 때** 걷는다.
   본 대화가 다시 말하는 것으로 걷지 마라 — 새 claude 는 서브에이전트를 백그라운드로 돌리며 본 대화를 이어 간다.
   서브에이전트 대화 보기 화면의 **Esc 는 화면만 닫는다**(window 캡처에서 막는다). 새면 아래 입력바를 거쳐 claude 가 멈춘다.
+  Claude 대화창이 서브에이전트를 부르면 옆에 읽기 전용 칸을 연다(`useSubPanes`, 11월 3일 사용자 요청 — 한 줄로는 어디까지
+  했는지 안 보였다). 첫 칸은 본 칸 오른쪽, 다음부터 그 아래로 쌓고(`layout.ts` `attach`) 전체를 `balance` 로 펴지 않는다 —
+  펴면 서브에이전트가 늘수록 지시하는 본 칸이 가장 좁아진다. 포커스는 본 칸에 둔다. 칸 목록은 ref 가 주인이다(조각이
+  렌더보다 빨리 와 state 로는 같은 틈에 뜬 둘이 서로를 못 본다). 사용자가 닫은 서브에이전트는 다시 열지 않는다.
+  이 칸에는 PTY 가 없다 — 세션에 `subPanes` 로 적어 두지 않으면 다시 켤 때 그 자리가 빈 셸로 뜬다.
 - 위임 알림에서 지어진 대화 이름은 자동 칸 이름으로 받지 않는다(`paneTitle`의 `chiispace task-`·
   `chiispace_*` 필터). 알림은 받는 칸 에이전트의 첫 프롬프트라 그 에이전트가 그것으로 대화 이름을
   짓는데, 앱에는 여느 자동 제목과 똑같이 도착해 구별되지 않는다. 필터를 지우면 `/rename`으로 붙인
@@ -419,7 +424,8 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/layout.ts` | pane 배치 트리 · 끌어 옮기기 · 고르게 펴기 |
 | `ui/Term.tsx` | xterm.js 배선 · 한글 IME · 복원 명령 |
 | `ui/Chat.tsx` · `ui/ChatRows.tsx` · `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
-| `ui/SubAgents.tsx` · `ui/SubagentView.tsx` | 서브에이전트 진행 줄(`chat:sub`) · 그 대화 전체 보기 |
+| `ui/SubAgents.tsx` · `ui/SubagentView.tsx` | 서브에이전트 진행 줄(`chat:sub`) · 그 대화 전체 보기(원문 따라 읽기는 `useSubagentTranscript`) |
+| `ui/useSubPanes.ts` · `ui/SubPane.tsx` | 오케스트레이션 때 서브에이전트마다 옆에 여는 읽기 전용 칸 · 그 칸의 몸통 |
 | `ui/ClaudeStreamPane.tsx` · `ui/claude-stream.ts` | 터미널 없는 Claude 칸 — 권한·질문 카드, 모델·추론·권한 모드, 통로 해석(단위 검증) |
 | `ui/CodexStreamPane.tsx` · `ui/codex-stream.ts` | 터미널 없는 Codex 칸 — 승인·질문·설정, 스트림 해석 |
 | `ui/CodexSubagents.tsx` | Codex 자식 진행 줄·서버가 알려 준 자식 대화 읽기. 행·상세 틀은 Claude와 공유 |

@@ -3,7 +3,7 @@
  *  칸 하나를 그리는 일은 `Pane`, 터미널 칸의 상태 폴링·복원 명령·명부는 `usePaneAgents`,
  *  터미널 없는 칸(대화창)은 `useStreams`, 포커스는 `focus`,
  *  단축키·끌기·칸 정리는 각 `use*` 가 맡는다. 여기를 고칠 일이 줄어야 동시에 일하는 세션끼리 덜 부딪힌다. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { bySlug, useCasting } from "./roster";
 import {
@@ -21,9 +21,10 @@ import { SplitPicker, type SplitChoice } from "./SplitPicker";
 import { useGit } from "./git";
 import * as L from "./layout";
 import { usePaneBridge } from "./bridge";
-import { bootStreams, leavesOf, readSaved, savedJson, type Tab } from "./saved";
+import { bootStreams, leavesOf, readSaved, savedJson, savedSubPanes, type Tab } from "./saved";
 import { usePaneAgents } from "./usePaneAgents";
 import { useStreams } from "./useStreams";
+import { useSubPanes } from "./useSubPanes";
 import { useFocus } from "./focus";
 import { useShortcuts } from "./useShortcuts";
 import { usePaneDrag, useSeamDrag } from "./useDrag";
@@ -72,6 +73,8 @@ export default function App() {
   const agents = usePaneAgents();
   const { stat, procs, chatIds } = agents;
   const streams = useStreams(booted, tabs, stat);
+  // 오케스트레이션할 때 서브에이전트마다 옆에 여는 읽기 전용 칸.
+  const subs = useSubPanes({ streams: streams.streams, setTabs, nextPane, setPaneTitles });
   const { focusPane, chats } = useFocus(streams.streams);
   const [casting, setCasting] = useCasting(live);
   const curRoot = cur?.root ?? null;
@@ -247,6 +250,7 @@ export default function App() {
           setPaneTitles(savedPaneTitles(s.paneTitles, leavesOf(s.tabs ?? [])));
           if (s.casting) setCasting(s.casting);
           adopt(savedStreams(s.streams));
+          subs.adopt(savedSubPanes(s.subPanes));
           if (typeof s.sideOpen === "boolean") setSideOpen(s.sideOpen);
           if (s.procs) {
             // 대화 id 가 확실한 Claude 칸은 터미널 없는 칸으로 연다(saved.ts `bootStreams`).
@@ -293,6 +297,7 @@ export default function App() {
       const json = savedJson({
         tabs, active, nextPane: nextPane.current, nextTab: nextTab.current, fontSize,
         procs: procs.current, names, paneTitles, casting, sideOpen, streams: streamMap, keepTerm,
+        subPanes: subs.subPanes,
       });
       invoke("state_save", { json }).catch(() => {});
     }, 400);
@@ -300,7 +305,7 @@ export default function App() {
     // stat 은 800ms 마다 새로 오지만 디바운스가 묶어 준다. 넣어 두는 것은 누적한 복원 명령(procs,
     // ref 라 바뀌어도 다시 그리지 않는다)이 폴링을 따라 저장되게 하려는 것이다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streamMap, keepTerm]);
+  }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streamMap, keepTerm, subs.subPanes]);
 
   useTabCleanup(tabs, tabsNow, setTabs, setActive);
   useShortcuts(cur, tabs.length, chats, {
@@ -343,7 +348,7 @@ export default function App() {
     });
   }, [cur, seed]);
 
-  const { paneView } = streams;
+  const paneView = useMemo(() => ({ ...streams.paneView, ...subs.view }), [streams.paneView, subs.view]);
   return (
     <div className={sideOpen ? "app" : "app closed"}>
       <button
@@ -413,6 +418,7 @@ export default function App() {
                         fallback={label(s.id, paneView, titles)}
                         renaming={renaming === s.id}
                         stream={streamMap[s.id]}
+                        sub={subs.subPanes[s.id]}
                         streamBusy={!!streams.streamBusy[s.id]}
                         switching={!!streams.switching[s.id]}
                         switchError={streams.switchError[s.id]}

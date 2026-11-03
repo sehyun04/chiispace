@@ -697,6 +697,12 @@ body {
   background: var(--lilac);
   color: #fff;
 }
+/* 서브에이전트 칸은 본 칸과 한눈에 갈려야 한다. 에이전트 칩과 다른 종이색 바탕으로 둔다. */
+.pane-head .chip.sub-chip {
+  background: var(--paper-2);
+  color: var(--ink-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
 
 /* 칸 안에 서 있는 아이. 오른쪽 아래에 두는 이유는 그쪽이 대개 마지막 줄 아래라
  * 글자를 가장 적게 가려서다. 마우스는 통과시킨다 — 여기를 눌러도 터미널이 잡혀야 한다. */
@@ -725,14 +731,14 @@ body {
 }
 
 /* 일하는 중 테두리(Pane.tsx 의 WorkRing). 진행률을 알 수 없으니(셸이 안 알려준다) 둘레를 도는 모양이다.
-   둘레를 100 으로 잰 띠 하나가 하치와레·치이카와·우사기 세 빛깔로 이어져 돌고, 뒤로 반짝이 둘이 따라온다.
-   터미널 글자 위를 지나므로 마우스는 통과시키고, 겹치는 자리는 칸 가장자리 몇 픽셀뿐이다. */
+   그 칸 아이 색 크레용 띠 하나가 연한 바탕 선 위를 돌고, 같은 띠가 갈색으로 1.5px 어긋나 따라가 손그림 그림자가 된다.
+   빛 번짐·반짝이·흰 심지는 11월 3일 걷었다 — 크림 종이 위에서 네온처럼 떠 앱의 결과 어긋났다. 테마는 흐린 그림자를
+   쓰지 않는다(theme.css `--drop`). 터미널 글자 위를 지나므로 마우스는 통과시키고, 겹치는 자리는 칸 가장자리 몇 픽셀뿐이다. */
 .work-ring {
-  --lap: 2.4s;
-  /* 캐릭터 색 그대로는 크림 바탕에서 묻힌다(결정 26번). 색조는 두고 명도만 내렸다. */
-  --hachiware: #3d97d3;
-  --chiikawa: #9277b8;
-  --usagi: #e6ad1f;
+  /* 아이 색. 크림 바탕에서 묻히지 않게 색조는 두고 명도만 내렸다(결정 26번). 치이카와는 라일락 대신 볼터치 분홍이다 —
+     보라를 쓰지 않는다. 아이가 없는 칸은 하치와레 하늘이다. */
+  --c: #3d97d3;
+  --lap: 3.2s;
   position: absolute;
   inset: 0;
   width: 100%;
@@ -740,57 +746,45 @@ body {
   z-index: 6;
   pointer-events: none;
   overflow: visible;
-  filter: drop-shadow(0 0 4px rgba(61, 151, 211, 1)) drop-shadow(0 0 12px rgba(146, 119, 184, 0.75));
 }
+.work-ring[data-who="usagi"] { --c: #e0a91a; }
+.work-ring[data-who="chiikawa"] { --c: #e58f99; }
+.work-ring[data-who="momonga"] { --c: #3fa9c4; }
+.work-ring[data-who="kurimanju"] { --c: #a87346; }
+.work-ring[data-who="shisa"] { --c: #e0843a; }
+.work-ring[data-who="rakko"] { --c: #b88f58; }
+.work-ring[data-who="anoko"] { --c: #5e9a6e; }
+.work-ring[data-who="chiikabu"] { --c: #8b5e3c; }
+.work-ring[data-who="dekatsuyo"] { --c: #d4b51c; }
+.work-ring[data-who="furuhonya"] { --c: #e584a0; }
+.work-ring[data-who="pochetteyoroi"] { --c: #9a9ea6; }
 .work-ring rect {
-  x: 2.25px;
-  y: 2.25px;
-  width: calc(100% - 4.5px);
-  height: calc(100% - 4.5px);
-  rx: 7.75px;
-  ry: 7.75px;
+  x: 3px;
+  y: 3px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  rx: 8px;
+  ry: 8px;
   fill: none;
-  stroke-width: 4.5px;
-}
-.work-ring .base {
-  stroke: var(--sky);
-  opacity: 0.28;
-}
-.work-ring .run {
   stroke-linecap: round;
-  stroke-dasharray: 11 89;
+}
+.work-ring .track {
+  stroke: color-mix(in srgb, var(--c) 30%, var(--paper));
+  stroke-width: 3px;
+}
+.work-ring .shade,
+.work-ring .band {
+  stroke-width: 5px;
+  stroke-dasharray: 18 82;
   animation: lap var(--lap) linear infinite;
 }
-.work-ring .hachiware {
-  stroke: var(--hachiware);
+.work-ring .shade {
+  stroke: var(--outline);
+  opacity: 0.8;
+  transform: translate(1.5px, 1.5px);
 }
-/* 앞 조각 바로 뒤에 붙어 따라간다(11 씩 처짐). 음수 지연이라야 켜자마자 다 보인다. */
-.work-ring .chiikawa {
-  stroke: var(--chiikawa);
-  animation-delay: calc(var(--lap) * -0.89);
-}
-.work-ring .usagi {
-  stroke: var(--usagi);
-  animation-delay: calc(var(--lap) * -0.78);
-}
-.work-ring .spark {
-  stroke: var(--usagi);
-  stroke-dasharray: 2 98;
-  opacity: 0.55;
-  animation-delay: calc(var(--lap) * -0.745);
-}
-.work-ring .spark + .spark {
-  stroke-dasharray: 1 99;
-  opacity: 0.3;
-  animation-delay: calc(var(--lap) * -0.72);
-}
-/* 세 빛깔 띠 한가운데의 흰 심지. 색만 있으면 밝은 바탕에서 가는 선으로 읽히고, 심지가 있어야 빛나는 관처럼 보인다. */
-.work-ring .core {
-  stroke: #fff;
-  stroke-width: 1.5px;
-  stroke-dasharray: 32 68;
-  opacity: 0.85;
-  animation-delay: calc(var(--lap) * -0.78);
+.work-ring .band {
+  stroke: var(--c);
 }
 @keyframes lap {
   to {
@@ -798,11 +792,9 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .work-ring .run {
+  .work-ring .shade,
+  .work-ring .band {
     animation: none;
-  }
-  .work-ring .base {
-    opacity: 0.7;
   }
 }
 

@@ -34,6 +34,14 @@ export function SubagentView({
   onClose: () => void;
   renderRow: (item: Item, o: RowOpts) => ReactNode;
 }) {
+  const { info, items, loading } = useSubagentTranscript(root, session, target);
+  return <SubagentPanel title={info?.description ?? target.label} name={info?.agentType ?? "서브에이전트"}
+    items={items} loading={loading} onClose={onClose} renderRow={renderRow} taskLabel="claude 가 맡긴 일" />;
+}
+
+/** 서브에이전트 한 명의 대화 원문을 찾아 읽고, 일하는 동안 자라는 것을 따라 읽는다.
+ *  대화 보기 화면과 옆에 여는 서브에이전트 칸(SubPane)이 같이 쓴다. */
+export function useSubagentTranscript(root: string, session: string, target: SubTarget) {
   const [info, setInfo] = useState<Info | null>(null);
   const [raw, setRaw] = useState<string | null>(null);
 
@@ -94,16 +102,13 @@ export function SubagentView({
     return toItems(events, buildToolMap(events), true);
   }, [raw]);
 
-  return <SubagentPanel title={info?.description ?? target.label} name={info?.agentType ?? "서브에이전트"}
-    items={items} loading={!info || raw === null} onClose={onClose} renderRow={renderRow} taskLabel="claude 가 맡긴 일" />;
+  return { info, items, loading: !info || raw === null };
 }
 
 export function SubagentPanel({ title, name, items, loading, error, onClose, renderRow, taskLabel }: {
   title: string; name: string; items: Item[]; loading: boolean; error?: string; onClose: () => void;
   renderRow: (item: Item, o: RowOpts) => ReactNode; taskLabel: string;
 }) {
-  const scroll = useRef<HTMLDivElement>(null);
-  const atEnd = useRef(true);
   const back = useRef<HTMLButtonElement>(null);
   // Esc 는 이 화면만 닫는다. 입력바가 아래에 깔려 있어 그대로 두면 Esc 가 에이전트로 가서
   // 하던 일을 멈춘다 — 보려고 연 화면을 닫다가 작업을 끊으면 안 된다.
@@ -123,14 +128,6 @@ export function SubagentPanel({ title, name, items, loading, error, onClose, ren
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  useLayoutEffect(() => {
-    const el = scroll.current;
-    if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [items]);
-
-  // 첫 사용자 말은 맡긴 일이다. 그 뒤의 사용자 말(드물다)은 그대로 둔다.
-  const task = items.findIndex((it) => it.kind === "bubble" && it.role === "user");
-
   return (
     <div className="subview" role="dialog" aria-label={`서브에이전트 대화 · ${title}`}>
       <div className="subview-head">
@@ -143,37 +140,56 @@ export function SubagentPanel({ title, name, items, loading, error, onClose, ren
         <span className="subview-title">{title}</span>
         <span className="subview-kind">{name}</span>
       </div>
-      <div
-        className="chat-scroll"
-        ref={scroll}
-        onScroll={() => {
-          const el = scroll.current;
-          if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
-      >
-        {error && <div className="note bad" role="alert">{error}</div>}
-        {loading ? (
-          <div className="chat-empty">서브에이전트 기록을 찾는 중</div>
-        ) : items.length === 0 ? (
-          <div className="chat-empty">아직 적힌 것이 없다</div>
-        ) : (
-          items.map((item, i) => {
-            if (i === task) {
-              return (
-                <div className="subview-task" key={i}>
-                  <div className="tool-label">{taskLabel}</div>
-                  <Markdown text={(item as Bubble).text} />
-                </div>
-              );
-            }
-            const prev = items[i - 1];
-            const next = items[i + 1];
-            const isB = item.kind === "bubble";
-            const same = (o?: Item) => o?.kind === "bubble" && isB && o.role === (item as Bubble).role;
-            return renderRow(item, { key: i, showFace: !same(prev), grouped: same(next), name });
-          })
-        )}
-      </div>
+      <SubagentLog items={items} loading={loading} error={error} renderRow={renderRow} taskLabel={taskLabel} name={name} />
+    </div>
+  );
+}
+
+/** 서브에이전트 대화의 말풍선 목록. 일하는 동안 끝을 보고 있으면 따라 내려간다. */
+export function SubagentLog({ items, loading, error, renderRow, taskLabel, name }: {
+  items: Item[]; loading: boolean; error?: string; renderRow: (item: Item, o: RowOpts) => ReactNode; taskLabel: string; name: string;
+}) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const atEnd = useRef(true);
+  useLayoutEffect(() => {
+    const el = scroll.current;
+    if (el && atEnd.current) el.scrollTop = el.scrollHeight;
+  }, [items]);
+
+  // 첫 사용자 말은 맡긴 일이다. 그 뒤의 사용자 말(드물다)은 그대로 둔다.
+  const task = items.findIndex((it) => it.kind === "bubble" && it.role === "user");
+
+  return (
+    <div
+      className="chat-scroll"
+      ref={scroll}
+      onScroll={() => {
+        const el = scroll.current;
+        if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      }}
+    >
+      {error && <div className="note bad" role="alert">{error}</div>}
+      {loading ? (
+        <div className="chat-empty">서브에이전트 기록을 찾는 중</div>
+      ) : items.length === 0 ? (
+        <div className="chat-empty">아직 적힌 것이 없다</div>
+      ) : (
+        items.map((item, i) => {
+          if (i === task) {
+            return (
+              <div className="subview-task" key={i}>
+                <div className="tool-label">{taskLabel}</div>
+                <Markdown text={(item as Bubble).text} />
+              </div>
+            );
+          }
+          const prev = items[i - 1];
+          const next = items[i + 1];
+          const isB = item.kind === "bubble";
+          const same = (o?: Item) => o?.kind === "bubble" && isB && o.role === (item as Bubble).role;
+          return renderRow(item, { key: i, showFace: !same(prev), grouped: same(next), name });
+        })
+      )}
     </div>
   );
 }

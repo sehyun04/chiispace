@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import os from "node:os";
@@ -11,7 +11,7 @@ const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그 대화 전체를 열 수 있고, 결과가 돌아가면 걷힌다", { skip: !exe || !claude, timeout: 180000 }, async () => {
+test("서브에이전트가 일하는 동안 한 줄로 보이고 옆 칸에도 열리며, 눌러서 그 대화 전체를 열 수 있고, 결과가 돌아가면 걷힌다", { skip: !exe || !claude, timeout: 180000 }, async () => {
   // 가짜 Anthropic 서버가 본 대화에서 Agent 도구를 부르게 하면 실제 claude 가 실제로
   // 서브에이전트를 띄워 같은 서버로 요청을 보낸다. 그 요청은 앱 프록시를 지나며 chat:sub 로
   // 흐른다. 서브에이전트의 답을 붙잡아 둔 동안 대화창을 본다. 유료 모델은 부르지 않는다.
@@ -137,6 +137,23 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
           state: e.querySelector('.tool-stat')?.textContent ?? null,
         })),
         notes: texts('.note'),
+        // 오케스트레이션 때 서브에이전트마다 옆에 여는 읽기 전용 칸(useSubPanes).
+        panes: [...document.querySelectorAll('[data-pane]')].map(s => {
+          const r = s.getBoundingClientRect();
+          const ring = s.querySelector('.work-ring');
+          return {
+            id: s.dataset.pane,
+            sub: !!s.querySelector('.sub-body'),
+            xterm: !!s.querySelector('.xterm'),
+            chip: s.querySelector('.pane-head .chip')?.textContent ?? null,
+            ring: ring ? ring.getAttribute('data-who') ?? '' : null,
+            task: s.querySelector('.sub-body .subview-task')?.textContent ?? null,
+            bubbles: [...s.querySelectorAll('.sub-body .bubble')].map(e => e.textContent),
+            done: !!s.querySelector('.sub-done'),
+            rect: [r.left, r.top, r.width, r.height].map(Math.round),
+          };
+        }),
+        focusIn: document.activeElement?.closest('[data-pane]')?.dataset.pane ?? null,
         view: (() => {
           const v = over?.querySelector('.subview');
           if (!v) return null;
@@ -151,6 +168,7 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
         if (c.click) over?.querySelector(c.click)?.click();
+        if (c.closePane) document.querySelector('[data-pane="' + c.closePane + '"] .pane-head .x')?.click();
         // 사람이 Esc 를 누른 것처럼 지금 포커스가 있는 곳에서 올린다.
         if (c.esc) (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
         if (c.send && input) {
@@ -166,6 +184,11 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
   const app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
   const dom = () => latest.dom ?? {};
   const until = async (ok, n = 300) => { for (let i = 0; i < n && !ok(); i++) await delay(100); return ok(); };
+  // 테스트 창만 찍는다(CHIISPACE_TEST_SCREENSHOT=1 로 직접 돌릴 때).
+  const shot = (name) => {
+    if (process.env.CHIISPACE_TEST_SCREENSHOT !== "1") return;
+    spawnSync("powershell.exe", ["-NoProfile", "-File", "scripts/shot.ps1", "-ProcessId", String(app.pid), "-WaitSec", "1", "-Out", path.join(root, name + ".png")], { windowsHide: true });
+  };
   try {
     assert.ok(await until(() => dom().shown && dom().theirs?.some(t => t.includes("SUB_READY_MARK"))), "저장된 대화가 대화창에 안 뜸: " + JSON.stringify(dom()));
 
@@ -183,6 +206,19 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     // 파일은 스트림보다 조금 늦게 생긴다(meta 가 먼저, 대화는 0.5초쯤 뒤). 앱도 생길 때까지 다시 찾는다.
     assert.ok(await until(() => existsSync(subFile), 50), "서브에이전트 대화 파일 이름이 헤더 id 와 다름: " + subFile);
 
+    // 오케스트레이션: 서브에이전트가 뜨면 옆에 읽기 전용 칸이 열려 그 대화가 보인다. 본 칸의 입력바를 빼앗지 않는다.
+    const subPane = () => dom().panes?.find(p => p.sub);
+    assert.ok(await until(() => subPane()?.task?.includes("SUB_TASK"), 100), "서브에이전트 칸이 안 열리거나 맡긴 일이 안 보임: " + JSON.stringify(dom().panes));
+    const opened = subPane();
+    const main = dom().panes.find(p => p.id === "%0");
+    assert.equal(opened.xterm, false, "서브에이전트 칸에 터미널이 떴다");
+    assert.equal(opened.chip, "서브에이전트");
+    assert.notEqual(opened.ring, null, "일하는 서브에이전트 칸에 테두리가 안 돈다");
+    assert.ok(opened.rect[0] > main.rect[0] && Math.abs(opened.rect[1] - main.rect[1]) < 4, "서브에이전트 칸이 본 칸 오른쪽에 안 붙음: " + JSON.stringify(dom().panes));
+    assert.notEqual(dom().focusIn, opened.id, "서브에이전트 칸이 포커스를 가져갔다");
+    assert.equal(dom().panes.filter(p => p.sub).length, 1, "서브에이전트 하나에 칸이 여럿 열림");
+    shot("sub-pane-working");
+
     // 일하는 중에 그 줄을 누르면 서브에이전트의 대화가 열린다. 첫 말은 맡긴 일로 보인다.
     commands.push({ click: ".sub" });
     assert.ok(await until(() => dom().view?.task?.includes("SUB_TASK"), 100), "진행 줄을 눌렀는데 서브에이전트 대화가 안 열림: " + JSON.stringify(dom()));
@@ -199,6 +235,13 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     assert.ok(await until(() => dom().view === null, 50), "Esc 로 서브에이전트 화면이 안 닫힘");
     assert.ok(await until(() => !dom().subs?.length, 300), "서브에이전트가 끝났는데 줄이 안 걷힘: " + JSON.stringify({ dom: dom(), seen }));
     assert.ok(await until(() => dom().theirs?.some(t => t.includes("MAIN_AFTER_SUB")), 300), "본 대화의 답이 안 섬: " + JSON.stringify({ dom: dom(), seen }));
+    // 끝난 서브에이전트 칸은 마지막 답까지 보이고 끝남 표시와 함께 남는다. 테두리는 멈춘다.
+    const finished = () => dom().panes?.find(p => p.id === opened.id);
+    assert.ok(await until(() => finished()?.bubbles?.some(t => t.includes("SUB_DONE")) && finished().done && finished().ring === null, 300), "끝난 서브에이전트 칸이 마지막 답·끝남 표시를 안 보임: " + JSON.stringify(finished()));
+    // 다시 켜도 그 칸이 터미널로 뜨지 않게 세션에 적힌다.
+    const savedSubs = () => { try { return JSON.parse(readFileSync(state, "utf8")).subPanes ?? {}; } catch { return {}; } };
+    assert.ok(await until(() => savedSubs()[opened.id]?.agent === seen.subHeader, 50), "서브에이전트 칸이 세션에 안 적힘: " + JSON.stringify(savedSubs()));
+    shot("sub-pane-done");
     assert.ok(![...dom().theirs, ...dom().live].some(t => t.includes("SUB_WORKING") || t.includes("SUB_DONE")), "서브에이전트의 글이 본 대화 말풍선에 섞였음");
     // 새면 입력바의 Esc(중단)가 되어 대화에 "여기서 중단했다"가 선다.
     assert.ok(!dom().notes?.some(t => t.includes("중단")), "서브에이전트 화면을 닫은 Esc 가 claude 로 샜음: " + JSON.stringify(dom().notes));
@@ -207,6 +250,11 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고, 눌러서 그
     assert.ok(await until(() => dom().view?.bubbles?.some(t => t.includes("SUB_DONE")), 100), "부름 줄로 서브에이전트 대화가 안 열림: " + JSON.stringify(dom()));
     commands.push({ click: ".subview-back" });
     assert.ok(await until(() => dom().view === null, 50), "본 대화로 돌아가지 않음");
+    // 사용자가 닫은 서브에이전트 칸은 닫힌 채로 있다.
+    commands.push({ closePane: opened.id });
+    assert.ok(await until(() => !dom().panes?.some(p => p.id === opened.id), 50), "서브에이전트 칸이 안 닫힘");
+    await delay(1500);
+    assert.ok(!dom().panes?.some(p => p.sub), "닫은 서브에이전트 칸이 다시 열림: " + JSON.stringify(dom().panes));
     assert.equal(seen.main1, 1);
     assert.ok(seen.main2 >= 1, "서브에이전트 결과를 받은 본 대화 요청이 없음");
     assert.equal(app.exitCode, null);

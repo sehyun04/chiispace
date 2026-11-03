@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bootStreams, leavesOf, readSaved, savedJson } from "../ui/saved.ts";
+import { bootStreams, leavesOf, readSaved, savedJson, savedSubPanes } from "../ui/saved.ts";
 
 const sid = "12345678-2222-4222-8222-222222222222";
 const other = "87654321-3333-4333-8333-333333333333";
@@ -25,6 +25,7 @@ test("저장은 닫힌 칸의 복원 명령·이름·대화·터미널 고정을
     sideOpen: false,
     streams: { "%1": { agent: "claude", session: other, cwd: "C:\\work" }, "%9": { agent: "codex", session: "x", cwd: "C:\\" } },
     keepTerm: { "%0": true, "%9": true },
+    subPanes: { "%2": { parent: "%1", root: "C:\\work", session: other, agent: "a1b2", label: "로그 찾기" }, "%9": { parent: "%1", root: "C:\\", session: other, agent: "gone", label: "닫힌 칸" } },
   }));
   assert.deepEqual(Object.keys(json.procs), ["%0"]);
   assert.equal(json.restoreMode, "native-continue");
@@ -32,6 +33,7 @@ test("저장은 닫힌 칸의 복원 명령·이름·대화·터미널 고정을
   assert.deepEqual(json.paneTitles, { "%1": "빌드" });
   assert.deepEqual(Object.keys(json.streams), ["%1"]);
   assert.deepEqual(json.keepTerminal, ["%0"]);
+  assert.deepEqual(Object.keys(json.subPanes), ["%2"]);
   assert.equal(json.sideOpen, false);
   assert.equal(json.nextPane, 5);
   assert.deepEqual(leavesOf(json.tabs), ["%0", "%1", "%2"]);
@@ -65,4 +67,20 @@ test("터미널로 되돌려 둔 칸과 조회 실패는 옮기지 않는다", a
   const failed = await bootStreams(seeds, {}, tabs, async () => { throw new Error("no file"); });
   assert.deepEqual(failed.moved, {});
   assert.deepEqual(Object.keys(failed.seeds), ["%0"]);
+});
+
+test("서브에이전트 칸은 모양이 맞는 것만 되살리고, 다시 켤 때는 끝난 것으로 읽는다", () => {
+  const ok = { parent: "%1", root: "C:\\work", session: other, agent: "a1b2c3", label: "로그 찾기" };
+  const read = savedSubPanes({
+    "%2": { ...ok, done: false },
+    "%3": { ...ok, agent: "../../etc" },
+    "%4": { ...ok, session: "not-a-uuid" },
+    "%5": { ...ok, parent: "main" },
+    "x": ok,
+    "%6": { ...ok, label: 7 },
+  });
+  assert.deepEqual(Object.keys(read).sort(), ["%2", "%6"]);
+  assert.equal(read["%2"].done, true);
+  assert.equal(read["%6"].label, "서브에이전트");
+  for (const bad of [null, [], "x", 3]) assert.deepEqual(savedSubPanes(bad), {});
 });

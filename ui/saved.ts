@@ -28,7 +28,25 @@ export type SavedSession = {
   sideOpen?: boolean;
   streams?: unknown;
   keepTerminal?: unknown;
+  subPanes?: unknown;
 };
+
+/** 본 대화가 부른 서브에이전트를 옆에서 보이는 칸. 읽기만 한다 — 그 서브에이전트의 대화 파일을 그린다. */
+export type SubPaneInfo = { parent: string; root: string; session: string; agent: string; label: string; done?: boolean };
+
+/** 저장된 서브에이전트 칸. 다시 켤 때는 그 서브에이전트가 이미 내려갔으므로 모두 끝난 것으로 읽는다.
+ *  대화 id 와 에이전트 id 는 파일 경로가 되므로 모양이 맞는 것만 받는다. */
+export function savedSubPanes(value: unknown): Record<string, SubPaneInfo> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap<[string, SubPaneInfo]>(([id, raw]) => {
+    const s = raw as Record<string, unknown> | null;
+    if (!/^%\d+$/.test(id) || !s || typeof s.root !== "string" || typeof s.parent !== "string" || !/^%\d+$/.test(s.parent)) return [];
+    if (typeof s.session !== "string" || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(s.session)) return [];
+    if (typeof s.agent !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(s.agent)) return [];
+    const label = typeof s.label === "string" ? s.label.slice(0, 200) : "서브에이전트";
+    return [[id, { parent: s.parent, root: s.root, session: s.session, agent: s.agent, label, done: true }]];
+  }));
+}
 
 /** 깨진 세션 파일은 없는 것으로 본다 — 기본값으로 켜는 편이 못 켜는 것보다 낫다. */
 export function readSaved(raw: string | null): SavedSession | null {
@@ -79,6 +97,7 @@ export function savedJson(s: {
   sideOpen: boolean;
   streams: Record<string, StreamChat>;
   keepTerm: Record<string, true>;
+  subPanes: Record<string, SubPaneInfo>;
 }): string {
   const live = new Set(leavesOf(s.tabs));
   const procs: Record<string, Seed> = {};
@@ -99,5 +118,6 @@ export function savedJson(s: {
     sideOpen: s.sideOpen,
     streams: Object.fromEntries(Object.entries(s.streams).filter(([id]) => live.has(id))),
     keepTerminal: Object.keys(s.keepTerm).filter((id) => live.has(id)),
+    subPanes: Object.fromEntries(Object.entries(s.subPanes).filter(([id]) => live.has(id))),
   });
 }
