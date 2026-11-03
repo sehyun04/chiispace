@@ -315,7 +315,8 @@
 .think {
   margin: 0 0 8px 38px;
   border-radius: var(--radius-sm);
-  background: #f2edf5;
+  /* 도구 묶음(종이색)과 갈리게 옅은 하늘. 보라 바탕(#f2edf5)이었다. */
+  background: #ecf4f8;
   overflow: hidden;
 }
 .think .tool-head {
