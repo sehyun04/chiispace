@@ -694,8 +694,13 @@ body {
   font-size: 11px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--lilac);
+  /* 원래 라일락이었는데 크림 종이 위에서 혼자 보라로 떴다(11월 3일 사용자). 흰 글자가 읽히는 테마 색으로 —
+     Claude 는 내 말풍선의 코코아(4.92), Codex 는 링크 파랑(4.62). */
+  background: var(--me);
   color: #fff;
+}
+.pane-head .chip[data-agent="codex"] {
+  background: var(--link);
 }
 /* 서브에이전트 칸은 본 칸과 한눈에 갈려야 한다. 에이전트 칩과 다른 종이색 바탕으로 둔다. */
 .pane-head .chip.sub-chip {

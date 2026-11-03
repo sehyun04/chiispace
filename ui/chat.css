@@ -919,13 +919,13 @@ button.note.launch::after {
   font-weight: 700;
   color: var(--ink);
 }
-/* 연보라(--lilac) 위 흰 글자는 대비 2.23 이라 생각 색을 쓴다(5.45). */
+/* 머리줄 에이전트 칩과 같은 알약. 보라를 쓰지 않는다 — 흰 글자가 읽히는 코코아(4.92). */
 .subview-kind {
   flex: none;
   font-size: 11px;
   padding: 1px 8px;
   border-radius: 999px;
-  background: var(--think);
+  background: var(--me);
   color: #fff;
 }
 .subview-task {

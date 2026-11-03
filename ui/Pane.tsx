@@ -101,7 +101,7 @@ export function Pane(p: PaneProps) {
             {p.name || p.autoName || p.fallback}
           </span>
         )}
-        {p.sub ? <span className="chip sub-chip">서브에이전트</span> : view?.agent ? <span className="chip">{view.agent}</span> : null}
+        {p.sub ? <span className="chip sub-chip">서브에이전트</span> : view?.agent ? <span className="chip" data-agent={view.agent}>{view.agent}</span> : null}
         {p.stream?.agent === "claude" || p.stream?.agent === "codex" || (!p.stream && (stat?.agent === "claude" || stat?.agent === "codex")) ? (
           <ModeSwitch
             chat={!!p.stream}
