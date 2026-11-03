@@ -120,7 +120,6 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
     let app = await launch();
     try {
       await until(() => saved().streams?.["%0"]?.session && pane("%0").disabled === false, "서버 대화 ID 저장");
-      assert.ok(placeholders.some(p => p.includes("Codex 연결 중")), "연결 준비 상태 안내 누락");
       assert.ok(!placeholders.some(p => p.includes("떠 있지 않다")), "연결 중을 Codex 없음으로 표시");
       assert.deepEqual(pane("%0").buttons.map(b => b.text), ["터미널", "대화창"]);
       commands.push({ id: "%0", send: "SWITCH_MARK" });
@@ -204,6 +203,9 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
       await until(() => pane("%0").stream && pane("%0").disabled === false, "빈 터미널에서 빈 대화창 복귀");
       assert.ok(!pane("%0").theirs?.length);
       assert.ok(!placeholders.some(p => p.includes("떠 있지 않다")), "전송·복원 중을 Codex 없음으로 표시");
+      // 연결 중 안내는 여기서 본다. 켠 직후의 연결은 엿보기(CHIISPACE_PROBE_MS)가 붙기 전에 끝나기도 해 못 볼 때가
+      // 있다(배포 검증에서 두 번 연달아 그랬다). 앱이 떠 있는 동안 대화창으로 돌아온 네 번은 엿보는 중에 연결한다.
+      assert.ok(placeholders.some(p => p.includes("Codex 연결 중")), "연결 준비 상태 안내 누락");
       assert.equal(requests.length, 2, "전환 명령이 모델 요청을 만듦");
     } finally { await close(app); }
   } catch (error) {
