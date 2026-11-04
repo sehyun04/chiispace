@@ -146,6 +146,7 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고 옆 칸에도 
             sub: !!s.querySelector('.sub-body'),
             xterm: !!s.querySelector('.xterm'),
             chip: s.querySelector('.pane-head .chip')?.textContent ?? null,
+            title: s.querySelector('.pane-head .title')?.textContent ?? null,
             ring: ring ? ring.getAttribute('data-who') ?? '' : null,
             task: s.querySelector('.sub-body .subview-task')?.textContent ?? null,
             bubbles: [...s.querySelectorAll('.sub-body .bubble')].map(e => e.textContent),
@@ -217,6 +218,8 @@ test("서브에이전트가 일하는 동안 한 줄로 보이고 옆 칸에도 
     assert.ok(opened.rect[0] > main.rect[0] && Math.abs(opened.rect[1] - main.rect[1]) < 4, "서브에이전트 칸이 본 칸 오른쪽에 안 붙음: " + JSON.stringify(dom().panes));
     assert.notEqual(dom().focusIn, opened.id, "서브에이전트 칸이 포커스를 가져갔다");
     assert.equal(dom().panes.filter(p => p.sub).length, 1, "서브에이전트 하나에 칸이 여럿 열림");
+    // 칸 이름은 맡긴 일의 첫 줄이 아니라 claude 가 적은 짧은 설명이다.
+    assert.ok(await until(() => subPane()?.title === "로그 찾기", 50), "서브에이전트 칸 이름이 짧은 설명으로 안 바뀜: " + JSON.stringify(subPane()));
     shot("sub-pane-working");
 
     // 일하는 중에 그 줄을 누르면 서브에이전트의 대화가 열린다. 첫 말은 맡긴 일로 보인다.

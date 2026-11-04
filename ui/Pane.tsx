@@ -154,7 +154,7 @@ export function Pane(p: PaneProps) {
         )
       ) : null}
       {p.sub ? (
-        <SubPane sub={p.sub} slug={slug} />
+        <SubPane id={id} sub={p.sub} slug={slug} onTitle={p.onStreamTitle} />
       ) : p.stream?.agent === "codex" ? (
         // 폴더를 바꾸거나(새 대화) /resume 으로 다른 대화를 고르면 칸을 새로 그려 통로도 새로 연다.
         <CodexStreamPane key={`${p.stream.cwd}#${p.streamEpoch}`} id={id} chat={p.stream as CodexChat}
