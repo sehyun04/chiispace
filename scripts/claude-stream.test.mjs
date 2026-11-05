@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   initialStream, reduceStream, sentStream, answeredStream, INIT_ID,
   allowLine, denyLine, answerLine, suggestionLabel, titleFrom, userLine,
-  currentModel, effortChoices, effortRequest, appliedEffort, contextLine,
+  currentModel, effortChoices, effortRequest, appliedEffort, modelName, settingsModel,
 } from "../ui/claude-stream.ts";
 
 const run = (...msgs) => msgs.reduce((s, m) => reduceStream(s, m), initialStream);
@@ -112,8 +112,37 @@ test("추론 수준은 모델이 받는 것 중 설정으로 걸 수 있는 것�
   assert.equal(appliedEffort({ applied: { effort: "high" }, effective: { effortLevel: "low" } }), "high");
   assert.equal(appliedEffort({ effective: { effortLevel: "low" } }), "low");
   assert.equal(appliedEffort(null), undefined);
-  assert.equal(contextLine({ totalTokens: 33644, maxTokens: 1000000, percentage: 3 }), "33,644 / 1,000,000 (3%)");
-  assert.equal(contextLine({}), undefined);
+});
+
+// claude 2.1.318 의 실제 초기화 답 모양. 기본 줄과 opus 줄이 같은 모델로 풀린다.
+const REAL = [
+  { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5 · Best for everyday, complex tasks" },
+  { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5" },
+  { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet 5.5" },
+];
+const withModels = run({ type: "control_response", response: { subtype: "success", request_id: INIT_ID, response: { models: REAL, claude_code_version: "2.1.318" } } });
+
+test("줄의 모델은 Default 가 아니라 실제로 도는 모델 이름으로 보인다", () => {
+  assert.equal(withModels.version, "2.1.318");
+  // 기본 줄의 이름에 풀리는 모델을 붙인다.
+  assert.equal(modelName(REAL[0], REAL), "Opus 5.5 (기본)");
+  assert.equal(modelName(REAL[2], REAL), "Sonnet 5.5");
+  assert.equal(modelName({ value: "default" }, []), "기본");
+  // 설정에 opus 라 적혀 있으면 opus 줄, 설정이 비어 있으면 실제 이름으로 — 둘 다 기본 줄이 아니다.
+  const set = settingsModel({ applied: { model: "claude-opus-5-5" }, effective: { model: "opus" } }, REAL);
+  assert.equal(set, "opus");
+  assert.equal(currentModel({ ...withModels, model: set }).value, "opus");
+  const unset = settingsModel({ applied: { model: "claude-opus-5-5" }, effective: {} }, REAL);
+  assert.equal(unset, "claude-opus-5-5");
+  assert.equal(currentModel({ ...withModels, model: unset }).value, "opus");
+  // 목록에 없는 설정 값(opus[1m] 같은)은 실제 이름으로 고른다.
+  assert.equal(settingsModel({ applied: { model: "claude-opus-5-5" }, effective: { model: "opus[1m]" } }, REAL), "claude-opus-5-5");
+  assert.equal(settingsModel(null, REAL), undefined);
+  // 첫 턴의 system init 이 실제 이름을 줘도 줄에서 고른 이름은 그대로 둔다(턴마다 줄이 바뀌지 않게).
+  const picked = { ...withModels, model: "default" };
+  assert.equal(reduceStream(picked, { type: "system", subtype: "init", model: "claude-opus-5-5" }).model, "default");
+  assert.equal(reduceStream(picked, { type: "system", subtype: "init", model: "claude-sonnet-5-5" }).model, "claude-sonnet-5-5");
+  assert.equal(currentModel(reduceStream(withModels, { type: "system", subtype: "init", model: "claude-opus-5-5" })).value, "opus");
 });
 
 test("모르는 말이 와도 깨지지 않는다", () => {

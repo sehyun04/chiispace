@@ -46,9 +46,33 @@ export type ModelChoice = {
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh"];
 export const effortChoices = (m?: ModelChoice) => (m?.supportedEffortLevels ?? []).filter((v) => EFFORT_LEVELS.includes(v));
 
-/** 지금 쓰는 모델의 항목. 첫 턴 전에는 쓰는 모델을 모르므로(system init 은 첫 말과 함께 온다) 기본값이다. */
-export const currentModel = (s: StreamState) =>
-  s.model ? s.models.find((m) => m.value === s.model || m.resolvedModel === s.model) : s.models.find((m) => m.value === "default");
+/** 지금 쓰는 모델의 항목. 모델은 켤 때 설정 조회(`settingsModel`)로, 첫 턴부터는 system init 으로 안다.
+ *  실제 이름(`claude-opus-5-5`)으로 풀리는 줄은 기본 줄과 `opus` 줄 둘이다. 이름 있는 쪽을 먼저 고른다 —
+ *  기본 줄을 고르면 줄에 "Default"만 보여 Opus 로 쓰는지 알 수 없었다(11월 5일 사용자). */
+export function currentModel(s: StreamState) {
+  const { model, models } = s;
+  if (!model) return models.find((m) => m.value === "default");
+  return (
+    models.find((m) => m.value === model) ??
+    models.find((m) => m.value !== "default" && m.resolvedModel === model) ??
+    models.find((m) => m.resolvedModel === model)
+  );
+}
+
+/** 고르기 목록의 이름. 기본 줄은 claude 가 "Default (recommended)" 로만 주므로 풀리는 모델 이름을 앞에 둔다. */
+export function modelName(m: ModelChoice, models: ModelChoice[]): string {
+  if (m.value !== "default") return m.displayName ?? m.value;
+  const real = models.find((x) => x.value !== "default" && x.resolvedModel === m.resolvedModel)?.displayName ?? m.resolvedModel;
+  return real ? `${real} (기본)` : "기본";
+}
+
+/** 설정 조회 답에서 지금 쓰는 모델. 설정에 적힌 이름(`opus`)이 목록에 있으면 그것을, 아니면 실제로 걸린 이름을 쓴다. */
+export function settingsModel(body: unknown, models: ModelChoice[]): string | undefined {
+  const b = obj(body);
+  const chosen = str(obj(b.effective).model);
+  if (chosen && models.some((m) => m.value === chosen)) return chosen;
+  return str(obj(b.applied).model) ?? chosen;
+}
 
 /** claude 가 이 세션에서 받는 슬래시 명령. 스킬·사용자 명령도 여기 든다. */
 export type AgentCommand = { name: string; description?: string; argumentHint?: string; aliases?: string[] };
@@ -68,6 +92,8 @@ export type StreamState = {
   session?: string;
   /** 지금 걸린 추론 수준(설정 조회의 `applied.effort`). */
   effort?: string;
+  /** claude 판(초기화 답의 `claude_code_version`). 상태 표 맨 아래에 둔다. */
+  version?: string;
   /** 모델 오류처럼 턴이 실패한 까닭. 중단은 실패가 아니다. */
   error?: string;
   exited?: { code: number | null; error: string };
@@ -116,11 +142,28 @@ export function reduceStream(s: StreamState, msg: unknown): StreamState {
         const aliases = Array.isArray(c.aliases) ? c.aliases.filter((a): a is string => typeof a === "string") : undefined;
         return name ? [{ name, description: str(c.description), argumentHint: str(c.argumentHint), aliases }] : [];
       });
-      return { ...s, ready: true, models, commands, mode: str(body.current_permission_mode) ?? s.mode };
+      return {
+        ...s,
+        ready: true,
+        models,
+        commands,
+        mode: str(body.current_permission_mode) ?? s.mode,
+        version: str(body.claude_code_version) ?? s.version,
+      };
     }
-    case "system":
+    case "system": {
       if (m.subtype !== "init") return s;
-      return { ...s, model: str(m.model) ?? s.model, mode: str(m.permissionMode) ?? s.mode, session: str(m.session_id) ?? s.session };
+      // 고른 이름(`default`)이 이 실제 이름으로 풀리는 것이면 고른 이름을 둔다. 바꾸면 턴마다 줄이 "Opus 5.5 (기본)"과
+      // "Opus 5.5" 사이를 오간다.
+      const wire = str(m.model);
+      const same = !!wire && s.models.some((x) => x.value === s.model && x.resolvedModel === wire);
+      return {
+        ...s,
+        model: same ? s.model : (wire ?? s.model),
+        mode: str(m.permissionMode) ?? s.mode,
+        session: str(m.session_id) ?? s.session,
+      };
+    }
     case "stream_event":
     case "assistant":
       return s.busy ? s : { ...s, busy: true, error: undefined };
@@ -191,16 +234,6 @@ export const effortRequest = (effortLevel: string) => ({ subtype: "apply_flag_se
 export function appliedEffort(body: unknown): string | undefined {
   const b = obj(body);
   return str(obj(b.applied).effort) ?? str(obj(b.effective).effortLevel);
-}
-
-/** 문맥 조회 답을 사람이 읽을 한 줄로. */
-export function contextLine(body: unknown): string | undefined {
-  const b = obj(body);
-  if (typeof b.totalTokens !== "number") return undefined;
-  const n = (v: number) => v.toLocaleString("en-US");
-  const max = typeof b.maxTokens === "number" ? ` / ${n(b.maxTokens)}` : "";
-  const pct = typeof b.percentage === "number" ? ` (${b.percentage}%)` : "";
-  return `${n(b.totalTokens)}${max}${pct}`;
 }
 
 /** 허락. claude 는 어느 호출에 대한 답인지 `toolUseID` 로 맞춘다 — 빠지면 답을 못 알아듣고 계속 기다린다. */

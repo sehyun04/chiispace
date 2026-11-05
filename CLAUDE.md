@@ -108,9 +108,12 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   권한 답에는 `toolUseID`(요청의 `tool_use_id`)를 꼭 싣는다 — 빠지면 claude 가 답을 못 알아듣고 영영 기다린다.
   대화 파일 쪽의 지난 질문은 그리지 않는다(답할 질문은 통로가 카드로 준다). 앱을 끄면 입력이 닫혀
   claude 도 스스로 내려가고, 칸을 닫으면 `claude_chat_stop` 이 거둔다.
-- **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · [폴더] [상태]
-  순서와 상태 표 항목을 거기서 정한다. 새 대화는 `/clear` 다(줄의 단추는 10월 17일 걷었다). 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
+- **터미널 없는 두 칸(Claude·Codex)의 입력바 위 줄은 `StreamBar` 한 부품이다.** 모델 · 추론 · 권한 · (5시간 게이지) · [폴더] [상태]
+  순서와 상태 표(게이지 · 항목 · 판 카드) 항목을 거기서 정한다. 새 대화는 `/clear` 다(줄의 단추는 10월 17일 걷었다). 칸마다 따로 그리면 같은 자리가 다른 모양이 된다(실제로 그랬다).
   Claude 추론 수준은 `apply_flag_settings`(이 세션에만 거는 층)로 건다 — 사용자 설정 파일을 고치지 않는다.
+  Claude 줄의 모델은 켤 때 `get_settings` 로 채우고, 같은 모델로 풀리는 줄이 여럿이면(기본 = opus) 이름 있는 줄을 고른다 —
+  기본 줄을 고르면 "Default"만 보여 무엇이 도는지 모른다(11월 5일 사용자). 5시간 게이지는 claude 의 `get_usage` 값이고 계정 하나라
+  모든 칸이 같은 값을 본다(`usePlanUsage`). 구독 한도가 없는 계정이면 띄우지 않는다 — 0% 게이지는 거짓말이다.
   입력바 `/` 명령의 모델·추론·권한·상태·새 대화도 이 줄의 항목에서 만든다(`barCommands`). 따로 적으면 줄과 명령이 어긋난다.
   Claude 칸의 나머지 명령은 claude 가 초기화 답(`commands`)으로 준 것만 띄운다 — 앱이 명령 목록을 적어 두지 않는다.
 - **터미널 칸 위에 대화창을 덮지 않는다**(10월 17일 덮개를 걷었다). 대화로 보는 길이 둘(덮개·대화창 칸)이면 기능 차이가
@@ -430,7 +433,8 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/CodexStreamPane.tsx` · `ui/codex-stream.ts` | 터미널 없는 Codex 칸 — 승인·질문·설정, 스트림 해석 |
 | `ui/CodexSubagents.tsx` | Codex 자식 진행 줄·서버가 알려 준 자식 대화 읽기. 행·상세 틀은 Claude와 공유 |
 | `ui/codex-commands.ts` | Codex의 실제 연결한 명령 목록·일반 턴 요청·조회 결과 표시 |
-| `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·폴더·상태 · 폴더 칩(`fs_dirs`) |
+| `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·게이지·폴더·상태 카드 · 폴더 칩(`fs_dirs`) |
+| `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |
 | `ui/app.css` · `ui/theme.css` · `ui/chat.css` | 치이카와 테마 |

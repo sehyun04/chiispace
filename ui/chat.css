@@ -1245,24 +1245,121 @@ button.note.launch::after {
   color: var(--ink-2);
   box-shadow: 0 0 0 1px var(--line) inset;
 }
-/* 상태 표. Claude·Codex 가 같은 항목을 같은 순서로 보인다(StreamBar). */
+/* 사용 한도 게이지. 줄의 선택 상자와 같은 알약 안에 막대와 숫자를 둔다 — 라벨 · 알약 짝이 모델·권한과 같은 결이다.
+   색은 여유가 줄수록 하늘 → 노랑 → 빨강. 움직이지 않는다. */
+.gauge {
+  position: relative;
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  overflow: hidden;
+  vertical-align: middle;
+}
+.gauge-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--sky);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sky) 60%, var(--outline)) inset;
+}
+.gauge[data-level="warn"] .gauge-fill {
+  background: var(--sun);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sun) 55%, var(--outline)) inset;
+}
+.gauge[data-level="bad"] .gauge-fill {
+  background: var(--bad);
+  box-shadow: none;
+}
+.gauge-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+/* 줄 단추 규칙(.stream-bar button)의 바탕을 걷는다. 바탕은 안쪽 알약이 가진다. */
+.stream-bar button.bar-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  background: none;
+  color: var(--ink-2);
+}
+.bar-meter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--paper-2);
+}
+.stream-bar button.bar-meter:hover .bar-meter-pill {
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+
+/* 상태 표. Claude·Codex 가 같은 부품으로 그린다(StreamBar). 줄 아래 카드 하나: 게이지 · 항목 · 판. */
 .stream-status {
   flex: none;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 2px 10px;
-  margin: 0;
-  padding: 6px 12px;
+  padding: 6px 10px 0;
   background: var(--paper);
   font-size: 11px;
   color: var(--ink);
-  overflow-wrap: anywhere;
 }
-.stream-status > div {
+.status-card {
+  padding: 8px 11px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.stream-status .status-k {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.status-meters {
+  display: grid;
+  /* 막대를 칸 끝까지 늘리면 넓은 칸에서 0% 막대가 빈 줄처럼 보인다. 길이는 묶고 설명이 나머지를 쓴다. */
+  grid-template-columns: max-content minmax(60px, 200px) max-content 1fr;
+  align-items: center;
+  gap: 5px 10px;
+  padding-bottom: 7px;
+  margin-bottom: 7px;
+  border-bottom: 1px dashed var(--line);
+}
+.status-meter {
   display: contents;
 }
-.stream-status > div > span:first-child {
-  color: var(--ink-2);
+.status-meter .gauge {
+  width: auto;
+  height: 8px;
+  border-radius: 4px;
+}
+.status-meter .gauge-num {
+  text-align: right;
+  min-width: 3ch;
+}
+.status-meter .status-d {
+  color: var(--ink-3);
+}
+.status-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  margin: 0;
+}
+.status-rows > div {
+  display: contents;
+}
+.status-rows dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.status-foot {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  color: var(--ink-3);
 }
 .stream-status + .composer {
   border-top: 0;

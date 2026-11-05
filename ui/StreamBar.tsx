@@ -2,10 +2,11 @@
  *
  *  두 칸이 따로 그리면 같은 자리에 다른 모양·다른 순서가 서고, 한쪽에만 단추가 생긴다(실제로 그랬다).
  *  무엇을 고를 수 있는지는 에이전트마다 다르므로 항목은 부른 쪽이 주고, 모양과 순서는 여기서 정한다:
- *  모델 · 추론 · 권한 · [폴더] [상태], 상태를 펴면 그 아래에 같은 항목의 표. 새 대화는 `/clear` 다(10월 17일 단추를 걷었다).
+ *  모델 · 추론 · 권한 · (사용 한도) · [폴더] [상태], 상태를 펴면 그 아래에 같은 항목의 표. 새 대화는 `/clear` 다(10월 17일 단추를 걷었다).
  */
 import type { ReactNode, Ref } from "react";
 import { FolderChip } from "./FolderChip";
+import { meterLevel, type Meter } from "./usage";
 
 export type BarChoice = { value: string; label: string; title?: string };
 export type BarField = {
@@ -40,25 +41,42 @@ export const modelLabel = (display?: string, id?: string) =>
 /** 상태 표의 폴더. 두 칸이 같은 표기로 보이게 Windows 경로로 쓴다. */
 export const folderLabel = (p: string) => (p ? p.replace(/\//g, "\\") : "홈");
 
+function Gauge({ m }: { m: Meter }) {
+  return (
+    <span className="gauge" data-level={meterLevel(m.used)}>
+      <span className="gauge-fill" style={{ width: `${m.used}%` }} />
+    </span>
+  );
+}
+
 export function StreamBar({
   model,
   effort,
   permission,
+  meter,
   statusOpen,
   onStatus,
   folder,
+  meters,
   status,
+  foot,
   statusClass,
 }: {
   model: BarField;
   /** 고를 수 있는 수준이 없는 모델이면 비운다. */
   effort?: BarField;
   permission: BarField;
+  /** 권한 옆 게이지. 구독 한도를 모르면 비운다. 누르면 상태 표를 편다. */
+  meter?: Meter;
   statusOpen: boolean;
   onStatus: () => void;
   /** 이 칸의 작업 폴더. 바꾸면 그 폴더의 새 대화다(FolderChip). */
   folder: { path: string; fresh: boolean; disabled?: boolean; onPick: (path: string) => void };
+  /** 상태 표 맨 위의 게이지들(사용 한도·문맥). */
+  meters?: Meter[];
   status: [string, ReactNode][];
+  /** 상태 표 맨 아래 한 줄(판·구독). */
+  foot?: string;
   statusClass?: string;
 }) {
   return (
@@ -87,6 +105,21 @@ export function StreamBar({
             </label>
           ) : null,
         )}
+        {meter ? (
+          <button
+            type="button"
+            className="bar-meter"
+            aria-label={`${meter.label} 한도 ${Math.round(meter.used)}% 사용 · 상태 보기`}
+            title={meter.title}
+            onClick={onStatus}
+          >
+            <span className="bar-meter-label">{meter.label}</span>
+            <span className="bar-meter-pill">
+              <Gauge m={meter} />
+              <span className="gauge-num">{Math.round(meter.used)}%</span>
+            </span>
+          </button>
+        ) : null}
         </div>
         <div className="stream-bar-acts">
         <FolderChip {...folder} />
@@ -97,12 +130,29 @@ export function StreamBar({
       </div>
       {statusOpen && (
         <div className={["stream-status", statusClass].filter(Boolean).join(" ")} role="status">
-          {status.map(([k, v]) => (
-            <div key={k}>
-              <span>{k}</span>
-              <span>{v}</span>
+          <div className="status-card">
+          {meters?.length ? (
+            <div className="status-meters">
+              {meters.map((m) => (
+                <div key={m.label} className="status-meter" title={m.title}>
+                  <span className="status-k">{m.label}</span>
+                  <Gauge m={m} />
+                  <span className="gauge-num">{Math.round(m.used)}%</span>
+                  <span className="status-d">{m.detail}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : null}
+          <dl className="status-rows">
+            {status.map(([k, v]) => (
+              <div key={k}>
+                <dt className="status-k">{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+          {foot ? <div className="status-foot">{foot}</div> : null}
+          </div>
         </div>
       )}
     </>

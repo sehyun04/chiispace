@@ -14,6 +14,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
+import { contextMeter, limitMeter, planLabel, type Meter } from "./usage";
+import { usePlanUsage } from "./usePlanUsage";
 import { shortToolName, toolSummary } from "./tools";
 import { agentCommands, ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
 import {
@@ -21,7 +23,6 @@ import {
   answeredStream,
   allowLine,
   appliedEffort,
-  contextLine,
   controlLine,
   currentModel,
   denyLine,
@@ -30,8 +31,10 @@ import {
   initialStream,
   initLine,
   interruptLine,
+  modelName,
   reduceStream,
   sentStream,
+  settingsModel,
   suggestionLabel,
   titleFrom,
   userLine,
@@ -87,7 +90,7 @@ export function ClaudeStreamPane({
   const [boot, setBoot] = useState(0);
   const titled = useRef(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [context, setContext] = useState<string>();
+  const [context, setContext] = useState<Meter>();
   // 답을 기다리는 요청(설정·문맥 조회, 모델 바꾸기 …). 답이 오면 request_id 로 짝짓는다.
   const pending = useRef(new Map<string, (r: Reply) => void>());
 
@@ -153,9 +156,14 @@ export function ClaudeStreamPane({
         if (!live) return;
         setAlive(true);
         await send(initLine());
-        // 지금 걸린 추론 수준은 초기화 답에 없다. 설정을 한 번 물어 줄에 채운다.
+        // 지금 걸린 추론 수준과 모델은 초기화 답에 없다. 설정을 한 번 물어 줄에 채운다 — 모델은 첫 말을 보내야
+        // system init 으로 오므로, 이걸 안 하면 그때까지 줄이 "기본"에 머문다. 사용자가 그 사이에 고른 것은 덮지 않는다.
         void control({ subtype: "get_settings" })
-          .then((b) => live && setSt((s) => ({ ...s, effort: appliedEffort(b) ?? s.effort })))
+          .then(
+            (b) =>
+              live &&
+              setSt((s) => ({ ...s, effort: appliedEffort(b) ?? s.effort, model: s.model ?? settingsModel(b, s.models) })),
+          )
           .catch(() => {});
       } catch (err) {
         if (live) setSt((s) => ({ ...s, exited: { code: null, error: String(err) } }));
@@ -221,8 +229,13 @@ export function ClaudeStreamPane({
   const toggleStatus = () => {
     const open = !statusOpen;
     setStatusOpen(open);
-    if (open && alive) void control({ subtype: "get_context_usage" }).then((b) => setContext(contextLine(b)), () => {});
+    if (open && alive) void control({ subtype: "get_context_usage" }).then((b) => setContext(contextMeter(b)), () => {});
   };
+  // 행동 분석(최근 7일 대화 파일 훑기)은 빼고 한도만 묻는다. 게이지에는 그것만 쓴다.
+  const plan = usePlanUsage(() => control({ subtype: "get_usage", skip_behaviors: true }), alive, st.busy);
+  const now = new Date();
+  const fiveHour = plan?.fiveHour && limitMeter("5시간", plan.fiveHour, now);
+  const sevenDay = plan?.sevenDay && limitMeter("7일", plan.sevenDay, now);
   const model = currentModel(st);
   const efforts = effortChoices(model);
   const modeName = MODES.find(([v]) => v === (st.mode ?? "default"))?.[1] ?? st.mode ?? "매번 묻기";
@@ -236,7 +249,7 @@ export function ClaudeStreamPane({
       disabled: !alive,
       choices: [
         ...(model ? [] : [{ value: "", label: st.model ?? "기본" }]),
-        ...st.models.map((m) => ({ value: m.value, label: m.displayName ?? m.value, title: m.description })),
+        ...st.models.map((m) => ({ value: m.value, label: modelName(m, st.models), title: m.description })),
       ],
       onChange: (v) => setting({ subtype: "set_model", model: v }, (s) => ({ ...s, model: v })),
     },
@@ -261,17 +274,20 @@ export function ClaudeStreamPane({
       choices: MODES.map(([value, label]) => ({ value, label })),
       onChange: (v) => setting({ subtype: "set_permission_mode", mode: v }, (s) => ({ ...s, mode: v })),
     },
+    meter: fiveHour,
     statusOpen,
     onStatus: toggleStatus,
     folder: { path: cwd, fresh: !talked, disabled: !alive || st.busy, onPick: (to) => onFolder(id, "claude", to) },
+    meters: [fiveHour, sevenDay, context].filter((m): m is Meter => !!m),
     status: [
-      ["모델", modelLabel(model?.displayName, st.model ?? model?.resolvedModel)],
+      ["모델", modelLabel(model && modelName(model, st.models), model?.resolvedModel ?? st.model)],
       ["추론", st.effort ? effortLabel(st.effort) : "기본"],
       ["권한", modeName],
       ["폴더", folderLabel(cwd)],
-      ["사용 토큰", context ?? "집계 전"],
+      ...(context ? [] : [["문맥", "집계 전"] as [string, string]]),
       ["대화", st.session ?? session],
     ],
+    foot: [st.version && `claude ${st.version}`, planLabel(plan?.plan)].filter(Boolean).join(" · ") || undefined,
   };
   const toolbar = <StreamBar {...bar} />;
   // TUI 에만 있던 명령 중 대화창에서 할 수 있게 만든 것. `claude -p` 는 이것들을 받지 않는다(초기화 답의 목록에 없다).

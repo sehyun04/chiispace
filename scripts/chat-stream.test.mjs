@@ -125,6 +125,10 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
         stop: !!over?.querySelector('.composer-stop'),
         models: [...(over?.querySelectorAll('.stream-bar select:first-of-type option') ?? [])].map(o => o.value),
         model: over?.querySelector('.stream-bar select')?.value ?? null,
+        modelText: over?.querySelector('.stream-bar select')?.selectedOptions[0]?.textContent ?? null,
+        gauge: !!over?.querySelector('.bar-meter'),
+        meters: texts('.status-meter .status-k'),
+        foot: over?.querySelector('.status-foot')?.textContent ?? null,
         title: slot?.querySelector('.pane-head .title')?.textContent ?? null,
         bar: [...(over?.querySelectorAll('.stream-bar label > span') ?? [])].map(e => e.textContent),
         buttons: [...(over?.querySelectorAll('.stream-bar-acts > button') ?? [])].map(e => e.textContent),
@@ -207,6 +211,8 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.equal(dom().chip, "claude");
     assert.ok(await until(() => !dom().inputDisabled && dom().models.length > 0, 200), "claude 가 안 켜졌거나 모델 목록이 없음: " + JSON.stringify(dom()));
     assert.ok(dom().inputFocused, "새 대화 칸의 입력바에 포커스가 없음");
+    // 첫 말 전에도 줄의 모델은 "Default" 가 아니라 실제로 도는 모델 이름이다(설정 조회로 안다).
+    assert.ok(await until(() => dom().modelText && !/default/i.test(dom().modelText), 100), "줄의 모델이 실제 이름이 아님: " + dom().modelText);
     // 저장은 0.4초 묶어 쓴다.
     await until(() => saved().streams?.["%1"]?.session, 50);
     sid = saved().streams?.["%1"]?.session;
@@ -269,10 +275,15 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     commands.push({ send: "STREAM_EFFORT 낮게" });
     assert.ok(await until(() => requests.some(r => r.mark === "STREAM_EFFORT"), 300), "추론 바꾼 뒤 요청이 없음");
     assert.equal(requests.find(r => r.mark === "STREAM_EFFORT").effort, "low", "추론 수준이 요청에 안 실림");
-    // 상태를 펴면 같은 항목의 표가 뜬다. 사용 토큰은 claude 에게 물어 채운다.
+    // 상태를 펴면 게이지 · 같은 항목 · 판 순서의 카드가 뜬다. 문맥은 claude 에게 물어 채운다.
     commands.push({ button: "상태" });
-    assert.ok(await until(() => /모델.*추론.*권한.*폴더.*사용 토큰.*대화/.test(dom().status ?? "") && dom().status.includes(sid) && !dom().status.includes("집계 전"), 100),
+    assert.ok(await until(() => /문맥.*모델.*추론.*권한.*폴더.*대화/.test(dom().status ?? "") && dom().status.includes(sid) && !dom().status.includes("집계 전"), 100),
       "상태 표가 안 뜨거나 비었음: " + dom().status);
+    assert.deepEqual(dom().meters, ["문맥"], "격리 검증은 API 키라 구독 한도 없이 문맥만 있어야 함: " + JSON.stringify(dom().meters));
+    assert.match(dom().foot ?? "", /^claude \d+\.\d+\.\d+/, "상태 표 맨 아래 판이 없음: " + dom().foot);
+    // 구독 한도가 없는 계정에는 줄의 게이지를 띄우지 않는다(빈 0% 게이지는 거짓말이다).
+    assert.equal(dom().gauge, false, "구독 한도가 없는데 게이지가 뜸");
+    shot("status");
     commands.push({ button: "상태" });
     assert.ok(await until(() => dom().status === null, 50), "상태 표가 안 접힘");
 
