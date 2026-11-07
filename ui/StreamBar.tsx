@@ -20,6 +20,8 @@ export type BarField = {
   title?: string;
   /** 입력바의 `/model` 처럼 선택 상자로 포커스를 옮길 때. */
   selectRef?: Ref<HTMLSelectElement>;
+  /** 줄에서만 뺀다. `/` 명령과 상태 표에는 남는다. */
+  hidden?: boolean;
 };
 
 /** 추론 수준의 이름. Claude(`effortLevel`)와 Codex(`reasoningEffort`)가 같은 낱말을 쓴다. */
@@ -85,7 +87,7 @@ export function StreamBar({
         {/* 칸이 좁으면 선택 상자만 줄을 넘긴다. 단추는 한 묶음으로 오른쪽 위에 둬야 두 칸에서 같은 자리에 선다. */}
         <div className="stream-bar-fields">
         {[model, effort, permission].map((f) =>
-          f ? (
+          f && !f.hidden ? (
             <label key={f.label}>
               <span>{f.label}</span>
               <select

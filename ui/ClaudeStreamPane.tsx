@@ -271,6 +271,9 @@ export function ClaudeStreamPane({
       aria: "Claude 권한",
       value: st.mode ?? "default",
       disabled: !alive,
+      // 늘 묻지 않기로 쓰는데 줄 한 칸을 차지한다(11월 7일 사용자). 그때만 줄에서 뺀다 — claude 가 스스로 계획 모드로
+      // 들어가거나 `/permissions` 로 바꾸면 다시 보여야 평소와 다르다는 것을 안다. 초기화 답 전에도 빼 두어 깜박이지 않게 한다.
+      hidden: !st.mode || st.mode === "bypassPermissions",
       choices: MODES.map(([value, label]) => ({ value, label })),
       onChange: (v) => setting({ subtype: "set_permission_mode", mode: v }, (s) => ({ ...s, mode: v })),
     },

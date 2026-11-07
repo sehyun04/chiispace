@@ -309,13 +309,24 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
   }
 
   // 7. 다시 켜면 그 칸은 같은 대화로 이어 열린다. 터미널 없이.
+  // 이번에는 사용자처럼 설정의 기본 모드를 묻지 않기로 둔다. 도중에 묻지 않기로 바꾸는 것은 claude 가 거절한다 —
+  // 묻지 않기로 시작한 세션만 그 모드를 쓸 수 있다.
+  writeFileSync(path.join(home, "settings.json"), JSON.stringify({ permissions: { defaultMode: "bypassPermissions" } }));
   app = launch();
   try {
     assert.ok(await until(() => dom().over && dom().mine.some(t => t.includes("STREAM_HELLO")), 300), "다시 켰는데 지난 대화가 안 보임: " + JSON.stringify(dom()));
     assert.equal(dom().xterm, false);
     assert.equal(dom().title, "STREAM_HELLO 첫 말", "칸 이름이 안 남음");
     assert.ok(await until(() => !dom().inputDisabled, 200), "이어 연 claude 가 안 켜짐");
+    // 묻지 않기일 때는 줄에서 권한 칸을 뺀다(늘 그 모드로 쓰는 사용자에게는 자리만 차지한다). 상태 표와 `/permissions` 에는
+    // 남고, 다른 모드가 되면 줄에 다시 보인다.
+    assert.ok(await until(() => JSON.stringify(dom().bar) === JSON.stringify(["모델", "추론"]), 100), "묻지 않기인데 권한 칸이 줄에 남음: " + JSON.stringify(dom().bar));
+    commands.push({ button: "상태" });
+    assert.ok(await until(() => /권한묻지 않기/.test(dom().status ?? ""), 50), "상태 표에 권한이 안 남음: " + dom().status);
     shot("resumed");
+    commands.push({ button: "상태" });
+    commands.push({ send: "/permissions default" });
+    assert.ok(await until(() => JSON.stringify(dom().bar) === JSON.stringify(["모델", "추론", "권한"]), 100), "다른 모드인데 권한 칸이 안 돌아옴: " + JSON.stringify(dom().bar));
     commands.push({ send: "STREAM_AGAIN 이어서" });
     assert.ok(await until(() => requests.some(r => r.mark === "STREAM_AGAIN"), 300), "이어 연 대화로 요청이 안 감");
     assert.ok(requests.find(r => r.mark === "STREAM_AGAIN").n > 4, "이어 열었는데 지난 말이 안 실림: " + JSON.stringify(requests.slice(-2)));
