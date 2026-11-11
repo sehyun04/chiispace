@@ -1,8 +1,15 @@
 /** 대화창의 입력바. 쓴 말은 칸이 준 통로(`Transport`)로 보낸다. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { readPicture, type Picture } from "./images";
 import { choose, complete, paletteView, type PaletteAction, type PaletteChoice, type PaletteCommand, type PaletteView } from "./palette";
 
-export type Transport = { send: (text: string) => Promise<void>; interrupt: () => void; isCommand?: (text: string) => boolean };
+export type Transport = {
+  send: (text: string, images?: Picture[]) => Promise<void>;
+  interrupt: () => void;
+  isCommand?: (text: string) => boolean;
+  /** 그림을 받는 통로. 없으면 붙여넣기는 글만 받고 그림 단추도 안 띄운다. */
+  images?: boolean;
+};
 
 type ChatWin = { __chats?: Record<string, HTMLTextAreaElement | null> };
 
@@ -22,7 +29,7 @@ export function Composer({
   paneId: string;
   live: boolean;
   busy: boolean;
-  onSent: (text: string) => () => void;
+  onSent: (text: string, images?: string[]) => () => void;
   agent: "claude" | "codex";
   waiting: boolean;
   transport: Transport;
@@ -32,6 +39,11 @@ export function Composer({
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [pics, setPics] = useState<Picture[]>([]);
+  // 읽는 중인 그림 수. 다 읽기 전에 보내면 그 그림만 빠진 채 간다.
+  const [reading, setReading] = useState(0);
+  const [picNote, setPicNote] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [pick, setPick] = useState(0);
   // Esc 로 닫은 그때의 글. 글이 바뀌면 다시 뜬다 — 닫은 채로 박히면 다음 명령도 못 고른다.
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -89,23 +101,41 @@ export function Composer({
 
   const interrupt = transport.interrupt;
 
-  const send = (raw = text) => {
+  const attach = (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (!images.length) return;
+    setPicNote(null);
+    setReading((n) => n + images.length);
+    for (const f of images) {
+      readPicture(f).then(
+        (p) => setPics((ps) => [...ps, p]),
+        () => setPicNote(`그림을 못 읽었다${f.name ? ` — ${f.name}` : ""}`),
+      ).finally(() => setReading((n) => n - 1));
+    }
+  };
+
+  // 명령 목록에서 고른 명령은 그림 없이 보낸다. 붙여 둔 그림은 다음에 쓸 말과 같이 간다.
+  const send = (raw = text, withPics = true) => {
     const t = raw.trim();
-    if (!t || !live || waiting) return;
+    const imgs = withPics ? pics : [];
+    if ((!t && !imgs.length) || !live || waiting || (imgs.length && reading)) return;
     setText("");
+    if (imgs.length) setPics([]);
+    setPicNote(null);
     // 명령은 대화 파일에 내 말이 아니라 명령 줄로 적힌다. "보내는 중" 말풍선을 띄우면 짝이 안 맞아 오래 남는다.
-    const undo = transport.isCommand?.(t) ? () => {} : onSent(t);
-    // 못 보냈으면 쓴 말을 되살린다. 사라지면 다시 칠 방법이 없다.
-    transport.send(t).catch(() => {
+    const undo = transport.isCommand?.(t) && !imgs.length ? () => {} : onSent(t, imgs.map((p) => p.url));
+    // 못 보냈으면 쓴 말과 그림을 되살린다. 사라지면 다시 칠 방법이 없다.
+    transport.send(t, imgs.length ? imgs : undefined).catch(() => {
       undo();
-      setText((current) => (current ? `${t}\n${current}` : t));
+      if (t) setText((current) => (current ? `${t}\n${current}` : t));
+      if (imgs.length) setPics((ps) => [...imgs, ...ps]);
     });
   };
 
   const act = (a: PaletteAction | null) => {
     if (!a) return;
     if (a.kind === "fill") return setText(a.text);
-    if (a.kind === "send") return send(a.text);
+    if (a.kind === "send") return send(a.text, false);
     setText("");
     a.run();
   };
@@ -120,6 +150,56 @@ export function Composer({
           onPick={(i) => act(choose(view, i))}
         />
       )}
+      {pics.length || reading || picNote ? (
+        <div className="composer-pics" aria-label="붙인 그림">
+          {pics.map((p, i) => (
+            <span className="composer-pic" key={i}>
+              <img src={p.url} alt="" />
+              <button type="button" aria-label="그림 빼기" title="빼기" onMouseDown={(e) => e.preventDefault()} onClick={() => setPics((ps) => ps.filter((x) => x !== p))}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </span>
+          ))}
+          {reading ? <span className="composer-pics-note">그림 읽는 중</span> : null}
+          {picNote ? <span className="composer-pics-note bad">{picNote}</span> : null}
+        </div>
+      ) : null}
+      {transport.images ? (
+        <>
+          <button
+            type="button"
+            className="composer-pick"
+            aria-label="그림 붙이기"
+            title="그림 붙이기 · 캡처한 그림은 Ctrl+V 로도 붙는다"
+            disabled={!live || waiting}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M16 5h6" />
+              <path d="M19 2v6" />
+              <path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" />
+              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+              <circle cx="9" cy="9" r="2" />
+            </svg>
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              attach([...(e.target.files ?? [])]);
+              e.target.value = "";
+              ref.current?.focus();
+            }}
+          />
+        </>
+      ) : null}
       <textarea
         ref={ref}
         rows={1}
@@ -127,6 +207,14 @@ export function Composer({
         disabled={!live || waiting}
         placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : unavailable ?? `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => {
+          if (!transport.images) return;
+          const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+          // 엑셀·워드에서 복사하면 글과 함께 그 모양을 찍은 그림도 온다. 글이 있으면 글이 본뜻이다.
+          if (!files.length || e.clipboardData.getData("text/plain")) return;
+          e.preventDefault();
+          attach(files);
+        }}
         onKeyDown={(e) => {
           // 조합 중인 Enter 는 글자를 확정하는 키지 보내는 키가 아니다.
           if (e.nativeEvent.isComposing || e.keyCode === 229) return;

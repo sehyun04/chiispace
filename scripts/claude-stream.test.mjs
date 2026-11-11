@@ -160,3 +160,13 @@ test("다시 묻지 않기 갈래와 칸 이름", () => {
   assert.equal(Array.from(titleFrom("가".repeat(60))).length, 41);
   assert.deepEqual(userLine("hi").message, { role: "user", content: "hi" });
 });
+
+test("그림을 붙인 말은 글 다음에 그림 블록을 단다", () => {
+  // 터미널 claude 가 대화 파일에 적는 순서(글 다음 그림)와 같아야 다시 그릴 때 한 말풍선으로 합쳐진다.
+  const pic = { mediaType: "image/png", data: "AAA", url: "data:image/png;base64,AAA" };
+  const block = { type: "image", source: { type: "base64", media_type: "image/png", data: "AAA" } };
+  assert.deepEqual(userLine("이 화면", [pic]).message.content, [{ type: "text", text: "이 화면" }, block]);
+  // 그림만 보내면 빈 글 블록을 넣지 않는다(API 가 빈 글을 거절한다).
+  assert.deepEqual(userLine("", [pic, pic]).message.content, [block, block]);
+  assert.equal(userLine("글만", []).message.content, "글만");
+});

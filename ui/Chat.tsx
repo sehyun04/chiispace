@@ -64,7 +64,7 @@ type ChatProps = {
   content?: Item[];
 };
 
-type Sent = { text: string; mine: number; at: number };
+type Sent = { text: string; images?: string[]; mine: number; at: number };
 
 export function Chat({
   agent = "claude",
@@ -219,8 +219,8 @@ export function Chat({
       return keep.length === s.length ? s : keep;
     });
   }, [mineTexts]);
-  const onSent = (text: string) => {
-    const pending = { text, mine: mineTexts.length, at: Date.now() };
+  const onSent = (text: string, images?: string[]) => {
+    const pending = { text, images, mine: mineTexts.length, at: Date.now() };
     setSent((s) => [...s, pending]);
     window.setTimeout(() => loadRef.current(), 400);
     return () => setSent(s => s.filter(p => p !== pending));
@@ -280,7 +280,8 @@ export function Chat({
                   <span className="msg-tag">보내는 중</span>
                   <div className="msg-row">
                     <div className="bubble">
-                      <span style={{ whiteSpace: "pre-wrap" }}>{p.text}</span>
+                      {p.images?.map((src, j) => <img key={j} className="msg-img" src={src} alt="" />)}
+                      {p.text ? <span style={{ whiteSpace: "pre-wrap" }}>{p.text}</span> : null}
                     </div>
                   </div>
                 </div>

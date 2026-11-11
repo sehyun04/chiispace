@@ -199,8 +199,9 @@ export function ClaudeStreamPane({
     () => ({
       // `/clear` 같은 명령은 대화 파일에 명령 줄로 적힌다. "보내는 중" 말풍선으로 남기면 짝이 안 맞아 오래 남는다.
       isCommand: (text) => /^\/[\w-]+/.test(text.trim()),
-      send: async (text) => {
-        await send(userLine(text));
+      images: true,
+      send: async (text, images) => {
+        await send(userLine(text, images));
         setSt(sentStream);
         setTalked(true);
         const title = titled.current ? null : titleFrom(text);

@@ -54,6 +54,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령 (React 없음, 단위 검증) |
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
+| `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도로 줄여 base64 로 읽기(단위 검증) |
 | `ui/usage.ts`, `ui/usePlanUsage.ts` | 구독 사용 한도·문맥 게이지 값 · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/roster.tsx`, `ui/casting.ts` | 치이카와 로스터 · 누가 어느 칸을 맡는가(겹치지 않게 고르기는 단위 검증) |
 | `ui/SplitPicker.tsx` | 칸 나누기 단축키의 상대 고르기 창 |
@@ -90,6 +91,9 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   입력바 위 줄의 모델은 실제로 도는 모델 이름(예: Opus 5.5)으로 보이고, 권한 옆 게이지가 구독의 5시간 한도 중 쓴 몫을 보인다
   (claude 의 `get_usage`, 모든 Claude 칸이 같은 값). 게이지나 [상태]·`/status` 를 누르면 5시간·7일·문맥 막대와 모델·추론·권한·
   폴더·대화, claude 판·구독이 한 카드로 펴진다. API 키처럼 구독 한도가 없는 계정에는 게이지가 없다.
+  권한 칸은 묻지 않기일 때 줄에서 빠지고 다른 모드가 되면 다시 보인다.
+  그림은 입력바에 붙여 넣거나(캡처 뒤 Ctrl+V) 입력바 왼쪽 그림 단추로 고른다. 입력바 윗줄에 작게 떠서 하나씩 뺄 수 있고, 글과
+  함께(또는 그림만) 보낸다. 큰 그림은 claude 터미널판과 같은 한도(한 변 2000px·3.75MB)로 줄여 보낸다. 끌어 놓기는 아직 안 된다.
 - **Codex도 터미널 없이 연다.** 설치된 CLI의 로컬 `app-server`를 칸마다 독립 실행한다. 새 훅을 주입하거나
   `/hooks` 신뢰를 요구하지 않는다. 답변은 실시간으로 흐르고 승인·질문은 카드로, 모델·추론·승인은 입력바 위에서
   고른다. `/model`은 모델 선택으로, `/status`·`/permissions`는 상태 표시로 연결된다.

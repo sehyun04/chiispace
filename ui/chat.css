@@ -776,6 +776,79 @@
   }
 }
 
+/* 붙인 그림은 입력바 윗줄에 작게 — 보내기 전에 무엇이 붙었는지 보고 잘못 붙인 것은 뺀다. */
+.composer {
+  flex-wrap: wrap;
+}
+.composer-pics {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 2px;
+}
+.composer-pic {
+  position: relative;
+  display: block;
+}
+.composer-pic img {
+  display: block;
+  height: 52px;
+  max-width: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.composer-pic button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink-2);
+  color: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.composer-pic button:hover {
+  background: var(--ink);
+}
+.composer-pics-note {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.composer-pics-note.bad {
+  color: var(--bad);
+}
+.composer-pick {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer-pick:hover:not(:disabled) {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.composer-pick:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .composer-stop {
   flex: none;
   width: 32px;

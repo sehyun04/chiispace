@@ -154,7 +154,7 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
 
 ### 남은 범위
 
-- 터미널 없는 칸의 칸 사이 협업, 이미지 입력.
+- 터미널 없는 칸의 칸 사이 협업, Codex 대화창의 그림 넣기(Claude 대화창은 11월 11일 붙여넣기·단추로 넣었다 — 끌어 놓기는 창 설정 문제로 뺐다, 작업 정리 40절).
   Codex의 켤 때 자동 전환은 계속 보류한다. 역방향 수동 전환의 제한은 위와 같다. `/review`·`/fork`는 별도 사용자 선택을 기다린다 —
   [Codex 대화창 남은 인계](docs/HANDOFF-CODEX-PARITY.md). 완료한 전환·자식 화면·명령은 WORKLOG 31~36절을 본다.
   `/config`·`/permissions`·`/memory`·`/export` 등 남은 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를
@@ -436,6 +436,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/CodexSubagents.tsx` | Codex 자식 진행 줄·서버가 알려 준 자식 대화 읽기. 행·상세 틀은 Claude와 공유 |
 | `ui/codex-commands.ts` | Codex의 실제 연결한 명령 목록·일반 턴 요청·조회 결과 표시 |
 | `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·게이지·폴더·상태 카드 · 폴더 칩(`fs_dirs`) |
+| `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
 | `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |

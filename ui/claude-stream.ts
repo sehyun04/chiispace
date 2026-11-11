@@ -4,6 +4,7 @@
  *  주고받는다. 대화 내용 자체는 여기서 다루지 않는다 — 말풍선은 대화 파일이, 쓰이는 중인 답은
  *  프록시가 그린다(Chat.tsx). 여기서는 대화창이 화면 대신 받아야 하는 것만 모은다:
  *  권한 묻기, 선택지 질문, 일하는 중인지, 모델과 권한 모드. React 없이 단위 검증한다. */
+import { imageBlock, type Picture } from "./images.ts";
 
 export type Suggestion = Record<string, unknown>;
 
@@ -216,9 +217,10 @@ let seq = 0;
 const nextId = () => `chiispace-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
 export const initLine = () => ({ type: "control_request", request_id: INIT_ID, request: { subtype: "initialize" } });
-export const userLine = (text: string) => ({
+/** 그림이 있으면 글 다음에 그림을 둔다. 터미널 claude 가 대화 파일에 적는 순서와 같아야 다시 그릴 때 한 말풍선이 된다(transcript.ts). */
+export const userLine = (text: string, images: Picture[] = []) => ({
   type: "user",
-  message: { role: "user", content: text },
+  message: { role: "user", content: images.length ? [...(text ? [{ type: "text", text }] : []), ...images.map(imageBlock)] : text },
   parent_tool_use_id: null,
   session_id: "",
 });

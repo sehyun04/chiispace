@@ -59,10 +59,16 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
       const message = { id: "msg_" + randomUUID().slice(0, 8), type: "message", role: "assistant", model: j.model ?? "m", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5, output_tokens: 1 } };
       if (!j.stream) { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...message, content: [{ type: "text", text: "제목" }], stop_reason: "end_turn" })); return; }
       // claude 는 사용자 말 뒤에 부가 블록을 덧붙여 보낸다. 가장 늦게 나온 표시로 가른다.
-      const marks = ["STREAM_HELLO", "STREAM_BASH", "STREAM_DENY", "STREAM_ASK", "STREAM_SLOW", "STREAM_MODEL", "STREAM_AGAIN", "STREAM_CLEARED", "STREAM_EFFORT", "STREAM_FOLDER"];
+      const marks = ["STREAM_HELLO", "STREAM_BASH", "STREAM_DENY", "STREAM_ASK", "STREAM_SLOW", "STREAM_MODEL", "STREAM_AGAIN", "STREAM_CLEARED", "STREAM_EFFORT", "STREAM_FOLDER", "STREAM_IMAGE"];
       const [mark, at] = marks.map(k => [k, all.lastIndexOf(k)]).sort((x, y) => y[1] - x[1])[0];
       const afterTool = all.lastIndexOf("tool_result") > at;
-      if (at >= 0) requests.push({ mark, afterTool, model: j.model, n: (j.messages ?? []).length, hello: all.includes("STREAM_HELLO"), effort: j.output_config?.effort });
+      // 마지막 사용자 말에 실린 그림. PNG 는 머리(IHDR)에서 크기를 읽는다 — 앱이 한도로 줄였는지 본다.
+      const lastUser = [...(j.messages ?? [])].reverse().find(m => m.role === "user");
+      const images = (Array.isArray(lastUser?.content) ? lastUser.content : []).filter(b => b.type === "image").map(b => {
+        const buf = Buffer.from(b.source?.data ?? "", "base64");
+        return buf.length < 24 ? { type: b.source?.media_type } : { type: b.source?.media_type, width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+      });
+      if (at >= 0) requests.push({ mark, afterTool, model: j.model, n: (j.messages ?? []).length, hello: all.includes("STREAM_HELLO"), effort: j.output_config?.effort, images });
       res.writeHead(200, { "content-type": "text/event-stream" });
       sse(res, "message_start", { message });
       const text = async (parts, hold) => {
@@ -140,6 +146,9 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
         chip: slot?.querySelector('.pane-head .chip')?.textContent ?? null,
         palette: [...(over?.querySelectorAll('.palette-row') ?? [])].map(e => e.textContent),
         value: input?.value ?? null,
+        pics: over?.querySelectorAll('.composer-pic').length ?? 0,
+        picButton: !!over?.querySelector('.composer-pick'),
+        mineImages: over?.querySelectorAll('.msg.mine:not(.sending) .msg-img').length ?? 0,
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
@@ -166,6 +175,18 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
           if (sel) { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, c.effort); sel.dispatchEvent(new Event('change', { bubbles: true })); }
         }
         if (c.button) [...(over?.querySelectorAll('.stream-bar button') ?? [])].find(b => b.textContent === c.button)?.click();
+        // 붙여넣기·그림 단추는 앱 안의 이벤트로 흉내 낸다(OS 클립보드·마우스를 쓰지 않는다). 그림은 캔버스로 만든다.
+        if ((c.paste || c.pick) && input) {
+          const o = c.paste ?? c.pick;
+          const cv = document.createElement('canvas'); cv.width = o.width; cv.height = o.height;
+          const g = cv.getContext('2d'); g.fillStyle = '#6fb7e0'; g.fillRect(0, 0, o.width, o.height);
+          const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+          const dt = new DataTransfer();
+          dt.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+          if (o.text) dt.setData('text/plain', o.text);
+          if (c.paste) input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+          else { const f = over.querySelector('.composer input[type=file]'); f.files = dt.files; f.dispatchEvent(new Event('change', { bubbles: true })); }
+        }
       }
     } finally { pending = false; }
   }, 100); return 'isolated stream test'; })()`;
@@ -225,6 +246,28 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.equal(dom().title, "STREAM_HELLO 첫 말", "첫 말이 칸 이름이 안 됨");
     const file = path.join(home, "projects", project.replace(/[^a-zA-Z0-9]/g, "-"), sid + ".jsonl");
     assert.ok(existsSync(file), "앱이 정한 id 로 대화 파일이 안 생김: " + file);
+
+    // 1-1. 그림: 붙여 넣거나 단추로 고르면 입력바에 미리보기가 뜨고 글과 함께 간다.
+    // 큰 그림은 claude 터미널판의 한도(한 변 2000)로 줄여 보낸다 — 그림이 20장을 넘는 대화에서 API 가 통째로 거절하지 않게.
+    assert.ok(dom().picButton, "그림 단추가 없음");
+    commands.push({ paste: { width: 3000, height: 1000 } });
+    assert.ok(await until(() => dom().pics === 1, 50), "붙여 넣은 그림이 입력바에 안 뜸: " + JSON.stringify(dom()));
+    // 엑셀처럼 글과 그림이 같이 오는 복사는 글이 본뜻이라 그림을 붙이지 않는다.
+    commands.push({ paste: { width: 40, height: 40, text: "셀 값" } });
+    await delay(800);
+    assert.equal(dom().pics, 1, "글과 같이 온 그림까지 붙음");
+    commands.push({ pick: { width: 40, height: 40 } });
+    assert.ok(await until(() => dom().pics === 2, 50), "단추로 고른 그림이 안 붙음");
+    commands.push({ click: ".composer-pic:nth-child(2) button" });
+    assert.ok(await until(() => dom().pics === 1, 50), "그림 빼기가 안 됨");
+    shot("image-attached");
+    commands.push({ send: "STREAM_IMAGE 이 그림 봐" });
+    assert.ok(await until(() => requests.some(r => r.mark === "STREAM_IMAGE"), 300), "그림 붙인 말이 안 감");
+    assert.deepEqual(requests.find(r => r.mark === "STREAM_IMAGE").images, [{ type: "image/png", width: 2000, height: 667 }],
+      "그림이 안 실렸거나 안 줄었음: " + JSON.stringify(requests.find(r => r.mark === "STREAM_IMAGE")));
+    assert.ok(await until(() => dom().pics === 0 && dom().mineImages === 1 && dom().theirs.some(t => t.includes("STREAM_IMAGE_REPLY")), 300),
+      "보낸 그림이 대화에 안 남음: " + JSON.stringify(dom()));
+    shot("image-sent");
 
     // 2. 권한 묻기가 카드로 온다. 허락하면 실제로 실행된다.
     commands.push({ send: "STREAM_BASH 폴더 만들어" });
