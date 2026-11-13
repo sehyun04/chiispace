@@ -39,6 +39,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/stream-session.ts` | 터미널 없는 Claude·Codex 칸의 저장 구분·빈 대화 복원 경계 |
 | `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
 | `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
+| `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기 · `/export` 저장(새 파일만) |
 | `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
@@ -54,6 +55,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/Chat.tsx`, `ui/ChatRows.tsx`, `ui/Composer.tsx` | 대화창 — 대화 읽기·실시간 답 · 말풍선과 카드 · 입력바 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄의 모델·추론·권한, claude 가 준 명령 (React 없음, 단위 검증) |
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
+| `ui/claude-menus.ts` | Claude 대화창의 `/memory`·`/copy`·`/export` 값 다루기(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도로 줄여 base64 로 읽기(단위 검증) |
 | `ui/usage.ts`, `ui/usePlanUsage.ts` | 구독 사용 한도·문맥 게이지 값 · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/roster.tsx`, `ui/casting.ts` | 치이카와 로스터 · 누가 어느 칸을 맡는가(겹치지 않게 고르기는 단위 검증) |
@@ -94,6 +96,9 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   권한 칸은 묻지 않기일 때 줄에서 빠지고 다른 모드가 되면 다시 보인다.
   그림은 입력바에 붙여 넣거나(캡처 뒤 Ctrl+V) 입력바 왼쪽 그림 단추로 고른다. 입력바 윗줄에 작게 떠서 하나씩 뺄 수 있고, 글과
   함께(또는 그림만) 보낸다. 큰 그림은 claude 터미널판과 같은 한도(한 변 2000px·3.75MB)로 줄여 보낸다. 끌어 놓기는 아직 안 된다.
+  `claude -p` 가 받지 않는 TUI 명령 셋은 앱이 한다: `/copy`(마지막 답 복사), `/export`(대화를 마크다운으로 클립보드에, 또는 칸 폴더의
+  `날짜-시각-첫 말.md` 새 파일로 — 있는 파일은 덮지 않는다), `/memory`(claude 가 이 대화에 불러온 CLAUDE.md 들을 골라 기본 편집기로 열기).
+  `/mcp`·`/context`·`/usage` 는 claude 가 직접 받아 답이 "출력" 카드로 남는다.
 - **Codex도 터미널 없이 연다.** 설치된 CLI의 로컬 `app-server`를 칸마다 독립 실행한다. 새 훅을 주입하거나
   `/hooks` 신뢰를 요구하지 않는다. 답변은 실시간으로 흐르고 승인·질문은 카드로, 모델·추론·승인은 입력바 위에서
   고른다. `/model`은 모델 선택으로, `/status`·`/permissions`는 상태 표시로 연결된다.
@@ -335,6 +340,10 @@ node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검�
 ```
 
 아래는 검증마다 무엇을 보는지와, 환경 변수를 손으로 줄 때의 방법이다.
+
+클립보드·편집기처럼 사용자 것을 건드리는 명령은 실제로 부르지 않는다. 프로브가 앱 명령이 지나는 IPC 요청(`fetch`)을
+가로채 적어 두기만 한다(`chat-stream`). `__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는
+없는 파일을 여는 시험 호출로 먼저 본다 — 못 가로채도 그 호출은 앱이 거절하고 끝나므로, 확인된 뒤에만 클립보드 단계로 간다.
 
 세션 선택 회귀 테스트는 `npm test`, Rust 검증은
 `cargo test --manifest-path src-tauri/Cargo.toml --release --features custom-protocol`로 돌린다.

@@ -157,8 +157,12 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
 - 터미널 없는 칸의 칸 사이 협업, Codex 대화창의 그림 넣기(Claude 대화창은 11월 11일 붙여넣기·단추로 넣었다 — 끌어 놓기는 창 설정 문제로 뺐다, 작업 정리 40절).
   Codex의 켤 때 자동 전환은 계속 보류한다. 역방향 수동 전환의 제한은 위와 같다. `/review`·`/fork`는 별도 사용자 선택을 기다린다 —
   [Codex 대화창 남은 인계](docs/HANDOFF-CODEX-PARITY.md). 완료한 전환·자식 화면·명령은 WORKLOG 31~36절을 본다.
-  `/config`·`/permissions`·`/memory`·`/export` 등 남은 TUI 전용 메뉴는 대화창에서 지원하지 않는다 — 머리줄 [터미널]로 같은 대화를
-  터미널에서 연다. 이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
+  Claude 대화창: `/memory`·`/export`·`/copy` 는 11월 13일 앱이 만들었다(작업 정리 41절). `/mcp`·`/context`·`/usage`·`/config 키=값` 은
+  claude 2.1.323 의 `-p` 가 직접 받아 글로 답하므로 앱이 만들지 않는다. `/agents` 는 claude 에서 없어졌다.
+  `/memory` 목록은 claude 가 준 `get_context_usage` 의 `memoryFiles` 만 쓴다 — 앱이 메모리 파일 경로를 짐작하지 마라.
+  `/export` 파일은 칸 폴더의 새 `.md` 로만 쓰고 있는 파일을 덮지 않는다(`claude_menus.rs`).
+  남은 TUI 전용 메뉴(`/rewind`·`/hooks`·`/add-dir`·`/plugin` 등)는 머리줄 [터미널]로 같은 대화를 터미널에서 연다.
+  이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
   로그인은 앱 안에 만들지 않는다 — 브라우저 인증을 앱이 받으면 인증 정보를 앱이 다뤄야 한다. `/login` 은 새 탭의 터미널에서
   CLI 의 로그인(`claude auth login`·`codex login`)을 돌린다.
 - 실모델 자연어 위임, Claude 팀 연동, 에이전트 자동 생성·지속 작업은 별도 범위다.
@@ -408,6 +412,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/lib.rs` | PTY ↔ 웹뷰 다리, pane 상태, 검증 손잡이 |
 | `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
 | `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
+| `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기(있는 `.md` 만) · `/export` 저장(칸 폴더의 새 `.md` 만, 덮지 않음) |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
 | `src-tauri/src/codex_switch.rs` | 터미널 Codex의 새 종료 요약으로 현재 ID 확인·대화창 복귀 |
@@ -436,6 +441,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/CodexSubagents.tsx` | Codex 자식 진행 줄·서버가 알려 준 자식 대화 읽기. 행·상세 틀은 Claude와 공유 |
 | `ui/codex-commands.ts` | Codex의 실제 연결한 명령 목록·일반 턴 요청·조회 결과 표시 |
 | `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·게이지·폴더·상태 카드 · 폴더 칩(`fs_dirs`) |
+| `ui/claude-menus.ts` | Claude 대화창의 `/memory` 목록·`/copy` 마지막 답·`/export` 마크다운과 파일 이름(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
 | `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |

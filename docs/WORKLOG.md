@@ -1392,6 +1392,37 @@ CLAUDE.md의 현재 상태·코드 맵과 이 인계를 갱신하고, HANDOFF-CO
 그림 → 둘, 하나 빼기 → 하나, 보내면 가짜 API 서버가 받은 마지막 사용자 말에 2000×667 PNG 한 장, 대화 파일 말풍선에 그림이 남는다.
 실제 클립보드·실모델로 보낸 그림은 사용자 실사용 확인이 남는다.
 
+## 41. 11월 13일 추가: Claude 대화창의 `/memory`·`/export`·`/copy`
+
+"다음 개선사항"으로 앞서 제안한 TUI 메뉴 옮기기를 했다. 먼저 격리 claude 2.1.323(가짜 키·가짜 서버, 모델 호출 없음)에 명령을
+하나씩 보내 `-p` 에서 무엇이 오는지 쟀다. 11월 11일 검토에서 `/mcp`·`/agents` 도 터미널 전용이라고 한 것은 틀렸다.
+
+| 명령 | `claude -p` 에서 |
+|---|---|
+| `/mcp` | 서버 목록을 글로 주고 `reconnect·enable·disable` 도 받는다. 대화 파일에 `system/local_command` 로 남아 "출력" 카드로 보인다 |
+| `/agents` | "The /agents wizard has been removed" — claude 에서 없어졌다 |
+| `/context`·`/usage`·`/config 키=값` | 받는다 |
+| `/memory`·`/export` | "isn't available in this environment" |
+| `/copy` | 초기화 답의 명령 목록에 없다 |
+
+그래서 앱은 마지막 셋만 만든다(`ui/claude-menus.ts`, `src-tauri/src/claude_menus.rs`).
+
+- **`/memory`.** 목록은 claude 의 `get_context_usage` 답 `memoryFiles`(경로·종류)다 — claude 가 이 대화에 실제로 불러온 파일이라
+  앱이 `~/.claude/CLAUDE.md` 같은 경로를 짐작하지 않는다. 고르면 기본 편집기로 연다(TUI 도 편집기로 연다). Rust 쪽은 있는 `.md`
+  파일만 연다. 불러온 것이 없으면 `/init` 을 알려 준다.
+- **`/export`.** 대화창이 그리는 것과 같은 대화 파일·같은 해석(`toItems`)으로 마크다운을 만든다: 누가 말했는지 제목(나·Claude),
+  도구·질문은 한 목록, 그림은 "(그림 N장)", 명령과 그 출력, 생각·시스템 알림은 뺀다. 클립보드로, 또는 칸 폴더에
+  `날짜-시각-첫 말.md` 새 파일로 쓴다(TUI 도 작업 폴더에 쓴다). 새 파일로만 열어(`create_new`) 겹치면 `-2` 를 붙이고 덮지 않는다.
+- **`/copy`.** 맨 끝 Claude 말풍선을 클립보드로.
+- 결과는 대화 끝에 한 줄(`.stream-notice`), 실패는 기존 빨간 줄로. 다음 말을 보내면 걷는다.
+
+검증: `claude-menus.test.mjs`(새 파일: 메모리 목록·마지막 답·파일 이름·마크다운), Rust `claude_menus` 셋(이름 거르기·번호 붙이기·
+덮지 않기). 실제 앱 `chat-stream`: 명령 목록에 셋이 뜨고, `/copy` 가 마지막 답을, `/export clipboard` 가 그림·도구·명령 줄이 든
+마크다운을 클립보드로 보내고, `/export file` 이 칸 폴더에 `2026-11-13-1745-STREAM_HELLO 첫 말.md` 같은 새 파일을 쓰고, `/memory` 에
+검증 프로젝트의 CLAUDE.md 가 뜨고 고르면 그 경로를 연다. 클립보드·편집기는 사용자 것이라 IPC 요청을 가로채 적기만 했다
+(`__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없어 첫 시도는 안전장치에서 멈췄다). 실제 클립보드·편집기로 여는 것은
+사용자 실사용 확인이 남는다.
+
 ## 문서별 역할
 
 - 이 문서: 지금까지 무엇을 만들고 고쳤으며 어디까지 검증했는지 보는 누적 작업 정리.

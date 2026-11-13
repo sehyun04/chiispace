@@ -767,6 +767,10 @@
   color: var(--bad);
   background: #f8e8e4;
 }
+/* `/export` 의 저장 경로처럼 띄어쓰기 없는 긴 줄도 칸 안에서 접는다. */
+.stream-notice {
+  overflow-wrap: anywhere;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .bubble.writing .md-p:last-child::after,

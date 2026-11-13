@@ -12,12 +12,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { ChatPane, type Transport } from "./Chat";
 import { StreamBar, effortLabel, folderLabel, modelLabel } from "./StreamBar";
 import { contextMeter, limitMeter, planLabel, type Meter } from "./usage";
 import { usePlanUsage } from "./usePlanUsage";
 import { shortToolName, toolSummary } from "./tools";
 import { agentCommands, ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
+import { buildToolMap, parseJsonl, toItems, type Bubble } from "./transcript";
+import { exportMarkdown, exportName, lastAnswer, memoryChoices } from "./claude-menus";
 import {
   answerLine,
   answeredStream,
@@ -91,6 +94,8 @@ export function ClaudeStreamPane({
   const titled = useRef(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [context, setContext] = useState<Meter>();
+  // 앱이 직접 한 명령(`/copy`·`/export`·`/memory`)의 결과 한 줄. 다음 말을 보내면 걷는다.
+  const [notice, setNotice] = useState<string | null>(null);
   // 답을 기다리는 요청(설정·문맥 조회, 모델 바꾸기 …). 답이 오면 request_id 로 짝짓는다.
   const pending = useRef(new Map<string, (r: Reply) => void>());
 
@@ -202,6 +207,7 @@ export function ClaudeStreamPane({
       images: true,
       send: async (text, images) => {
         await send(userLine(text, images));
+        setNotice(null);
         setSt(sentStream);
         setTalked(true);
         const title = titled.current ? null : titleFrom(text);
@@ -319,6 +325,61 @@ export function ClaudeStreamPane({
     { name: "login", hint: "로그인 — 새 탭의 터미널에서 claude auth login", run: () => onTerminal("claude auth login", "로그인") },
     { name: "logout", hint: "로그아웃 — 새 탭의 터미널에서 claude auth logout", run: () => onTerminal("claude auth logout", "로그아웃") },
   ];
+  // 대화창이 그리는 것과 같은 대화 파일·같은 해석으로 지금 대화를 읽는다.
+  const conversation = () =>
+    invoke<string>("claude_transcript_raw", { root: cwd, id: st.session ?? session }).then((raw) => {
+      const events = parseJsonl(raw);
+      return toItems(events, buildToolMap(events));
+    });
+  const failed = (e: unknown) => {
+    setNotice(null);
+    setSt((s) => ({ ...s, error: e instanceof Error ? e.message : String(e) }));
+  };
+  const exportTo = (where?: string) =>
+    void conversation()
+      .then(async (items) => {
+        if (!items.length) throw new Error("내보낼 말이 아직 없다");
+        const first = items.find((b): b is Bubble => b.kind === "bubble" && b.role === "user" && !!b.text.trim());
+        const title = (first && titleFrom(first.text)) || undefined;
+        const text = exportMarkdown(items, { title, session: st.session ?? session, folder: folderLabel(cwd) });
+        if (where === "clipboard") {
+          await writeText(text);
+          return "대화를 클립보드에 복사했다";
+        }
+        const path = await invoke<string>("save_export", { dir: cwd, name: exportName(title), text });
+        return `대화를 저장했다 — ${folderLabel(path)}`;
+      })
+      .then(setNotice, failed);
+  const menuCommands: PaletteCommand[] = [
+    {
+      name: "copy",
+      hint: "마지막 답 복사",
+      run: () =>
+        void conversation()
+          .then((items) => {
+            const text = lastAnswer(items);
+            if (!text) throw new Error("복사할 답이 아직 없다");
+            return writeText(text);
+          })
+          .then(() => setNotice("마지막 답을 복사했다"), failed),
+    },
+    {
+      name: "export",
+      hint: "대화 내보내기 — 클립보드나 이 폴더의 마크다운 파일로",
+      choices: [
+        { value: "clipboard", label: "클립보드로 복사", hint: "마크다운" },
+        { value: "file", label: "파일로 저장", hint: `${folderLabel(cwd)} 에 날짜-첫 말.md, 있는 파일은 덮지 않는다` },
+      ],
+      run: (v) => v && exportTo(v),
+    },
+    {
+      name: "memory",
+      hint: "메모리 파일 열기 — 이 대화에 불러온 CLAUDE.md",
+      empty: "불러온 메모리 파일이 없다 — /init 으로 프로젝트 CLAUDE.md 를 만들 수 있다",
+      load: () => control({ subtype: "get_context_usage" }).then(memoryChoices),
+      run: (v) => v && void invoke("open_memory_file", { path: v }).then(() => setNotice(`편집기로 열었다 — ${v}`), failed),
+    },
+  ];
   const onNew = () =>
     void transport.send("/clear").then(() => {
       // Codex 칸과 같다 — 새 대화는 이름도 새로 시작하고, 다음 첫 말이 이름이 된다.
@@ -327,7 +388,7 @@ export function ClaudeStreamPane({
       onTitle(id, "새 대화");
     }, () => {});
   const commands = mergeCommands(
-    [...barCommands({ ...bar, onNew, busy: !alive || st.busy }), ...paneCommands(!alive || st.busy)],
+    [...barCommands({ ...bar, onNew, busy: !alive || st.busy }), ...paneCommands(!alive || st.busy), ...menuCommands],
     agentCommands(st.commands),
   );
 
@@ -341,6 +402,7 @@ export function ClaudeStreamPane({
         ),
       )}
       {st.error && <div className="note bad">{st.error}</div>}
+      {notice && <div className="note stream-notice" role="status">{notice}</div>}
       {st.exited && (
         <div className="ask stream-exit">
           <div className="ask-title">claude 가 멈췄다</div>

@@ -9,6 +9,7 @@ mod shells;
 mod workspace;
 mod git_diff;
 mod claude_files;
+mod claude_menus;
 mod bridge;
 mod collab;
 mod launch_config;
@@ -342,6 +343,8 @@ pub fn run() {
             claude_files::claude_subagents,
             claude_files::claude_subagent_raw,
             claude_files::claude_subagent_size,
+            claude_menus::open_memory_file,
+            claude_menus::save_export,
             claude_chat::claude_chat_start,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_stop,

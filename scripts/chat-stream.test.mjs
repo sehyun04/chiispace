@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +18,8 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-stream-"));
   const project = path.join(root, "project");
   mkdirSync(project);
+  // /memory 가 보일 프로젝트 메모리. claude 가 불러온 것만 목록에 오른다.
+  writeFileSync(path.join(project, "CLAUDE.md"), "# 검증 프로젝트 메모리\n");
   const home = path.join(root, "claude-state");
   mkdirSync(home);
   const protectedFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].map((id) => path.join(process.env.APPDATA, id, "session.json"));
@@ -106,7 +108,23 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
   const pathKey = Object.keys(env).find(k => k.toLowerCase() === "path");
   env[pathKey] = path.dirname(claude) + ";" + env[pathKey];
   env.CHIISPACE_PROBE_MS = "500";
-  env.CHIISPACE_PROBE = `(() => { let pending = false; setInterval(async () => {
+  // 클립보드와 편집기는 사용자 것이다. 앱 명령이 지나는 IPC 요청(fetch)을 가로채 적어 두기만 한다.
+  // invoke 자체는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는 없는 파일을 여는 시험 호출로 먼저 본다(canary) —
+  // 못 가로채도 그 호출은 앱이 거절하고 끝난다.
+  env.CHIISPACE_PROBE = `(() => { let pending = false;
+  const realFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const m = /^(?:https?:[/][/]ipc[.]localhost|ipc:[/][/]localhost)[/]([^?]+)/.exec(url);
+    const cmd = m ? decodeURIComponent(m[1]) : '';
+    if (cmd === 'plugin:clipboard-manager|write_text' || cmd === 'open_memory_file') {
+      let args = {}; try { args = JSON.parse(init?.body ?? '{}'); } catch {}
+      if (cmd === 'open_memory_file') (window.__opened ??= []).push(args.path); else window.__clip = args.text ?? null;
+      return Promise.resolve(new Response('null', { status: 200, headers: { 'Tauri-Response': 'ok', 'Content-Type': 'application/json' } }));
+    }
+    return realFetch(input, init);
+  };
+  setInterval(async () => {
     if (pending) return; pending = true;
     try {
       const side = document.querySelector('.side');
@@ -149,6 +167,10 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
         pics: over?.querySelectorAll('.composer-pic').length ?? 0,
         picButton: !!over?.querySelector('.composer-pick'),
         mineImages: over?.querySelectorAll('.msg.mine:not(.sending) .msg-img').length ?? 0,
+        clip: window.__clip ?? null,
+        opened: window.__opened ?? [],
+        notice: over?.querySelector('.stream-notice')?.textContent ?? null,
+        bad: over?.querySelector('.note.bad')?.textContent ?? null,
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
@@ -175,6 +197,7 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
           if (sel) { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, c.effort); sel.dispatchEvent(new Event('change', { bubbles: true })); }
         }
         if (c.button) [...(over?.querySelectorAll('.stream-bar button') ?? [])].find(b => b.textContent === c.button)?.click();
+        if (c.canary) await window.__TAURI_INTERNALS__.invoke('open_memory_file', { path: c.canary }).catch(() => {});
         // 붙여넣기·그림 단추는 앱 안의 이벤트로 흉내 낸다(OS 클립보드·마우스를 쓰지 않는다). 그림은 캔버스로 만든다.
         if ((c.paste || c.pick) && input) {
           const o = c.paste ?? c.pick;
@@ -347,6 +370,38 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     commands.push({ send: "/status" });
     assert.ok(await until(() => dom().status === null, 50), "/status 를 다시 쳐도 안 접힘");
     assert.ok(!dom().mine.some(t => t.startsWith("/")), "명령이 말풍선으로 샘: " + JSON.stringify(dom().mine));
+
+    // TUI 에만 있던 /copy·/export·/memory. claude -p 는 /memory·/export 를 "isn't available" 로 끝내고 /copy 는 모른다.
+    const canary = path.join(root, "no-such-memory.md");
+    commands.push({ canary });
+    assert.ok(await until(() => dom().opened.includes(canary), 50), "앱 명령을 못 가로챔 — 사용자 클립보드를 건드리지 않으려고 멈춘다: " + JSON.stringify(dom().opened));
+    commands.push({ type: "/" });
+    assert.ok(await until(() => ["/copy", "/export", "/memory"].every(n => dom().palette.some(t => t.startsWith(n))), 50),
+      "명령 목록에 /copy·/export·/memory 가 없음: " + JSON.stringify(dom().palette));
+    commands.push({ send: "/copy" });
+    assert.ok(await until(() => dom().clip?.includes("STREAM_EFFORT_REPLY") && /복사했다/.test(dom().notice ?? ""), 100),
+      "/copy 가 마지막 답을 안 복사함: " + JSON.stringify({ clip: dom().clip, notice: dom().notice, bad: dom().bad }));
+    commands.push({ send: "/export clipboard" });
+    assert.ok(await until(() => /^# STREAM_HELLO 첫 말/.test(dom().clip ?? "") && /클립보드에 복사했다/.test(dom().notice ?? ""), 100),
+      "/export 가 대화를 안 복사함: " + JSON.stringify({ clip: dom().clip?.slice(0, 200), notice: dom().notice, bad: dom().bad }));
+    assert.ok(dom().clip.includes("## 나\n\nSTREAM_IMAGE 이 그림 봐\n\n(그림 1장)"), "내보낸 대화에 그림 붙인 말이 없음: " + dom().clip);
+    assert.ok(dom().clip.includes("\n- Bash: "), "내보낸 대화에 도구 줄이 없음: " + dom().clip);
+    assert.ok(dom().clip.includes("`/model sonnet`") && !dom().clip.includes("`//"), "내보낸 명령 줄 모양이 다름: " + dom().clip);
+    commands.push({ send: "/export file" });
+    assert.ok(await until(() => /저장했다/.test(dom().notice ?? ""), 100), "/export 파일 저장 안내가 없음: " + JSON.stringify({ notice: dom().notice, bad: dom().bad }));
+    const exported = readdirSync(project).filter(f => f.endsWith(".md") && f !== "CLAUDE.md");
+    assert.equal(exported.length, 1, "내보낸 파일이 하나가 아님: " + JSON.stringify(exported));
+    assert.ok(/^\d{4}-\d{2}-\d{2}-\d{4}-STREAM_HELLO 첫 말\.md$/.test(exported[0]), "내보낸 파일 이름: " + exported[0]);
+    assert.ok(readFileSync(path.join(project, exported[0]), "utf8").startsWith("# STREAM_HELLO 첫 말\n"), "내보낸 파일 내용이 다름");
+    // /memory 는 claude 가 이 대화에 불러온 메모리 파일을 보이고, 고르면 편집기로 연다.
+    commands.push({ type: "/memory " });
+    assert.ok(await until(() => dom().palette.some(t => t.includes("프로젝트 · CLAUDE.md")), 100), "/memory 목록에 프로젝트 메모리가 없음: " + JSON.stringify(dom().palette));
+    shot("palette-memory");
+    const memory = path.join(project, "CLAUDE.md");
+    commands.push({ send: "/memory " + memory });
+    assert.ok(await until(() => dom().opened.length === 2 && /편집기로 열었다/.test(dom().notice ?? ""), 100),
+      "/memory 로 고른 파일을 안 엶: " + JSON.stringify({ opened: dom().opened, notice: dom().notice, bad: dom().bad }));
+    assert.equal(dom().opened[1].replaceAll("/", "\\").toLowerCase(), memory.toLowerCase(), "다른 파일을 엶");
   } finally {
     await close(app);
   }
