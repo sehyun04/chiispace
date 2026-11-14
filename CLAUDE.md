@@ -30,6 +30,9 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   켤 때 명부 id 와 대화 파일이 둘 다 있는 터미널 Claude 칸은 이쪽으로 옮겨 연다
   ([작업 정리 21절](docs/WORKLOG.md#21-10월-9일-추가-켤-때-기존-claude-칸도-터미널-없이)).
 - **방향(사용자):** TUI 에만 있는 기능을 대화창으로 다 옮기면 대화창을 메인으로 한다. 새 기능은 대화창에 넣는다.
+- **폰 연결(11월 14일, 1단계).** 아이폰 홈 화면 앱(PWA)이 밖에서 Tailscale 사설망으로 PC 의 Claude 대화창 칸에 붙어 말하고 권한에 답한다
+  (`remote.rs`, `ui/Mobile.tsx`, [작업 정리 42절](docs/WORKLOG.md#42-11월-14일-추가-폰-연결-1단계--밖에서-아이폰으로-pc-의-claude-대화창-쓰기)).
+  PC 옆칸 맨 아래 폰 단추 → [폰 연결]. 사용자가 Tailscale 을 깔고 `tailscale serve --bg 47321` 을 한 번 돌려야 밖에서 닿는다(이 PC 에는 아직 없다).
 
 - **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 12일 22:34(`e865788`, Claude 대화창 그림 넣기 판).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
@@ -151,6 +154,13 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
 - 테스트는 별도 `CHIISPACE_STATE`·CLI 상태 폴더와 로컬 테스트 서버를 쓴다.
   사용자 대화·인증은 복제하지 않고 OS 키보드·마우스로 입력하지 않는다.
 - 칸 사이 협업은 실행별 MCP·대기열이다. 네이티브 팀 연동·실모델 위임 전체 완료로 확대하지 않는다.
+- **폰 서버(`remote.rs`)는 127.0.0.1 에만 열고 폰이 부를 수 있는 것은 `dispatch` 목록뿐이다.** 늘릴 때는 읽기만 하는지부터 본다(app-server 의
+  `permitted` 와 같은 원칙). 읽기는 PC 가 알려 준 칸의 (폴더, 대화 id)로 좁히고, 보내는 줄은 말·기다리는 권한 요청의 답·멈추기만 받는다.
+  칸 띄우기·끄기·파일 열기/쓰기·설정 바꾸기·`pty_write` 를 폰에 열지 마라 — 짝지은 토큰 하나가 곧 이 PC 의 명령 실행 권한이 된다.
+  Host·Origin 은 루프백(그 포트)과 `*.ts.net` 만 받는다. 토큰은 해시만 적는다. Tailscale 설치·로그인·`tailscale serve` 는 앱이 하지 않는다.
+  폰은 PC 칸에 붙기만 한다 — 폰이 칸을 새로 띄우거나 대화를 고르게 하지 마라(대화 고르기 규칙과 같은 이유).
+  폰 화면은 PC 대화창 부품을 그대로 쓰고 `invoke`·`listen` 만 바꿔 끼운다(`remote-shim.ts`). 폰용 부품을 따로 짜지 마라.
+  시작점은 `ui/phone-main.tsx` 다 — `mobile.tsx` 로 두면 Windows 에서 `Mobile.tsx` 와 같은 파일이다.
 
 ### 남은 범위
 
@@ -165,6 +175,8 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   이것들을 대화창으로 옮기는 것이 "대화창을 메인으로"의 남은 일이다.
   로그인은 앱 안에 만들지 않는다 — 브라우저 인증을 앱이 받으면 인증 정보를 앱이 다뤄야 한다. `/login` 은 새 탭의 터미널에서
   CLI 의 로그인(`claude auth login`·`codex login`)을 돌린다.
+- 폰 연결 2단계: 터미널 칸·Codex 칸을 폰으로, 끝남·권한 묻기 폰 알림, 폰에서 모델·권한 모드 바꾸기, 폰에서 먼저 말한 새 칸의 이름,
+  멈춘 칸 다시 켜기. 실제 아이폰·Tailscale 로는 아직 확인하지 않았다(격리 검증은 헤드리스 Edge 아이폰 크기).
 - 실모델 자연어 위임, Claude 팀 연동, 에이전트 자동 생성·지속 작업은 별도 범위다.
 - 두 앱의 정확한 동시 기동 타임아웃은 미진단이다(검증은 한 번에 하나씩 돈다). 순차 기동 통과와 구별한다.
 - 창 분리·설정·테마 전환·터미널 검색은 미구현이다.
@@ -415,6 +427,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기(있는 `.md` 만) · `/export` 저장(칸 폴더의 새 `.md` 만, 덮지 않음) |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
+| `src-tauri/src/remote.rs` | 폰 연결 서버 — 127.0.0.1 만, 짝짓기·기기 토큰(해시), 폰이 부를 수 있는 명령 목록, 알려 준 칸의 이벤트만 넘기기, 폰 화면 파일 |
 | `src-tauri/src/codex_switch.rs` | 터미널 Codex의 새 종료 요약으로 현재 ID 확인·대화창 복귀 |
 | `src-tauri/src/git_diff.rs` | `/diff`의 고정 읽기 전용 Git 경로 — tracked·untracked, 외부 diff 차단·출력 한도 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 칸의 claude API 를 그대로 넘기며 본 대화 스트림만 옆에서 읽는다 |
@@ -443,6 +456,9 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·게이지·폴더·상태 카드 · 폴더 칩(`fs_dirs`) |
 | `ui/claude-menus.ts` | Claude 대화창의 `/memory` 목록·`/copy` 마지막 답·`/export` 마크다운과 파일 이름(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
+| `ui/RemotePanel.tsx` · `ui/remote.css` | PC 쪽 [폰 연결] 창 — 켜기·번호·짝지은 폰 · 폰이 볼 칸 알리기(`useRemotePanes`) |
+| `mobile.html` · `ui/phone-main.tsx` · `ui/Mobile.tsx` · `ui/mobile.css` | 폰 화면 — 시작점 · 짝짓기·칸 목록·칸 하나(PC 대화창 부품 그대로) · 폰 얼개 |
+| `ui/remote-shim.ts` · `ui/phone.ts` | 폰에서 `invoke`·`listen` 을 폰 서버로 바꿔 끼우기(SSE) · 폰 값 다루기(단위 검증) |
 | `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |
 | `ui/transcript.ts` · `ui/tools.ts` · `ui/live.ts` | 대화 파일 평탄화 · 도구 한 줄 요약 · SSE 모으기 (React 없음, 단위 검증) |

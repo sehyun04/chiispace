@@ -1,0 +1,332 @@
+/* 폰 화면(Mobile.tsx). 대화창 자체는 chat.css 를 그대로 쓰고, 여기는 폰의 얼개와 손가락 크기만 맞춘다.
+ *
+ * 높이는 `--app-h`(보이는 높이, phone-main.tsx 가 잰다)를 쓴다. iOS 사파리는 화상 키보드가 올라와도 100dvh 를 줄이지 않아
+ * 입력바가 키보드 밑에 깔린다. 노치·홈 막대 자리는 safe-area 로 비운다. */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--ui-font);
+  font-size: 15px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* 얼굴 그림(roster.tsx). 데스크톱은 app.css 에 있는데 폰은 그 파일을 싣지 않는다. */
+.face {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.face.ph {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: var(--outline-w) solid var(--outline);
+  background: var(--card);
+  color: var(--ink-2);
+}
+.face.ph svg {
+  width: 58%;
+  height: 58%;
+}
+
+.m-app {
+  height: var(--app-h, 100dvh);
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+  background: var(--paper);
+}
+
+.m-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+}
+.m-back {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-left: -10px;
+  border-radius: 12px;
+  color: var(--ink-2);
+}
+.m-back:active {
+  background: var(--paper-2);
+}
+.m-head-face {
+  flex: none;
+  width: 34px;
+  height: 34px;
+}
+.m-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.m-title {
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 글자 색은 전부 카드 바탕(#fffdf8)에 대고 4.5 를 넘긴 값이다(theme.css). */
+.m-state.wait {
+  color: var(--me);
+  font-weight: 700;
+}
+.m-state.busy {
+  color: var(--link);
+}
+.m-state.off {
+  color: var(--bad);
+}
+
+.m-link {
+  flex: none;
+  padding: 6px 16px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  text-align: center;
+}
+
+.m-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+}
+.m-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.m-row:active {
+  background: var(--paper-2);
+}
+.m-row-face {
+  flex: none;
+  width: 42px;
+  height: 42px;
+}
+.m-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.m-row-title {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-row-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-chip {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+/* 허락을 기다리는 칸이 목록에서 먼저 눈에 들어와야 한다 — 그것 때문에 폰을 연다. */
+.m-chip.wait {
+  background: var(--sun);
+  color: var(--ink);
+}
+.m-chip.busy {
+  background: #e4f1f8;
+  color: var(--link);
+}
+.m-chip.off {
+  background: #f8e4e2;
+  color: var(--bad);
+}
+
+.m-empty {
+  margin: 0;
+  padding: 36px 24px;
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: center;
+}
+.m-bad {
+  color: var(--bad);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.m-foot {
+  flex: none;
+  padding: 6px 16px calc(8px + env(safe-area-inset-bottom));
+  text-align: center;
+}
+.m-forget {
+  padding: 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* ── 칸 하나 ── */
+
+.m-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.m-pane .chat-scroll {
+  padding: 12px max(12px, env(safe-area-inset-right)) 16px max(12px, env(safe-area-inset-left));
+}
+.m-pane .composer {
+  padding: 8px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+}
+/* iOS 는 16px 보다 작은 입력칸에 들어가면 화면을 확대한다. */
+.m-pane .composer textarea {
+  font-size: 16px;
+  padding: 9px 12px;
+}
+.m-pane .composer-pick,
+.m-pane .composer-send,
+.m-pane .composer-stop {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+/* 카드는 얼굴 자리를 비우지 않고 폭을 다 쓴다. 폰에서 38px 는 크다. */
+.m-pane .ask {
+  margin-left: 0;
+  font-size: 14px;
+}
+.m-pane .ask-row button,
+.m-pane .ask-opt {
+  min-height: 40px;
+}
+.m-pane .ask-typed {
+  font-size: 16px;
+}
+.m-pane .msg-img {
+  max-width: 100%;
+}
+
+/* ── 짝짓기 ── */
+
+.m-pair {
+  min-height: var(--app-h, 100dvh);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  text-align: center;
+}
+.m-pair-face {
+  width: 88px;
+  height: 88px;
+}
+.m-pair h1 {
+  margin: 10px 0 0;
+  font-size: 24px;
+}
+.m-pair p {
+  max-width: 300px;
+  margin: 4px 0 14px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.m-pair .m-hint {
+  margin-top: -6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.m-pair form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 280px;
+}
+.m-code {
+  padding: 12px;
+  border: 0;
+  border-radius: var(--radius);
+  outline: none;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px var(--line) inset;
+  font: inherit;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-align: center;
+}
+.m-code:focus {
+  box-shadow: 0 0 0 2px var(--sky) inset;
+}
+.m-go {
+  padding: 13px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--me);
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+}
+.m-go:disabled {
+  background: var(--paper-2);
+  color: var(--ink-3);
+}

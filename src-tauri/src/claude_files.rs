@@ -194,16 +194,24 @@ pub fn claude_transcript_raw(app: AppHandle, root: String, id: String) -> String
     session_file(&app, &root, &id).map(|p| read_tail(&p)).unwrap_or_default()
 }
 
+/// 폰이 받는 대화 원문. 파일이 자랄 때마다 통째로 다시 받으므로 휴대폰 망에서는 더 짧게 자른다(remote.rs).
+pub(crate) fn transcript_tail(app: &AppHandle, root: &str, id: &str, max: u64) -> String {
+    session_file(app, root, id).map(|p| read_tail_max(&p, max)).unwrap_or_default()
+}
+
 /// 대화 파일의 끝부분을 줄 단위로. 본 대화와 서브에이전트 대화가 같이 쓴다.
 fn read_tail(path: &std::path::Path) -> String {
+    // 긴 대화는 수십 MB 까지 간다. 통째로 웹뷰에 넘기면 그리기 전에 멎는다.
+    read_tail_max(path, 8 * 1024 * 1024)
+}
+
+fn read_tail_max(path: &std::path::Path, max: u64) -> String {
     use std::io::{BufRead, BufReader, Seek, SeekFrom};
     let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    // 긴 대화는 수십 MB 까지 간다. 통째로 웹뷰에 넘기면 그리기 전에 멎는다.
-    const TAIL: u64 = 8 * 1024 * 1024;
-    let cut = len > TAIL;
+    let cut = len > max;
     if cut {
-        let _ = f.seek(SeekFrom::Start(len - TAIL));
+        let _ = f.seek(SeekFrom::Start(len - max));
     }
     let mut r = BufReader::new(f);
     if cut {

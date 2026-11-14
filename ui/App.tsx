@@ -24,6 +24,7 @@ import { usePaneBridge } from "./bridge";
 import { bootStreams, leavesOf, readSaved, savedJson, savedSubPanes, type Tab } from "./saved";
 import { usePaneAgents } from "./usePaneAgents";
 import { useStreams } from "./useStreams";
+import { RemotePanel, useRemotePanes } from "./RemotePanel";
 import { useSubPanes } from "./useSubPanes";
 import { useFocus } from "./focus";
 import { useShortcuts } from "./useShortcuts";
@@ -349,6 +350,9 @@ export default function App() {
   }, [cur, seed]);
 
   const paneView = useMemo(() => ({ ...streams.paneView, ...subs.view }), [streams.paneView, subs.view]);
+  const [remoteOpen, setRemoteOpen] = useState(false);
+  const closeRemote = useCallback(() => setRemoteOpen(false), []);
+  useRemotePanes(booted, streams.streams, (id) => names[id] || paneTitles[id] || "", casting);
   return (
     <div className={sideOpen ? "app" : "app closed"}>
       <button
@@ -382,7 +386,9 @@ export default function App() {
         onSetRenaming={setRenaming}
         onSetCasting={setCasting}
         onCommitName={commitName}
+        onRemote={() => setRemoteOpen(true)}
       />
+      {remoteOpen && <RemotePanel onClose={closeRemote} />}
 
       <div className="main">
         {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.

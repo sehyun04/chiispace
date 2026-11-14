@@ -49,6 +49,7 @@ type Reply = { ok: boolean; body: unknown; error?: string };
 
 type LineEvent = { id: string; line: string };
 type ExitEvent = { id: string; code: number | null; error: string };
+type AnsweredEvent = { id: string; request_id: string };
 
 export function ClaudeStreamPane({
   id,
@@ -145,8 +146,12 @@ export function ClaudeStreamPane({
       setAlive(false);
       setSt((s) => ({ ...s, busy: false, prompts: [], exited: { code: e.payload.code, error: e.payload.error } }));
     });
+    // 폰(remote.rs)이 같은 칸의 권한 묻기에 답했다. 이 화면의 카드도 걷는다 — 남겨 두면 다시 눌러 엉뚱한 답이 간다.
+    const onAnswered = listen<AnsweredEvent>("claude:chat-answered", (e) => {
+      if (e.payload.id === id) setSt((s) => answeredStream(s, e.payload.request_id));
+    });
     void (async () => {
-      const offs = await Promise.all([onLine, onExit]);
+      const offs = await Promise.all([onLine, onExit, onAnswered]);
       if (!live) return offs.forEach((f) => f());
       unlisten.push(...offs);
       // 대화 파일이 있으면 이어 열고, 없으면 그 id 로 새로 시작한다.
@@ -446,7 +451,7 @@ const MODES: [string, string][] = [
   ["bypassPermissions", "묻지 않기"],
 ];
 
-function PermissionCard({
+export function PermissionCard({
   prompt,
   cwd,
   onAllow,
@@ -491,7 +496,7 @@ function PermissionCard({
 const norm = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
 const inside = (dir: string, root: string) => !!root && (norm(dir) === norm(root) || norm(dir).startsWith(norm(root) + "/"));
 
-function AskCard({
+export function AskCard({
   prompt,
   onAnswer,
   onSkip,

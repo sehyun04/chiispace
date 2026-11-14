@@ -1,0 +1,10 @@
+{
+  "name": "chiispace",
+  "short_name": "chiispace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbf5ea",
+  "theme_color": "#fbf5ea",
+  "icons": [{ "src": "/mobile-icon.png", "sizes": "180x180", "type": "image/png" }]
+}

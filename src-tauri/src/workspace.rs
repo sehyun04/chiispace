@@ -172,7 +172,7 @@ fn probe_state_file() -> Option<std::path::PathBuf> {
     Some(p)
 }
 
-fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+pub(crate) fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
     if let Some(p) = probe_state_file() {
         return Some(p);
     }

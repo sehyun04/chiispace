@@ -25,6 +25,7 @@ export function Composer({
   transport,
   commands,
   unavailable,
+  touch = false,
 }: {
   paneId: string;
   live: boolean;
@@ -36,6 +37,9 @@ export function Composer({
   /** `/` 를 치면 띄울 명령. 없으면 고르기 목록을 띄우지 않는다. */
   commands?: PaletteCommand[];
   unavailable?: string;
+  /** 손가락으로 쓰는 화면(폰). 화상 키보드의 줄바꿈 키는 줄을 바꾸고, 보내기는 단추로 한다 —
+   *  한글 조합을 끝내는 줄바꿈이 보내기로 새면 쓰던 말이 반쯤에서 나간다. */
+  touch?: boolean;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -205,7 +209,7 @@ export function Composer({
         rows={1}
         value={text}
         disabled={!live || waiting}
-        placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : unavailable ?? `${agent} 가 떠 있지 않다`}
+        placeholder={waiting ? "위의 승인·질문 카드에 답해 줘" : live && touch ? "보낼 말" : live ? `보낼 말 · Enter 보내기 · Shift+Enter 줄바꿈${commands ? " · / 명령" : ""} · 빈 칸에서 Esc 는 중단` : unavailable ?? `${agent} 가 떠 있지 않다`}
         onChange={(e) => setText(e.target.value)}
         onPaste={(e) => {
           if (!transport.images) return;
@@ -239,7 +243,7 @@ export function Composer({
               return setDismissed(text);
             }
           }
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Enter" && !e.shiftKey && !touch) {
             e.preventDefault();
             send();
           } else if (e.key === "Escape" && !text && live) {
@@ -249,6 +253,21 @@ export function Composer({
           }
         }}
       />
+      {touch && live && !waiting ? (
+        <button
+          type="button"
+          className="composer-send"
+          aria-label="보내기"
+          disabled={(!text.trim() && !pics.length) || reading > 0}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => send()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m5 12 7-7 7 7" />
+            <path d="M12 19V5" />
+          </svg>
+        </button>
+      ) : null}
       {busy && live ? (
         <button className="composer-stop" onMouseDown={(e) => e.preventDefault()} onClick={interrupt} title="중단 (Esc)">
           <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">

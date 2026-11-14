@@ -40,7 +40,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/workspace.rs` | 연 폴더 · git · 세션 파일 |
 | `src-tauri/src/claude_files.rs` | claude 명부에서 칸의 대화 id 읽기 · 대화·서브에이전트 파일 읽기 · `/resume` 의 지난 대화 목록 |
 | `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기 · `/export` 저장(새 파일만) |
-| `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 |
+| `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 · 뒤늦게 붙는 폰에 건넬 칸의 지금 상태 |
+| `src-tauri/src/remote.rs` | 폰 연결 서버 — 127.0.0.1 만, 짝짓기·기기 토큰, 폰이 부를 수 있는 명령 목록, 폰 화면 파일 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
 | `ui/App.tsx` | 얼개 — 탭 · 배치 · 세션 저장/복원을 쥐고 아래를 조립한다 |
@@ -57,6 +58,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
 | `ui/claude-menus.ts` | Claude 대화창의 `/memory`·`/copy`·`/export` 값 다루기(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도로 줄여 base64 로 읽기(단위 검증) |
+| `ui/RemotePanel.tsx` | PC 쪽 [폰 연결] 창과 폰이 볼 칸 알리기 |
+| `mobile.html`, `ui/phone-main.tsx`, `ui/Mobile.tsx`, `ui/remote-shim.ts`, `ui/phone.ts` | 폰 화면 — PC 대화창 부품을 그대로 쓰고 `invoke`·`listen` 만 폰 서버로 바꿔 끼운다 |
 | `ui/usage.ts`, `ui/usePlanUsage.ts` | 구독 사용 한도·문맥 게이지 값 · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/roster.tsx`, `ui/casting.ts` | 치이카와 로스터 · 누가 어느 칸을 맡는가(겹치지 않게 고르기는 단위 검증) |
 | `ui/SplitPicker.tsx` | 칸 나누기 단축키의 상대 고르기 창 |
@@ -111,6 +114,17 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
   그 사실이 확인된 경우에만 새 빈 대화로 연다. 기존 대화 복원 실패를 새 대화로 대신하지 않는다.
 
 터미널 칸은 터미널 그대로 쓴다. 10월 17일부터 터미널 위에 대화창을 덮지 않는다 — 대화로 보는 길은 대화창 칸 하나다.
+
+**폰으로 밖에서** — 아이폰에서 PC 에 열어 둔 Claude 대화창 칸을 보고, 말하고, 권한·질문 카드에 답한다. 폰에서 한 말은 PC 대화창에도,
+PC 에서 한 말은 폰에도 남고, 한쪽에서 답한 카드는 다른 쪽에서도 걷힌다. 폰이 칸을 새로 띄우지는 않는다(터미널 칸·Codex 칸은 아직).
+
+1. PC 와 아이폰에 Tailscale 을 깔고 같은 계정으로 로그인한다. 관리 화면에서 MagicDNS 와 HTTPS 인증서를 켠다.
+2. chiispace 옆칸 맨 아래 폰 단추 → [폰 연결] → 켜기. PC 에서 한 번 `tailscale serve --bg 47321` 을 돌린다(창에 복사 단추가 있다).
+3. 아이폰 사파리로 Tailscale 이 알려 준 PC 주소(`https://<PC 이름>.<tailnet>.ts.net`)를 열고 공유 → 홈 화면에 추가.
+4. [폰 연결]에서 짝짓기 번호를 받아 홈 화면의 chiispace 에 넣는다. 번호는 5분·한 번만 쓴다.
+
+앱의 서버는 이 PC 안(127.0.0.1)에서만 받고, 밖에서는 Tailscale 사설망을 거쳐서만 닿는다. 폰이 할 수 있는 것은 그 칸의 대화 읽기·말하기·
+권한 답하기·멈추기뿐이다. PC 가 켜져 있고 chiispace 가 떠 있어야 한다. 짝지은 폰은 [폰 연결]에서 잊을 수 있고, 잊으면 바로 끊긴다.
 
 위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 PTY Codex 훅 정리는 10월 16일 반영했다.
 
@@ -340,6 +354,9 @@ node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검�
 ```
 
 아래는 검증마다 무엇을 보는지와, 환경 변수를 손으로 줄 때의 방법이다.
+
+폰 연결(`remote-app`)은 격리 앱의 폰 서버를 빈 포트에 띄우고, 폰 역할을 둘로 나눠 본다 — Node 가 HTTP·SSE 로 짝짓기·명령·막기를,
+별도 프로필의 헤드리스 Edge(아이폰 크기, CDP)가 폰 화면을 누른다. 사용자 브라우저와 OS 입력은 쓰지 않는다. 화면 캡처는 검증 임시 폴더에 남는다.
 
 클립보드·편집기처럼 사용자 것을 건드리는 명령은 실제로 부르지 않는다. 프로브가 앱 명령이 지나는 IPC 요청(`fetch`)을
 가로채 적어 두기만 한다(`chat-stream`). `__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는

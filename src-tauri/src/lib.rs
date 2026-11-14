@@ -22,6 +22,7 @@ mod proxy;
 mod claude_chat;
 mod codex_stream;
 mod codex_switch;
+mod remote;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -310,6 +311,8 @@ pub fn run() {
             app.manage(proxy::start(app.handle()));
             bridge::start(app.handle())?;
             app.manage(launchers::install(app.path().app_cache_dir()?)?);
+            app.manage(remote::Remote::load(app.handle()));
+            remote::boot(app.handle());
             arm_autosend(app.handle());
             Ok(())
         })
@@ -348,6 +351,11 @@ pub fn run() {
             claude_chat::claude_chat_start,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_stop,
+            remote::remote_status,
+            remote::remote_switch,
+            remote::remote_new_code,
+            remote::remote_forget,
+            remote::remote_publish,
             codex_stream::codex_stream_start,
             codex_stream::codex_stream_request,
             codex_stream::codex_stream_answer,

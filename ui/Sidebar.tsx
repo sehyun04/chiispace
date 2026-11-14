@@ -50,6 +50,7 @@ export function Sidebar({
   onSetRenaming,
   onSetCasting,
   onCommitName,
+  onRemote,
 }: {
   tabs: Tab[];
   active: number;
@@ -76,6 +77,8 @@ export function Sidebar({
   onSetRenaming: (v: string | null) => void;
   onSetCasting: (v: (c: Record<string, string>) => Record<string, string>) => void;
   onCommitName: (id: string, raw: string) => void;
+  /** 폰 연결 창을 연다. */
+  onRemote?: () => void;
 }) {
   // 이름을 고치다 키로 끝냈으면 뒤따르는 blur 는 흘려보낸다. 그러지 않으면 확정이
   // 두 번 일어나 claude 에 /rename 이 두 번 날아간다.
@@ -260,14 +263,24 @@ export function Sidebar({
               ) : null}
             </div>
           ) : null}
-          <button
-            className={picker ? "newtab on" : "newtab"}
-            onClick={() => setPicker((v) => !v)}
-            title="새 대화 (Ctrl+Shift+T 는 지금 셸 그대로)"
-            aria-expanded={picker}
-          >
-            {picker ? "닫기" : "새 대화"}
-          </button>
+          <div className="side-bottom">
+            <button
+              className={picker ? "newtab on" : "newtab"}
+              onClick={() => setPicker((v) => !v)}
+              title="새 대화 (Ctrl+Shift+T 는 지금 셸 그대로)"
+              aria-expanded={picker}
+            >
+              {picker ? "닫기" : "새 대화"}
+            </button>
+            {onRemote ? (
+              <button className="side-remote" onClick={onRemote} title="폰 연결" aria-label="폰 연결">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+                  <path d="M12 18h.01" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         </div>
     </aside>
   );

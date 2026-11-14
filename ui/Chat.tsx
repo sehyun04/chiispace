@@ -62,6 +62,8 @@ type ChatProps = {
   fresh?: boolean;
   /** app-server는 파일을 거치지 않고 이력과 현재 메시지를 같은 항목으로 준다. */
   content?: Item[];
+  /** 손가락으로 쓰는 화면(폰). 입력바가 보내기 단추를 두고 줄바꿈 키로는 보내지 않는다. */
+  touch?: boolean;
 };
 
 type Sent = { text: string; images?: string[]; mine: number; at: number };
@@ -85,6 +87,7 @@ export function Chat({
   commands,
   fresh = false,
   content,
+  touch,
 }: ChatProps) {
   const direct = content !== undefined;
   const transcriptArgs = () => ({ root, id });
@@ -306,6 +309,7 @@ export function Chat({
           onSent={onSent}
           transport={transport}
           commands={commands}
+          touch={touch}
         />
       )}
     </div>
