@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,9 @@ const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
 const relayDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "relay");
 const wrangler = path.join(relayDir, "node_modules", ".bin", "wrangler.cmd");
+/** 실제로 올린 중계로 돌릴 때(`CHIISPACE_LIVE_RELAY=https://…workers.dev`). 매번 새 난수 방을 쓰고, 그 방에는 PC 비밀의 해시 하나만 남는다.
+ *  test.mjs 는 `CHIISPACE_TEST_` 로 시작하는 변수를 지우므로 이름을 따로 둔다. */
+const live = process.env.CHIISPACE_LIVE_RELAY?.trim().replace(/\/+$/, "");
 const edge = [
   path.join(process.env["ProgramFiles(x86)"] ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
   path.join(process.env.ProgramFiles ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
@@ -97,7 +101,7 @@ async function phoneBrowser(dir) {
   };
 }
 
-test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 통로로 말하기·권한 답하기, PC 와 카드 맞추기, 막기", { skip: !exe || !claude || !existsSync(wrangler), timeout: 480000 }, async () => {
+test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 통로로 말하기·권한 답하기, PC 와 카드 맞추기, 막기", { skip: !exe || !claude || (!live && !existsSync(wrangler)), timeout: 480000 }, async () => {
   // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·폰 연결 설정(remote.json 은 세션 파일 옆), 가짜 키와 가짜 Anthropic 서버,
   // 중계는 wrangler 로 이 PC 안에 띄운 것(상태 폴더도 따로). Cloudflare 계정에는 닿지 않는다.
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-remote-"));
@@ -138,14 +142,17 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
 
   // 로컬 중계.
   const relayPort = await freePort();
-  const relayBase = `http://127.0.0.1:${relayPort}`;
+  const relayBase = live ?? `http://127.0.0.1:${relayPort}`;
+  const relayUrl = new URL(relayBase);
   // .cmd 는 셸로만 뜬다. 인자를 따로 주면 Node 가 이스케이프 경고를 내므로 한 줄로 준다(경로는 우리가 만든 것뿐이다).
-  const relay = spawn(`"${wrangler}" dev --ip 127.0.0.1 --port ${relayPort} --persist-to "${path.join(root, "relay-state")}"`, {
-    cwd: relayDir,
-    shell: true,
-    windowsHide: true,
-    stdio: "ignore",
-  });
+  const relay = live
+    ? null
+    : spawn(`"${wrangler}" dev --ip 127.0.0.1 --port ${relayPort} --persist-to "${path.join(root, "relay-state")}"`, {
+        cwd: relayDir,
+        shell: true,
+        windowsHide: true,
+        stdio: "ignore",
+      });
   const room = randomBytes(16).toString("hex");
   const secret = randomBytes(32).toString("hex");
   const remoteFile = path.join(root, "remote.json");
@@ -276,9 +283,10 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   /** PC 를 흉내 내는 붙기. 웹소켓 업그레이드 요청에 비밀을 실어 보내고 상태 번호만 본다. */
   const pcUpgrade = (bearer) =>
     new Promise((resolve) => {
-      const req = http.request({
-        host: "127.0.0.1",
-        port: relayPort,
+      const req = (relayUrl.protocol === "https:" ? https : http).request({
+        host: relayUrl.hostname,
+        port: relayUrl.port || (relayUrl.protocol === "https:" ? 443 : 80),
+        servername: relayUrl.hostname,
         path: `/pc/${room}`,
         headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Authorization: `Bearer ${bearer}` },
       });
@@ -328,7 +336,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   let link = null;
   try {
     try {
-      assert.ok(await until(async () => (await fetch(relayBase + "/").then((r) => r.status, () => 0)) === 404, 300), "로컬 중계가 안 뜸");
+      assert.ok(await until(async () => (await fetch(relayBase + "/").then((r) => r.status, () => 0)) === 404, 300), "중계가 안 뜸");
       app = launch();
       // 0. 켤 때 폰 연결이 켜져 있으면 중계에 붙는다. 칸의 claude 도 뜬다.
       assert.ok(await until(() => dom().input && !dom().inputDisabled, 600), "칸의 claude 가 안 켜짐: " + JSON.stringify(dom()));
@@ -344,7 +352,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.equal(html.status, 200);
       const text = await html.text();
       assert.match(text, /<div id="root">/);
-      assert.match(html.headers.get("content-security-policy") ?? "", /connect-src 'self' wss:\/\/127\.0\.0\.1:\d+ ws:\/\/127\.0\.0\.1:\d+; frame-ancestors 'none'/);
+      assert.ok((html.headers.get("content-security-policy") ?? "").includes(`connect-src 'self' wss://${relayUrl.host} ws://${relayUrl.host}; frame-ancestors 'none'`), "화면의 CSP 가 이 중계로만 잇게 하지 않음: " + html.headers.get("content-security-policy"));
       const script = /src="\.\/(assets\/[^"]+\.js)"/.exec(text)?.[1];
       assert.ok(script, "폰 묶음 경로가 상대 경로가 아님: " + text);
       const js = await fetch(page + script);
@@ -410,8 +418,9 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       };
       const events = [];
       let status = null;
+      const statuses = [];
       let unpaired = false;
-      link = new Link({ url: wsUrl, paired, onStatus: (s) => (status = s), onEvent: (e, p) => events.push({ e, p }), onUnpaired: () => (unpaired = true) });
+      link = new Link({ url: wsUrl, paired, onStatus: (s) => statuses.push((status = s)), onEvent: (e, p) => events.push({ e, p }), onUnpaired: () => (unpaired = true) });
       link.start();
       assert.ok(await until(() => status === "open", 100), "평소 연결이 안 열림: " + status);
       assert.ok(await until(() => dom().remote?.subs?.some((t) => /붙은 화면 1/.test(t)), 50), "붙은 화면 수가 안 보임: " + JSON.stringify(dom().remote));
@@ -422,7 +431,8 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       // 5. 폰에서 말하면 PC 칸의 claude 가 받고, PC 대화창에도 그 말과 답이 남는다.
       await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서") });
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("HELLO_A_REPLY")) && dom().mine?.some((t) => t.includes("HELLO_A")), 400), "폰에서 보낸 말이 PC 칸에 안 남음: " + JSON.stringify(dom()));
-      assert.ok(events.some((x) => x.e === "chat:live" && JSON.stringify(x.p).includes("HELLO_A_REPLY")), "쓰이는 중인 답이 폰에 안 옴");
+      const seen = () => JSON.stringify({ statuses, events: Object.entries(events.reduce((n, x) => ((n[x.e] = (n[x.e] ?? 0) + 1), n), {})), wire: wire.length, live: events.filter((x) => x.e === "chat:live").map((x) => x.p.phase) });
+      assert.ok(await until(() => events.some((x) => x.e === "chat:live" && JSON.stringify(x.p).includes("HELLO_A_REPLY")), 50), "쓰이는 중인 답이 폰에 안 옴: " + seen());
       const lines = events.filter((x) => x.e === "claude:chat").map((x) => x.p.line);
       assert.ok(lines.some((l) => l.includes('"type":"result"')), "통로 줄이 폰에 안 옴");
       assert.ok(!lines.some((l) => l.startsWith('{"type":"stream_event"')), "답의 조각을 폰 망에 두 번 실음");
@@ -541,7 +551,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       if (app) await close(app);
     }
   } finally {
-    killTree(relay.pid);
+    if (relay) killTree(relay.pid);
     server.closeAllConnections();
     server.close();
   }

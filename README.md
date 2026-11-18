@@ -361,7 +361,8 @@ node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검�
 폰 연결(`remote-app`)은 `relay` 의 wrangler 로 중계를 이 PC 안에 띄우고(상태 폴더도 따로, Cloudflare 계정에 닿지 않는다) 격리 앱을 거기
 붙인다. 폰 역할은 둘이다 — Node 가 `ui/phone-link.ts` 로 짝짓기·암호 통로·막기를(중계를 지나는 날것의 줄에 평문이 없는지도 엿본다),
 별도 프로필의 헤드리스 Edge(아이폰 크기, CDP)가 폰 화면을 누른다. 사용자 브라우저와 OS 입력은 쓰지 않는다. `relay/node_modules` 가 없으면
-건너뛴다(`relay` 에서 `npm install`). 화면 캡처는 검증 임시 폴더에 남는다.
+건너뛴다(`relay` 에서 `npm install`). 화면 캡처는 검증 임시 폴더에 남는다. 실제로 올린 중계로 돌리려면
+`CHIISPACE_LIVE_RELAY=https://chiispace-relay.<이름>.workers.dev` 를 준다 — 매번 새 난수 방을 쓰고 그 방에는 PC 비밀의 해시 하나만 남는다.
 
 클립보드·편집기처럼 사용자 것을 건드리는 명령은 실제로 부르지 않는다. 프로브가 앱 명령이 지나는 IPC 요청(`fetch`)을
 가로채 적어 두기만 한다(`chat-stream`). `__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는
