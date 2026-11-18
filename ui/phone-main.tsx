@@ -1,48 +1,69 @@
-/** 폰 화면의 시작점(mobile.html). PC 앱의 폰 서버(remote.rs)가 내준다. 이름이 mobile.tsx 가 아닌 것은 Windows 에서 Mobile.tsx 와 같은 파일이 되어서다.
+/** 폰 화면의 시작점(mobile.html). 중계(relay/)를 거쳐 PC 앱이 내준다. 이름이 mobile.tsx 가 아닌 것은 Windows 에서
+ *  Mobile.tsx 와 같은 파일이 되어서다.
  *
- *  Tauri 가 없는 브라우저라 대화창 부품이 부르는 `invoke`·`listen` 을 먼저 폰 서버로 바꿔 끼운 뒤에 그린다(remote-shim.ts).
- *  기기 토큰은 이 브라우저에만 둔다. iOS 홈 화면 앱은 사파리와 저장소가 따로라 홈 화면에서 처음 열면 번호를 한 번 더 넣는다. */
+ *  Tauri 가 없는 브라우저라 대화창 부품이 부르는 `invoke`·`listen` 을 먼저 PC 로 가는 암호 통로로 바꿔 끼운 뒤에 그린다.
+ *  짝지은 키는 이 브라우저에만 둔다. iOS 홈 화면 앱은 사파리와 저장소가 따로라 홈 화면에서 처음 열면 한 번 더 짝짓는다. */
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { installRemote, type RemoteStatus } from "./remote-shim";
+import { Link, pair, socketUrl, type LinkStatus, type Paired } from "./phone-link";
+import { installRemote } from "./remote-shim";
+import { deviceName } from "./phone";
 import { Pair, Phone } from "./Mobile";
 import "./theme.css";
 import "./chat.css";
 import "./mobile.css";
 
-const KEY = "chiispace.remote.token";
-const read = () => {
+// 중계 주소는 방마다 다르다(`/r/<방>/`). 같은 중계에 방이 여럿이어도 짝지은 키가 섞이지 않게 주소로 가른다.
+const KEY = `chiispace.paired:${location.pathname}`;
+const read = (): Paired | null => {
   try {
-    return localStorage.getItem(KEY);
+    const v = JSON.parse(localStorage.getItem(KEY) ?? "null");
+    return v && typeof v.dev === "string" && v.jwk && typeof v.pc === "string" ? v : null;
   } catch {
     return null;
   }
 };
-const write = (t: string | null) => {
+const write = (p: Paired | null) => {
   try {
-    if (t) localStorage.setItem(KEY, t);
+    if (p) localStorage.setItem(KEY, JSON.stringify(p));
     else localStorage.removeItem(KEY);
   } catch {
     // 저장소를 못 쓰는 창(사생활 보호 등)이면 이번 창에서만 쓴다.
   }
 };
 
-let token = read();
-let setUi: ((s: { paired: boolean; status: RemoteStatus }) => void) | null = null;
-let ui = { paired: !!token, status: "connecting" as RemoteStatus };
+const url = socketUrl(location.href);
+let link: Link | null = null;
+let ui = { paired: false, status: "connecting" as LinkStatus };
+let setUi: ((s: typeof ui) => void) | null = null;
 const update = (patch: Partial<typeof ui>) => {
   ui = { ...ui, ...patch };
   setUi?.(ui);
 };
 
-const remote = installRemote({
-  token: () => token,
-  onUnpaired: () => {
-    token = null;
-    write(null);
-    update({ paired: false });
-  },
-  onStatus: (status) => update({ status }),
+const shim = installRemote((cmd, args) => (link ? link.invoke(cmd, args) : Promise.reject("짝지은 폰이 아니다")));
+
+function begin(p: Paired) {
+  link?.stop();
+  link = new Link({
+    url,
+    paired: p,
+    onStatus: (status) => update({ status }),
+    onEvent: shim.emit,
+    onUnpaired: () => {
+      link = null;
+      write(null);
+      update({ paired: false });
+    },
+  });
+  link.start();
+  update({ paired: true, status: "connecting" });
+}
+
+const saved = read();
+if (saved) begin(saved);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") link?.wake();
 });
 
 // iOS 사파리는 화상 키보드가 올라와도 화면 높이를 줄이지 않고 화면을 민다. 보이는 높이를 재서 입력바가 키보드 위에 남게 한다.
@@ -60,7 +81,6 @@ function Root() {
   useEffect(() => {
     setUi = set;
     set(ui);
-    if (token) remote.start();
     return () => {
       setUi = null;
     };
@@ -68,11 +88,10 @@ function Root() {
   if (!s.paired)
     return (
       <Pair
-        onToken={(t) => {
-          token = t;
-          write(t);
-          update({ paired: true, status: "connecting" });
-          remote.start();
+        connect={async (onSas) => {
+          const p = await pair(url, deviceName(navigator.userAgent), onSas);
+          write(p);
+          begin(p);
         }}
       />
     );
@@ -80,8 +99,8 @@ function Root() {
     <Phone
       status={s.status}
       onForget={() => {
-        remote.stop();
-        token = null;
+        link?.stop();
+        link = null;
         write(null);
         location.hash = "";
         update({ paired: false });

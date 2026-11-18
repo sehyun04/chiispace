@@ -117,6 +117,9 @@ body {
   font-size: 12px;
   text-align: center;
 }
+.m-link.off {
+  color: var(--bad);
+}
 
 .m-list {
   flex: 1;
@@ -292,31 +295,16 @@ body {
   color: var(--ink-2);
   font-size: 13px;
 }
-.m-pair form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 280px;
-}
-.m-code {
-  padding: 12px;
-  border: 0;
-  border-radius: var(--radius);
-  outline: none;
-  background: var(--card);
-  color: var(--ink);
-  box-shadow: 0 0 0 2px var(--line) inset;
-  font: inherit;
-  font-size: 28px;
+.m-sas {
+  margin: 4px 0 8px;
+  font-size: 40px;
   font-weight: 700;
-  letter-spacing: 0.35em;
-  text-align: center;
-}
-.m-code:focus {
-  box-shadow: 0 0 0 2px var(--sky) inset;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 .m-go {
+  width: 100%;
+  max-width: 280px;
   padding: 13px;
   border: 0;
   border-radius: var(--radius);

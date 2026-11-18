@@ -85,17 +85,81 @@
 .remote-btn.wide {
   padding: 8px 16px;
 }
-.remote-code {
+.remote small.bad {
+  color: var(--bad);
+}
+.remote-relay {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  margin-top: 10px;
+}
+.remote-relay label {
+  flex: none;
+  color: var(--ink-2);
+  font-weight: 700;
+}
+.remote-relay input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+.remote-relay input:focus {
+  box-shadow: 0 0 0 2px var(--sky) inset;
+}
+.remote-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.remote-page {
+  display: flex;
+  gap: 14px;
   margin: 12px 0 4px;
+}
+.remote-qr {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  border-radius: 8px;
+}
+.remote-page-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.remote-url {
+  max-width: 100%;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--paper);
+  font-family: var(--mono-font);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.remote-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
   padding: 12px;
   border-radius: var(--radius-sm);
   background: var(--paper);
 }
-.remote-code small {
+.remote-pair small {
   flex: 1;
+  min-width: 140px;
 }
 .remote-digits {
   font-size: 26px;
@@ -117,6 +181,10 @@
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+.remote-steps > li > code {
+  font-family: var(--mono-font);
+  font-size: 12px;
 }
 .remote-cmd code {
   flex: 1;

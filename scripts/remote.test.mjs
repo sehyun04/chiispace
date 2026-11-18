@@ -1,17 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { takeFrames, listenerTable } from "../ui/remote-shim.ts";
+import { listenerTable } from "../ui/remote-shim.ts";
 import { fromSnapshot, deviceName, folderName, paneState, paneHash, paneFromHash } from "../ui/phone.ts";
+import { b64u, unb64u, commitOf, loadKey, newKey, open, sasOf, seal, sessionKeys } from "../ui/phone-crypto.ts";
+import { socketUrl } from "../ui/phone-link.ts";
 
-test("SSE 조각은 덩이 경계에서 끊어 읽고, 덜 온 끝은 다음 조각과 잇는다", () => {
-  const a = takeFrames(': hello\n\ndata: {"event":"claude:chat","payload":{"id":"%1","line":"x"}}\n\ndata: {"event":"chat:li');
-  assert.deepEqual(a.frames, [{ event: "claude:chat", payload: { id: "%1", line: "x" } }]);
-  const b = takeFrames(a.rest + 've","payload":{"session":"s"}}\n\n: ping\n\n');
-  assert.deepEqual(b.frames, [{ event: "chat:live", payload: { session: "s" } }]);
-  assert.equal(b.rest, "");
-  // 깨진 덩이 하나가 뒤 덩이를 막지 않는다. 서버가 \r\n 으로 줘도 같다.
-  const c = takeFrames('data: {broken\r\n\r\ndata: {"event":"remote:panes","payload":null}\r\n\r\n');
-  assert.deepEqual(c.frames, [{ event: "remote:panes", payload: null }]);
+// src-tauri/src/remote_crypto.rs 의 시험과 같은 값. Node 의 crypto 로 따로 계산해 둔 것이다 — 두 쪽이 이 값을 내야 폰과 PC 가 말이 통한다.
+const V = {
+  d: "ERERERERERERERERERERERERERERERERERERERERERE",
+  x: "AhfmF_C2RDkoJ4-WmZ5pojpPLBUr321s32bluAKC1O0",
+  y: "GUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+  phonePub: "BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+  pcPub: "BNZak5d8qj0bCBhS_1ennkZfFmBXcwS66tUF3TpIWJzzUBheiVNy32Ih6joTdVfkc_3bZ1XwW9UHw8Uz_OnJEoU",
+};
+
+test("폰의 암호는 PC 와 같은 값을 낸다 — 약속·여섯 자리·방향별 키·암호문", async () => {
+  const key = await loadKey({ kty: "EC", crv: "P-256", d: V.d, x: V.x, y: V.y, ext: true });
+  assert.equal(b64u(key.pub), V.phonePub);
+  const nA = new Uint8Array(16).fill(0xaa);
+  const nB = new Uint8Array(16).fill(0xbb);
+  const pc = unb64u(V.pcPub);
+  assert.equal(b64u(await commitOf(key.pub, nA)), "E9oHB8Ni0IrtYIZSzH3yyq94cGa8u3y6TR4QKuoCHN0");
+  assert.equal(await sasOf(key.pub, pc, nA, nB), "816604");
+  const k = await sessionKeys(key.priv, pc, nA, nB, "0123456789abcdef");
+  assert.equal(Buffer.from(k.raw).toString("hex"),
+    "b798196ef38dc56fce438a6813fffcaccf4bf9745a1e62951bde0067cae5d8b1ed1393d272fddb9aae3d984867155d22423dbfa5f5d8a0cbafff03b5e881cdc5");
+  assert.equal(await seal(k.up, 0, '{"t":"invoke","i":1}'), "1ofJnyf65KeJedF6yXZxCMXDTj7pH4ypYG-SiSgiPQiNT1RH");
+  assert.equal(await open(k.down, 7, "mg5Tvypfk8JxNu1wyXT5nk9n6HzzaGUyZJk"), '{"t":"ev"}');
+  // 순번이 다르면 안 풀린다.
+  await assert.rejects(open(k.down, 8, "mg5Tvypfk8JxNu1wyXT5nk9n6HzzaGUyZJk"));
+});
+
+test("새로 만든 폰 키는 저장했다 다시 읽어도 같은 공개키다", async () => {
+  const k = await newKey();
+  assert.equal(k.pub.length, 65);
+  const again = await loadKey(JSON.parse(JSON.stringify(k.jwk)));
+  assert.equal(b64u(again.pub), b64u(k.pub));
+});
+
+test("통로 주소는 페이지 옆의 ws 다 — 중계에서는 방 아래", () => {
+  assert.equal(socketUrl("https://relay.me.workers.dev/r/0123456789abcdef0123456789abcdef/#/p/%253"), "wss://relay.me.workers.dev/r/0123456789abcdef0123456789abcdef/ws");
+  assert.equal(socketUrl("http://127.0.0.1:8787/r/ab/"), "ws://127.0.0.1:8787/r/ab/ws");
 });
 
 test("listen 이 단 귀만 그 이벤트를 받고, 뗀 귀는 받지 않는다", () => {

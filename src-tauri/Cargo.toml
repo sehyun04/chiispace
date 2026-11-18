@@ -47,11 +47,16 @@ tokio = { version = "1", features = ["net", "rt", "time", "sync"] }
 futures-util = "0.3"
 bytes = "1"
 
-# 폰 연결(remote.rs). 짝짓기 번호·기기 토큰은 OS 난수로 만들고 토큰은 해시만 적는다.
-# 대화 원문과 화면 묶음은 휴대폰 망에서 gzip 으로 줄여 보낸다. 셋 다 이미 다른 의존성이 끌고 온 판이다.
+# 폰 연결(remote.rs). PC 가 사용자의 Cloudflare 중계(relay/)에 먼저 웹소켓으로 붙고 폰도 거기로 온다 —
+# 집 PC 에 열린 포트가 없다. 폰과 PC 는 짝지을 때 P-256 키를 바꾸고 그 뒤로는 AES-GCM 암호문만 중계를 지난다
+# (remote_crypto.rs, 폰 쪽은 WebCrypto 라 곡선·암호를 거기서 받는 것으로 골랐다). 큰 원문은 암호화 전에 gzip 으로 줄인다.
 getrandom = "0.3"
 sha2 = "0.10"
 flate2 = "1"
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "std"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
+tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 
 # 터미널 엔진. 여기 소스는 우리가 갖지 않는다 — upstream(2rami/kasaterm)의
 # 크레이트를 그대로 당겨 쓴다. rev 를 박아 두는 이유: upstream main 은 활발히

@@ -1,0 +1,17 @@
+# chiispace 중계. 사용자 Cloudflare 계정에 한 번 올린다: `npx wrangler login` 뒤 `npx wrangler deploy`.
+# 무료 요금제에서 돌게 SQLite 쓰는 Durable Object 로 둔다. 대화가 지나가므로 로그를 켜지 않는다.
+name = "chiispace-relay"
+main = "src/index.js"
+compatibility_date = "2025-11-01"
+workers_dev = true
+
+[observability]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

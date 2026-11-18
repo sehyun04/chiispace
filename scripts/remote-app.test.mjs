@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
-import { takeFrames } from "../ui/remote-shim.ts";
+import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
+const relayDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "relay");
+const wrangler = path.join(relayDir, "node_modules", ".bin", "wrangler.cmd");
 const edge = [
   path.join(process.env["ProgramFiles(x86)"] ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
   path.join(process.env.ProgramFiles ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
@@ -28,6 +31,7 @@ const freePort = () =>
       s.close(() => resolve(port));
     });
   });
+const killTree = (pid) => spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
 const userLine = (text) => JSON.stringify({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, session_id: "" });
 const answer = (requestId, toolUseId, behavior = "allow", input = {}) =>
   JSON.stringify({
@@ -35,7 +39,7 @@ const answer = (requestId, toolUseId, behavior = "allow", input = {}) =>
     response: { subtype: "success", request_id: requestId, response: behavior === "allow" ? { behavior, updatedInput: input, toolUseID: toolUseId } : { behavior, message: "no", toolUseID: toolUseId } },
   });
 
-/** 별도 프로필의 헤드리스 Edge 한 탭. 사용자 브라우저·OS 입력을 쓰지 않고 페이지 안에서만 누른다(CDP). */
+/** 별도 프로필의 헤드리스 Edge 한 탭(아이폰 크기). 사용자 브라우저·OS 입력을 쓰지 않고 페이지 안에서만 누른다(CDP). */
 async function phoneBrowser(dir) {
   const proc = spawn(edge, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${dir}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", "about:blank"], {
     stdio: "ignore",
@@ -88,14 +92,14 @@ async function phoneBrowser(dir) {
       try {
         ws.close();
       } catch {}
-      spawnSync("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { windowsHide: true });
+      killTree(proc.pid);
     },
   };
 }
 
-test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC 와 카드 맞추기, 허락하지 않은 명령 막기", { skip: !exe || !claude, timeout: 420000 }, async () => {
-  // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·폰 연결 설정(remote.json 은 세션 파일 옆), 가짜 키와 가짜 Anthropic 서버.
-  // 폰 서버 포트도 비어 있는 것을 고른다 — 사용자 앱이 기본 포트를 쥐고 있을 수 있다.
+test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 통로로 말하기·권한 답하기, PC 와 카드 맞추기, 막기", { skip: !exe || !claude || !existsSync(wrangler), timeout: 480000 }, async () => {
+  // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·폰 연결 설정(remote.json 은 세션 파일 옆), 가짜 키와 가짜 Anthropic 서버,
+  // 중계는 wrangler 로 이 PC 안에 띄운 것(상태 폴더도 따로). Cloudflare 계정에는 닿지 않는다.
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-remote-"));
   const project = path.join(root, "project");
   mkdirSync(project);
@@ -131,9 +135,23 @@ test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC
       streams: { "%0": { agent: "claude", session: sid, cwd } },
     }),
   );
-  const port = await freePort();
+
+  // 로컬 중계.
+  const relayPort = await freePort();
+  const relayBase = `http://127.0.0.1:${relayPort}`;
+  // .cmd 는 셸로만 뜬다. 인자를 따로 주면 Node 가 이스케이프 경고를 내므로 한 줄로 준다(경로는 우리가 만든 것뿐이다).
+  const relay = spawn(`"${wrangler}" dev --ip 127.0.0.1 --port ${relayPort} --persist-to "${path.join(root, "relay-state")}"`, {
+    cwd: relayDir,
+    shell: true,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  const room = randomBytes(16).toString("hex");
+  const secret = randomBytes(32).toString("hex");
   const remoteFile = path.join(root, "remote.json");
-  writeFileSync(remoteFile, JSON.stringify({ on: true, port, devices: [] }));
+  writeFileSync(remoteFile, JSON.stringify({ on: true, relay: relayBase, room, secret, devices: [] }));
+  const page = `${relayBase}/r/${room}/`;
+  const wsUrl = socketUrl(page);
 
   const probe = "/" + randomUUID();
   let latest = {};
@@ -230,9 +248,13 @@ test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC
         remoteButton: !!side?.querySelector('.side-remote'),
         remote: panel ? {
           state: panel.querySelector('.remote-switch span')?.textContent ?? null,
-          code: panel.querySelector('.remote-digits')?.dataset.code ?? null,
+          page: panel.querySelector('.remote-url')?.textContent ?? null,
+          qr: !!panel.querySelector('.remote-qr path'),
+          pair: panel.querySelector('.remote-pair')?.textContent ?? null,
+          sas: panel.querySelector('.remote-digits')?.dataset.sas ?? null,
           devices: texts(panel, '.remote-dev span'),
-          sub: panel.querySelector('.remote-sub')?.textContent ?? null,
+          sub: panel.querySelector('.remote-sub:last-of-type')?.textContent ?? null,
+          subs: texts(panel, '.remote-sub'),
           error: panel.querySelector('.remote-bad')?.textContent ?? null,
         } : null,
       };
@@ -251,47 +273,40 @@ test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC
   }, 100); return 'isolated remote test'; })()`;
 
   const dom = () => latest.dom ?? {};
-  const base = `http://127.0.0.1:${port}`;
-  const call = async (cmd, args, token) => {
-    const r = await fetch(base + "/api/invoke", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ cmd, args }),
-    });
-    return { status: r.status, body: await r.json().catch(() => null) };
-  };
-  /** 다른 이름(Host)으로 들어온 요청. fetch 는 Host 를 못 바꾸므로 http 로 보낸다. */
-  const withHost = (host, extra = {}) =>
+  /** PC 를 흉내 내는 붙기. 웹소켓 업그레이드 요청에 비밀을 실어 보내고 상태 번호만 본다. */
+  const pcUpgrade = (bearer) =>
     new Promise((resolve) => {
-      const req = http.request({ host: "127.0.0.1", port, path: "/", headers: { Host: host, ...extra } }, (res) => {
+      const req = http.request({
+        host: "127.0.0.1",
+        port: relayPort,
+        path: `/pc/${room}`,
+        headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": randomBytes(16).toString("base64"), Authorization: `Bearer ${bearer}` },
+      });
+      req.on("response", (res) => {
         res.resume();
         resolve(res.statusCode);
+      });
+      req.on("upgrade", (res, socket) => {
+        socket.destroy();
+        resolve(101);
       });
       req.on("error", () => resolve(0));
       req.end();
     });
-  const listenEvents = async (token) => {
-    const frames = [];
-    const ctrl = new AbortController();
-    const res = await fetch(base + "/api/events", { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
-    assert.equal(res.status, 200, "이벤트 스트림이 안 열림");
-    assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
-    void (async () => {
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
+  /** 평문으로 말하는 날것의 폰. 짝짓기 규칙을 어기는 말을 보내 본다. */
+  const rawPhone = async () => {
+    const ws = new WebSocket(wsUrl);
+    const got = [];
+    ws.addEventListener("message", (e) => {
       try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          const r = takeFrames(buf + dec.decode(value, { stream: true }));
-          buf = r.rest;
-          frames.push(...r.frames);
-        }
+        got.push(JSON.parse(e.data));
       } catch {}
-      frames.push({ event: "__end" });
-    })();
-    return { frames, stop: () => ctrl.abort() };
+    });
+    await new Promise((r, j) => {
+      ws.addEventListener("open", r, { once: true });
+      ws.addEventListener("error", j, { once: true });
+    });
+    return { ws, got, send: (m) => ws.send(JSON.stringify(m)) };
   };
   const launch = () => spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
   const close = async (app) => {
@@ -301,145 +316,182 @@ test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC
     if (app.exitCode === null) app.kill();
   };
 
-  const app = launch();
+  // CHIISPACE_TEST_SCREENSHOT=1 이면 PC 쪽 [폰 연결] 창을 검증 창에서 찍는다. 사용자 창은 건드리지 않는다.
+  const shot = (name) => {
+    if (process.env.CHIISPACE_TEST_SCREENSHOT !== "1" || !app) return;
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-File", "scripts/shot.ps1", "-ProcessId", String(app.pid), "-WaitSec", "1", "-Out", path.join(root, name + ".png")], { windowsHide: true, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const RealWebSocket = globalThis.WebSocket;
+  let app = null;
   let phone = null;
-  let ev = null;
+  let link = null;
   try {
     try {
-      // 0. 켤 때 폰 연결이 켜져 있으면 서버가 같이 뜬다. 칸의 claude 도 뜬다.
+      assert.ok(await until(async () => (await fetch(relayBase + "/").then((r) => r.status, () => 0)) === 404, 300), "로컬 중계가 안 뜸");
+      app = launch();
+      // 0. 켤 때 폰 연결이 켜져 있으면 중계에 붙는다. 칸의 claude 도 뜬다.
       assert.ok(await until(() => dom().input && !dom().inputDisabled, 600), "칸의 claude 가 안 켜짐: " + JSON.stringify(dom()));
       assert.ok(dom().remoteButton, "옆칸에 폰 연결 단추가 없음");
-      assert.ok(await until(async () => (await fetch(base + "/").then((r) => r.status, () => 0)) === 200, 100), "폰 서버가 안 뜸");
-
-      // 1. 화면 파일은 구운 묶음에서 나온다. 데스크톱 첫 화면은 내주지 않는다. 남의 이름·출처는 막는다.
-      const page = await fetch(base + "/");
-      const html = await page.text();
-      assert.match(html, /<div id="root">/);
-      assert.match(html, /mobile\.webmanifest/);
-      assert.match(page.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
-      const script = /src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1];
-      assert.ok(script, "폰 화면 묶음 경로가 없음: " + html);
-      const js = await fetch(base + script, { headers: { "Accept-Encoding": "gzip" } });
-      assert.equal(js.status, 200);
-      assert.equal(js.headers.get("content-encoding"), "gzip", "묶음을 줄여 보내지 않음");
-      assert.equal((await fetch(base + "/mobile-icon.png")).status, 200, "홈 화면 아이콘이 없음");
-      assert.equal((await fetch(base + "/main.tsx")).status, 404);
-      assert.equal(await withHost("evil.example:" + port), 403, "남의 이름으로 들어온 요청을 받음");
-      assert.equal(await withHost("desk.tail1234.ts.net"), 200, "Tailscale 이름으로 들어온 요청을 막음");
-      assert.equal(await withHost(`127.0.0.1:${port}`, { Origin: "https://evil.example" }), 403, "남의 출처를 받음");
-      assert.equal((await call("remote_panes", {})).status, 401, "토큰 없이 명령을 받음");
-      assert.equal((await call("remote_panes", {}, "0".repeat(64))).status, 401, "모르는 토큰을 받음");
-      assert.equal((await fetch(base + "/api/events")).status, 401, "토큰 없이 이벤트를 받음");
-      const early = await fetch(base + "/api/pair", { method: "POST", body: JSON.stringify({ code: "000000", name: "x" }) });
-      assert.equal(early.status, 403, "번호를 받기 전에 짝지어짐");
-
-      // 2. PC 에서 번호를 받아 짝짓는다. 틀린 번호는 거절, 맞는 번호는 토큰 하나.
       commands.push({ in: "side", click: ".side-remote" });
-      assert.ok(await until(() => /켜짐/.test(dom().remote?.state ?? ""), 50), "폰 연결 창이 안 뜨거나 꺼져 있음: " + JSON.stringify(dom().remote));
-      commands.push({ button: "짝짓기 번호 받기" });
-      assert.ok(await until(() => /^\d{6}$/.test(dom().remote?.code ?? ""), 50), "짝짓기 번호가 안 뜸: " + JSON.stringify(dom().remote));
-      const code = dom().remote.code;
-      const pair = (c) => fetch(base + "/api/pair", { method: "POST", body: JSON.stringify({ code: c, name: "iPhone" }) }).then(async (r) => ({ status: r.status, body: await r.json() }));
-      const wrong = await pair(code === "000000" ? "111111" : "000000");
-      assert.equal(wrong.status, 403);
-      assert.equal(wrong.body.error, "번호가 틀렸다");
-      const ok = await pair(code);
-      assert.equal(ok.status, 200, JSON.stringify(ok.body));
-      const token = ok.body.token;
-      assert.match(token, /^[0-9a-f]{64}$/);
-      assert.equal((await pair(code)).status, 403, "한 번 쓴 번호로 또 짝지어짐");
-      assert.ok(await until(() => dom().remote?.devices?.some((d) => d.startsWith("iPhone")) && !dom().remote.code, 50), "짝지은 폰이 PC 에 안 보임: " + JSON.stringify(dom().remote));
+      assert.ok(await until(() => /중계에 붙음/.test(dom().remote?.state ?? ""), 200), "중계에 안 붙음: " + JSON.stringify(dom().remote));
+      assert.equal(dom().remote.page, page, "폰 주소가 방 주소가 아님");
+      assert.ok(dom().remote.qr, "폰 주소 QR 이 없음");
+      shot("pc-panel");
+
+      // 1. 폰 화면 파일은 PC 앱이 구워 넣은 폰 묶음에서 중계를 거쳐 나온다. 데스크톱 화면 파일은 안 나온다.
+      const html = await fetch(page);
+      assert.equal(html.status, 200);
+      const text = await html.text();
+      assert.match(text, /<div id="root">/);
+      assert.match(html.headers.get("content-security-policy") ?? "", /connect-src 'self' wss:\/\/127\.0\.0\.1:\d+ ws:\/\/127\.0\.0\.1:\d+; frame-ancestors 'none'/);
+      const script = /src="\.\/(assets\/[^"]+\.js)"/.exec(text)?.[1];
+      assert.ok(script, "폰 묶음 경로가 상대 경로가 아님: " + text);
+      const js = await fetch(page + script);
+      assert.equal(js.status, 200);
+      assert.match(js.headers.get("cache-control") ?? "", /immutable/);
+      assert.ok((await js.text()).length > 100000, "폰 묶음이 덜 옴(조각 잇기)");
+      assert.equal((await fetch(page + "mobile.webmanifest")).headers.get("content-type"), "application/manifest+json");
+      assert.equal((await fetch(page + "index.html")).status, 404, "데스크톱 화면 파일을 내줌");
+      assert.equal((await fetch(`${relayBase}/r/${randomBytes(16).toString("hex")}/`)).status, 503, "다른 방이 PC 를 봄");
+      // 방 주인은 처음 붙은 PC 의 비밀이다. 다른 비밀로는 PC 자리에 못 붙는다.
+      assert.equal(await pcUpgrade(randomBytes(32).toString("hex")), 403, "다른 비밀로 PC 자리에 붙음");
+
+      // 2. 짝짓기는 PC 에서 [폰 짝짓기]를 누른 동안만 된다.
+      await assert.rejects(pair(wsUrl, "iPhone", () => {}), /폰 짝짓기/);
+      commands.push({ button: "폰 짝짓기" });
+      assert.ok(await until(() => /폰에서 \[연결\]/.test(dom().remote?.pair ?? ""), 50), "짝짓기 받기가 안 열림: " + JSON.stringify(dom().remote));
+      // 약속한 키와 다른 키를 열면 거절한다(중계가 키를 바꿔치기하는 경우).
+      const raw = await rawPhone();
+      assert.ok(await until(() => raw.got.some((m) => m.relay === "pc-online"), 50));
+      raw.send({ k: "pair1", c: Buffer.from(createHash("sha256").update(randomBytes(81)).digest()).toString("base64url"), name: "x" });
+      assert.ok(await until(() => raw.got.some((m) => m.k === "pair2"), 50), "pair2 가 안 옴");
+      const fake = Buffer.concat([Buffer.from([4]), randomBytes(64)]).toString("base64url");
+      raw.send({ k: "pair3", pub: fake, na: randomBytes(16).toString("base64url") });
+      assert.ok(await until(() => raw.got.some((m) => m.k === "no" && /맞지 않는다/.test(m.why)), 50), "약속을 어긴 짝짓기를 받음: " + JSON.stringify(raw.got));
+      // 모르는 기기의 인사는 거절한다.
+      raw.send({ k: "hello", dev: "0123456789abcdef", na: randomBytes(16).toString("base64url") });
+      assert.ok(await until(() => raw.got.some((m) => m.k === "no" && m.why === "unknown"), 50), "모르는 기기를 받음");
+      // 키 없이 보낸 암호 덩이는 아무 답도 없다.
+      raw.send({ k: "x", n: 0, c: "AAAA" });
+      await delay(500);
+      assert.ok(!raw.got.some((m) => m.k === "x"), "키 없는 덩이에 답함");
+      raw.ws.close();
+
+      // 3. 숫자 비교 짝짓기. 두 화면의 여섯 자리가 같고, PC 에서 [맞다]를 눌러야 끝난다.
+      let shown = null;
+      const pairing = pair(wsUrl, "iPhone", (s) => (shown = s));
+      assert.ok(await until(() => shown && dom().remote?.sas, 100), "숫자가 안 뜸: " + JSON.stringify(dom().remote));
+      assert.equal(dom().remote.sas, shown, "PC 와 폰의 숫자가 다름");
+      shot("pc-sas");
+      commands.push({ button: "맞다" });
+      const paired = await pairing;
+      assert.match(paired.dev, /^[0-9a-f]{16}$/);
+      assert.ok(await until(() => dom().remote?.devices?.some((d) => d.startsWith("iPhone")) && !dom().remote.sas, 50), "짝지은 폰이 PC 에 안 보임: " + JSON.stringify(dom().remote));
+      // [아니다]를 누르면 짝짓기가 끝나지 않는다.
+      commands.push({ button: "폰 짝짓기" });
+      assert.ok(await until(() => /폰에서 \[연결\]/.test(dom().remote?.pair ?? ""), 50));
+      const refused = pair(wsUrl, "다른 폰", () => {});
+      assert.ok(await until(() => dom().remote?.sas, 100), "두 번째 숫자가 안 뜸");
+      commands.push({ button: "아니다" });
+      await assert.rejects(refused, /숫자가 다르다/);
+      commands.push({ button: "그만" });
+      assert.ok(await until(() => dom().remote?.devices?.length === 1 && !/폰에서 \[연결\]/.test(dom().remote?.pair ?? ""), 50), "거절한 폰이 남음: " + JSON.stringify(dom().remote));
       const saved = readFileSync(remoteFile, "utf8");
-      assert.ok(!saved.includes(token), "토큰을 그대로 적음");
+      assert.ok(!saved.includes(paired.jwk.d), "폰 비밀키가 PC 에 적힘");
 
-      ev = await listenEvents(token);
-      assert.ok(await until(() => /붙은 화면 1/.test(dom().remote?.sub ?? ""), 50), "붙은 화면 수가 안 보임: " + JSON.stringify(dom().remote));
+      // 4. 평소 연결. 중계를 지나는 날것의 줄은 모두 엿본다 — 대화 글자가 보이면 안 된다.
+      const wire = [];
+      globalThis.WebSocket = class extends RealWebSocket {
+        constructor(...a) {
+          super(...a);
+          this.addEventListener("message", (e) => wire.push(String(e.data)));
+        }
+      };
+      const events = [];
+      let status = null;
+      let unpaired = false;
+      link = new Link({ url: wsUrl, paired, onStatus: (s) => (status = s), onEvent: (e, p) => events.push({ e, p }), onUnpaired: () => (unpaired = true) });
+      link.start();
+      assert.ok(await until(() => status === "open", 100), "평소 연결이 안 열림: " + status);
+      assert.ok(await until(() => dom().remote?.subs?.some((t) => /붙은 화면 1/.test(t)), 50), "붙은 화면 수가 안 보임: " + JSON.stringify(dom().remote));
+      const call = (cmd, args) => link.invoke(cmd, args);
+      const panes = await call("remote_panes", {});
+      assert.deepEqual(panes.map((p) => [p.id, p.session, p.cwd, p.alive, p.waiting]), [["%0", sid, cwd, true, 0]], JSON.stringify(panes));
 
-      // 3. 폰은 PC 가 연 칸만 본다.
-      const panes = await call("remote_panes", {}, token);
-      assert.equal(panes.status, 200);
-      assert.deepEqual(
-        panes.body.map((p) => [p.id, p.session, p.cwd, p.alive, p.waiting]),
-        [["%0", sid, cwd, true, 0]],
-        JSON.stringify(panes.body),
-      );
-
-      // 4. 폰에서 말하면 PC 칸의 claude 가 받고, PC 대화창에도 그 말과 답이 남는다.
-      assert.equal((await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서") }, token)).status, 200);
+      // 5. 폰에서 말하면 PC 칸의 claude 가 받고, PC 대화창에도 그 말과 답이 남는다.
+      await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서") });
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("HELLO_A_REPLY")) && dom().mine?.some((t) => t.includes("HELLO_A")), 400), "폰에서 보낸 말이 PC 칸에 안 남음: " + JSON.stringify(dom()));
-      assert.ok(ev.frames.some((f) => f.event === "chat:live" && f.payload.session === sid), "쓰이는 중인 답이 폰에 안 옴");
-      const lines = ev.frames.filter((f) => f.event === "claude:chat").map((f) => f.payload.line);
+      assert.ok(events.some((x) => x.e === "chat:live" && JSON.stringify(x.p).includes("HELLO_A_REPLY")), "쓰이는 중인 답이 폰에 안 옴");
+      const lines = events.filter((x) => x.e === "claude:chat").map((x) => x.p.line);
       assert.ok(lines.some((l) => l.includes('"type":"result"')), "통로 줄이 폰에 안 옴");
       assert.ok(!lines.some((l) => l.startsWith('{"type":"stream_event"')), "답의 조각을 폰 망에 두 번 실음");
-      const raw = await call("claude_transcript_raw", { root: cwd, id: sid }, token);
-      assert.match(raw.body, /HELLO_A_REPLY/, "폰이 대화 원문을 못 읽음");
+      const rawText = await call("claude_transcript_raw", { root: cwd, id: sid });
+      assert.match(rawText, /HELLO_A_REPLY/, "폰이 대화 원문을 못 읽음");
+      assert.ok(wire.length > 10, "엿본 줄이 없음");
+      assert.ok(!wire.some((w) => /HELLO_A|claude:chat|remote_panes|안녕/.test(w)), "중계를 지나는 줄에 평문이 보임: " + wire.find((w) => /HELLO_A|claude:chat|안녕/.test(w))?.slice(0, 200));
+      assert.ok(wire.some((w) => /"z":true/.test(w)), "긴 원문을 줄여 보내지 않음");
 
-      // 5. 권한 묻기는 폰에도 오고, 폰에서 허락하면 PC 카드도 걷힌다.
-      const before = ev.frames.length;
-      assert.equal((await call("claude_chat_send", { id: "%0", line: userLine("TOOL_A 폴더") }, token)).status, 200);
-      const askOf = (from) => ev.frames.slice(from).map((f) => (f.event === "claude:chat" ? JSON.parse(f.payload.line) : null)).find((m) => m?.type === "control_request" && m.request?.subtype === "can_use_tool");
+      // 6. 권한 묻기는 폰에도 오고, 폰에서 허락하면 PC 카드도 걷힌다.
+      const before = events.length;
+      await call("claude_chat_send", { id: "%0", line: userLine("TOOL_A 폴더") });
+      const askOf = (from) => events.slice(from).map((x) => (x.e === "claude:chat" ? JSON.parse(x.p.line) : null)).find((m) => m?.type === "control_request" && m.request?.subtype === "can_use_tool");
       assert.ok(await until(() => askOf(before), 300), "권한 묻기가 폰에 안 옴");
       const ask = askOf(before);
       assert.ok(await until(() => dom().perm?.includes("mkdir dir_tool_a"), 100), "PC 에 권한 카드가 안 뜸");
-      const snap = await call("claude_chat_snapshot", { id: "%0" }, token);
-      assert.equal(snap.body.busy, true);
-      assert.equal(snap.body.prompts.length, 1, "통로의 지금 상태에 권한 묻기가 없음: " + JSON.stringify(snap.body));
-      assert.match(snap.body.init ?? "", /"subtype":"init"/);
-      assert.equal((await call("remote_panes", {}, token)).body[0].waiting, 1);
-
-      // 폰이 할 수 없는 것들. 모두 칸에 닿기 전에 막힌다.
-      const refused = async (cmd, args, why) => {
-        const r = await call(cmd, args, token);
-        assert.equal(r.status, 400, `${why}: ${JSON.stringify(r)}`);
-        return r.body.error;
+      const snap = await call("claude_chat_snapshot", { id: "%0" });
+      assert.equal(snap.busy, true);
+      assert.equal(snap.prompts.length, 1, "통로의 지금 상태에 권한 묻기가 없음: " + JSON.stringify(snap));
+      assert.match(snap.init ?? "", /"subtype":"init"/);
+      assert.equal((await call("remote_panes", {}))[0].waiting, 1);
+      const refuse = async (cmd, args, why) => {
+        const e = await call(cmd, args).then(() => null, (e) => String(e));
+        assert.ok(e, `${why}: 받음`);
+        return e;
       };
-      await refused("claude_chat_send", { id: "%0", line: answer("chiispace-none", "t") }, "기다리지 않는 요청에 답함");
-      await refused("claude_chat_send", { id: "%0", line: JSON.stringify({ type: "control_request", request_id: "x", request: { subtype: "set_permission_mode", mode: "bypassPermissions" } }) }, "권한 모드를 바꿈");
-      await refused("claude_chat_send", { id: "%9", line: userLine("x") }, "PC 에 없는 칸에 보냄");
-      await refused("claude_transcript_raw", { root: cwd, id: randomUUID() }, "다른 대화를 읽음");
-      await refused("claude_transcript_raw", { root: "C:/", id: sid }, "다른 폴더로 대화를 읽음");
-      for (const cmd of ["pty_write", "claude_chat_start", "claude_chat_stop", "open_memory_file", "save_export", "claude_conversations", "remote_switch", "state_load", "fs_dirs"]) {
-        assert.match(await refused(cmd, { id: "%0", data: "x", path: "C:/x.md" }, `${cmd} 을 받음`), /폰에서는 부를 수 없는/);
+      await refuse("claude_chat_send", { id: "%0", line: answer("chiispace-none", "t") }, "기다리지 않는 요청에 답함");
+      await refuse("claude_chat_send", { id: "%0", line: JSON.stringify({ type: "control_request", request_id: "x", request: { subtype: "set_permission_mode", mode: "bypassPermissions" } }) }, "권한 모드를 바꿈");
+      await refuse("claude_chat_send", { id: "%9", line: userLine("x") }, "PC 에 없는 칸에 보냄");
+      await refuse("claude_transcript_raw", { root: cwd, id: randomUUID() }, "다른 대화를 읽음");
+      await refuse("claude_transcript_raw", { root: "C:/", id: sid }, "다른 폴더로 대화를 읽음");
+      for (const cmd of ["pty_write", "claude_chat_start", "claude_chat_stop", "open_memory_file", "save_export", "claude_conversations", "remote_switch", "remote_pairing", "remote_confirm", "state_load", "fs_dirs"]) {
+        assert.match(await refuse(cmd, { id: "%0", data: "x", path: "C:/x.md", on: true, ok: true }, `${cmd} 을 받음`), /폰에서는 부를 수 없는/);
       }
-
-      assert.equal((await call("claude_chat_send", { id: "%0", line: answer(ask.request_id, ask.request.tool_use_id, "allow", ask.request.input) }, token)).status, 200);
+      await call("claude_chat_send", { id: "%0", line: answer(ask.request_id, ask.request.tool_use_id, "allow", ask.request.input) });
       assert.ok(await until(() => dom().perm === null, 100), "폰에서 답했는데 PC 권한 카드가 남음");
-      assert.ok(ev.frames.some((f) => f.event === "claude:chat-answered" && f.payload.request_id === ask.request_id), "답했다는 신호가 안 옴");
+      assert.ok(events.some((x) => x.e === "claude:chat-answered" && x.p.request_id === ask.request_id), "답했다는 신호가 안 옴");
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("TOOL_A_AFTER")), 400), "허락 뒤 답이 PC 에 안 옴");
       assert.ok(existsSync(path.join(project, "dir_tool_a")), "폰에서 허락했는데 실행이 안 됨");
-      assert.equal((await call("claude_chat_send", { id: "%0", line: answer(ask.request_id, ask.request.tool_use_id) }, token)).status, 400, "이미 답한 요청에 또 답함");
+      await refuse("claude_chat_send", { id: "%0", line: answer(ask.request_id, ask.request.tool_use_id) }, "이미 답한 요청에 또 답함");
 
-      // 6. PC 에서 답하면 폰 쪽도 걷을 신호를 받는다.
-      const mark = ev.frames.length;
+      // 7. PC 에서 답하면 폰 쪽도 걷을 신호를 받는다.
+      const mark = events.length;
       commands.push({ send: "TOOL_B PC 에서" });
       assert.ok(await until(() => askOf(mark) && dom().perm?.includes("dir_tool_b"), 400), "PC 에서 보낸 말의 권한 묻기가 폰에 안 옴");
       const askB = askOf(mark);
       commands.push({ click: ".ask.perm .ask-no" });
-      assert.ok(await until(() => ev.frames.some((f) => f.event === "claude:chat-answered" && f.payload.request_id === askB.request_id), 100), "PC 에서 답한 것이 폰에 안 알려짐");
+      assert.ok(await until(() => events.some((x) => x.e === "claude:chat-answered" && x.p.request_id === askB.request_id), 100), "PC 에서 답한 것이 폰에 안 알려짐");
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("TOOL_B_AFTER")), 400), "거절 뒤 답이 안 옴");
       assert.equal(existsSync(path.join(project, "dir_tool_b")), false, "거절했는데 실행됨");
 
-      // 7. 폰 화면(헤드리스 Edge, 아이폰 크기). 짝짓기 → 칸 목록 → 칸 → 말하기 → 권한 카드.
+      // 8. 폰 화면(헤드리스 Edge, 아이폰 크기). 숫자 비교 짝짓기 → 칸 목록 → 칸 → 말하기 → 권한 카드.
       if (edge) {
         phone = await phoneBrowser(path.join(root, "edge-profile"));
-        await phone.send("Page.navigate", { url: base + "/" });
-        assert.ok(await until(() => phone.evaluate("!!document.querySelector('.m-code')").catch(() => false), 100), "폰 화면에 번호 칸이 안 뜸");
+        await phone.send("Page.navigate", { url: page });
+        assert.ok(await until(() => phone.evaluate("!!document.querySelector('.m-go')").catch(() => false), 150), "폰 화면에 연결 단추가 안 뜸");
         await phone.shot(path.join(root, "phone-pair.png"));
-        // 앞 번호는 짝지을 때 썼다. 번호가 없으면 단추는 "짝짓기 번호 받기"다.
-        commands.push({ button: "짝짓기 번호 받기" });
-        assert.ok(await until(() => /^\d{6}$/.test(dom().remote?.code ?? ""), 50), "새 번호가 안 뜸: " + JSON.stringify(dom().remote));
-        const code2 = dom().remote.code;
-        await phone.evaluate(`(() => { const i = document.querySelector('.m-code'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(code2)}); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await delay(100);
+        commands.push({ button: "폰 짝짓기" });
+        assert.ok(await until(() => /폰에서 \[연결\]/.test(dom().remote?.pair ?? ""), 50));
         await phone.evaluate("document.querySelector('.m-go').click()");
-        assert.ok(await until(() => phone.evaluate("document.querySelectorAll('.m-row').length === 1"), 100), "폰 화면에 칸 목록이 안 뜸");
+        assert.ok(await until(async () => dom().remote?.sas && (await phone.evaluate("document.querySelector('.m-sas')?.dataset.sas ?? null")) === dom().remote.sas, 150), "폰 화면과 PC 의 숫자가 안 맞음");
+        await phone.shot(path.join(root, "phone-sas.png"));
+        commands.push({ button: "맞다" });
+        assert.ok(await until(() => phone.evaluate("document.querySelectorAll('.m-row').length === 1"), 150), "폰 화면에 칸 목록이 안 뜸");
         assert.ok(await until(() => dom().remote?.devices?.length === 2, 50), "폰 화면이 짝지어지지 않음: " + JSON.stringify(dom().remote));
         await delay(400);
         await phone.shot(path.join(root, "phone-list.png"));
-        const row = await phone.evaluate("document.querySelector('.m-row').textContent");
-        assert.match(row, /쉬는 중/, "칸 상태가 안 보임: " + row);
         await phone.evaluate("document.querySelector('.m-row').click()");
-        assert.ok(await until(() => phone.evaluate("[...document.querySelectorAll('.msg .bubble')].some(b => b.textContent.includes('TOOL_B_AFTER'))"), 100), "폰 칸에 대화가 안 그려짐");
+        assert.ok(await until(() => phone.evaluate("[...document.querySelectorAll('.msg .bubble')].some(b => b.textContent.includes('TOOL_B_AFTER'))"), 150), "폰 칸에 대화가 안 그려짐");
         assert.ok(await phone.evaluate("!!document.querySelector('.composer-send') && document.querySelector('.composer textarea').placeholder === '보낼 말'"), "폰 입력바가 손가락용이 아님");
         await phone.shot(path.join(root, "phone-pane.png"));
         const type = (t) =>
@@ -467,30 +519,29 @@ test("폰 연결 — 짝짓기, PC 칸에 붙어 말하기·권한 답하기, PC
         console.log("Edge 가 없어 폰 화면 검증은 건너뜀");
       }
 
-      // 8. 잊은 폰은 바로 끊기고 다시 못 부른다. 끄면 서버가 내려간다. 다음에 켤 때도 꺼진 채다.
+      // 9. 잊은 폰은 바로 끊기고, 다시 붙으면 PC 가 모른다고 해서 짝짓기 화면으로 돌아간다.
       commands.push({ button: "잊기", nth: 0 });
-      assert.ok(await until(() => ev.frames.some((f) => f.event === "__end"), 100), "잊은 폰의 이벤트 스트림이 안 끊김");
-      assert.equal((await call("remote_panes", {}, token)).status, 401, "잊은 폰이 명령을 부름");
+      assert.ok(await until(() => unpaired, 150), "잊은 폰이 안 끊김");
+      await assert.rejects(link.invoke("remote_panes", {}));
+      link.stop();
+      // 10. 끄면 중계에서 PC 가 사라진다. 폰 화면은 PC 가 안 보인다고 알린다. 다음에 켤 때도 꺼진 채다.
       commands.push({ button: "끄기" });
       assert.ok(await until(() => /꺼짐/.test(dom().remote?.state ?? ""), 50), "폰 연결이 안 꺼짐");
-      // 새 연결은 받지 않는다. 끄기 전에 맺어 둔 연결(fetch 가 다시 쓰는 것)로 온 요청은 503 으로 돌려보낸다.
-      const refusedConnect = () =>
-        new Promise((r) => {
-          const s = net.connect(port, "127.0.0.1");
-          s.on("connect", () => (s.destroy(), r(false)));
-          s.on("error", () => r(true));
-        });
-      assert.ok(await until(refusedConnect, 50), "끈 뒤에도 서버가 새 연결을 받음");
-      assert.ok([0, 503].includes(await fetch(base + "/").then((r) => r.status, () => 0)), "끈 뒤에 남은 연결로 화면을 내줌");
+      // 끈 PC 는 중계에서 바로 사라져야 한다. 남아 있으면 화면 요청이 답 없는 PC 에 20초씩 붙잡힌다(504).
+      assert.ok(await until(async () => (await fetch(page, { signal: AbortSignal.timeout(5000) }).then((r) => r.status, () => 0)) === 503, 30), "끈 뒤에도 PC 가 중계에 붙어 있음");
+      if (edge) assert.ok(await until(() => phone.evaluate("document.querySelector('.m-link.off')?.textContent ?? ''").then((t) => /PC 가 안 보인다/.test(t)), 100), "폰 화면이 PC 가 꺼진 것을 모름");
       const after = JSON.parse(readFileSync(remoteFile, "utf8"));
       assert.equal(after.on, false);
       assert.equal(after.devices.length, edge ? 1 : 0);
+      assert.equal(after.room, room, "방이 바뀜");
     } finally {
-      ev?.stop();
+      globalThis.WebSocket = RealWebSocket;
+      link?.stop();
       phone?.close();
-      await close(app);
+      if (app) await close(app);
     }
   } finally {
+    killTree(relay.pid);
     server.closeAllConnections();
     server.close();
   }

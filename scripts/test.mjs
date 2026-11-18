@@ -82,6 +82,7 @@ function build() {
   const target = path.join(repo, "src-tauri", "target", "test-build");
   run("npx", ["tsc", "--noEmit"], repo);
   run("npx", ["vite", "build"], repo);
+  run("npx", ["vite", "build", "--config", "vite.mobile.config.ts"], repo);
   run("cargo", ["build", "--release", "--features", "custom-protocol", "--target-dir", target], path.join(repo, "src-tauri"));
   return path.join(target, "release", "chiispace.exe");
 }

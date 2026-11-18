@@ -23,6 +23,7 @@ mod claude_chat;
 mod codex_stream;
 mod codex_switch;
 mod remote;
+mod remote_crypto;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -353,7 +354,9 @@ pub fn run() {
             claude_chat::claude_chat_stop,
             remote::remote_status,
             remote::remote_switch,
-            remote::remote_new_code,
+            remote::remote_set_relay,
+            remote::remote_pairing,
+            remote::remote_confirm,
             remote::remote_forget,
             remote::remote_publish,
             codex_stream::codex_stream_start,

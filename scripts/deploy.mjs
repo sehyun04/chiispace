@@ -90,6 +90,7 @@ const target = path.join(repo, "src-tauri", "target", "deploy-build");
 say("굽는 중");
 npx(["tsc", "--noEmit"], wt);
 npx(["vite", "build"], wt);
+npx(["vite", "build", "--config", "vite.mobile.config.ts"], wt);
 must("cargo", ["build", "--release", "--features", "custom-protocol", "--target-dir", target], path.join(wt, "src-tauri"), true);
 const built = { app: path.join(target, "release", "chiispace.exe"), cli: path.join(target, "release", "chiispace-cli.exe") };
 const stage = path.join(wt, ".deploy-stage");

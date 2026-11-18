@@ -11,34 +11,28 @@ import { ChatPane, type Transport } from "./Chat";
 import { AskCard, PermissionCard } from "./ClaudeStreamPane";
 import { Face } from "./roster";
 import { answerLine, answeredStream, allowLine, denyLine, initialStream, interruptLine, reduceStream, sentStream, userLine, type Prompt, type StreamState } from "./claude-stream";
-import { deviceName, folderName, fromSnapshot, paneFromHash, paneHash, paneState, type PhonePane, type Snapshot } from "./phone";
-import type { RemoteStatus } from "./remote-shim";
+import { folderName, fromSnapshot, paneFromHash, paneHash, paneState, type PhonePane, type Snapshot } from "./phone";
+import type { LinkStatus } from "./phone-link";
 
 type LineEvent = { id: string; line: string };
 type ExitEvent = { id: string; code: number | null; error: string };
 type AnsweredEvent = { id: string; request_id: string };
 
-export function Pair({ onToken }: { onToken: (token: string) => void }) {
-  const [code, setCode] = useState("");
+export function Pair({ connect }: { connect: (onSas: (sas: string) => void) => Promise<void> }) {
+  const [sas, setSas] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const submit = async () => {
-    setSending(true);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
     setErr(null);
+    setSas(null);
     try {
-      const res = await fetch("/api/pair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name: deviceName(navigator.userAgent) }),
-      });
-      const body = (await res.json().catch(() => null)) as { token?: string; error?: string } | null;
-      if (!res.ok || !body?.token) throw new Error(body?.error ?? `연결하지 못했다 (${res.status})`);
-      onToken(body.token);
+      await connect(setSas);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-      setCode("");
+      setSas(null);
     } finally {
-      setSending(false);
+      setBusy(false);
     }
   };
   return (
@@ -47,31 +41,26 @@ export function Pair({ onToken }: { onToken: (token: string) => void }) {
         <Face slug="hachiware" />
       </div>
       <h1>chiispace</h1>
-      <p>PC 의 chiispace 옆칸 아래 [폰 연결]에서 받은 여섯 자리 번호를 넣어 줘.</p>
-      {/* iOS 홈 화면 앱은 사파리와 저장소가 따로다. 사파리에서 짝지으면 홈 화면에서 또 짝지어야 하고 PC 목록에 폰이 둘 남는다. */}
-      {(navigator as { standalone?: boolean }).standalone === false ? (
-        <p className="m-hint">먼저 공유 → 홈 화면에 추가를 누르고, 홈 화면의 chiispace 에서 번호를 넣으면 앱처럼 쓴다.</p>
-      ) : null}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (code.length === 6 && !sending) void submit();
-        }}
-      >
-        <input
-          className="m-code"
-          aria-label="짝짓기 번호"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          pattern="[0-9]*"
-          maxLength={6}
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-        />
-        <button className="m-go" type="submit" disabled={code.length !== 6 || sending}>
-          {sending ? "잇는 중" : "연결"}
-        </button>
-      </form>
+      {sas ? (
+        <>
+          <p>PC 화면에도 이 숫자가 보이면 PC 에서 [맞다]를 눌러 줘.</p>
+          <div className="m-sas" aria-label="짝짓기 숫자" data-sas={sas}>
+            {sas.slice(0, 3)} {sas.slice(3)}
+          </div>
+          <p className="m-hint">숫자가 다르면 PC 에서 [아니다]를 눌러. 누가 가운데서 끼어든 것이다.</p>
+        </>
+      ) : (
+        <>
+          <p>PC 의 chiispace 옆칸 아래 폰 단추 → [폰 짝짓기]를 누른 뒤 여기서 [연결]을 눌러 줘.</p>
+          {/* iOS 홈 화면 앱은 사파리와 저장소가 따로다. 사파리에서 짝지으면 홈 화면에서 또 짝지어야 하고 PC 목록에 폰이 둘 남는다. */}
+          {(navigator as { standalone?: boolean }).standalone === false ? (
+            <p className="m-hint">먼저 공유 → 홈 화면에 추가를 누르고, 홈 화면의 chiispace 에서 짝지으면 앱처럼 쓴다.</p>
+          ) : null}
+          <button className="m-go" disabled={busy} onClick={() => void go()}>
+            {busy ? "PC 에 묻는 중" : "연결"}
+          </button>
+        </>
+      )}
       {err ? <p className="m-bad" role="alert">{err}</p> : null}
     </main>
   );
@@ -83,13 +72,20 @@ const Back = () => (
   </svg>
 );
 
-function Link({ status }: { status: RemoteStatus }) {
+const LINK_TEXT: Record<LinkStatus, string> = {
+  open: "",
+  connecting: "PC 에 잇는 중",
+  retrying: "PC 와 끊겼다 · 다시 잇는 중",
+  "pc-offline": "PC 가 안 보인다 · chiispace 와 [폰 연결]이 켜져 있어야 한다",
+};
+
+function Link({ status }: { status: LinkStatus }) {
   if (status === "open") return null;
-  return <div className="m-link" role="status">{status === "connecting" ? "PC 에 잇는 중" : "PC 와 끊겼다 · 다시 잇는 중"}</div>;
+  return <div className={status === "pc-offline" ? "m-link off" : "m-link"} role="status">{LINK_TEXT[status]}</div>;
 }
 
 /** 칸 목록과 고른 칸. 목록은 계속 새로 받아 둔다 — 칸 화면에서도 대화 id 가 바뀌면(`/clear`) 따라가야 한다. */
-export function Phone({ status, onForget }: { status: RemoteStatus; onForget: () => void }) {
+export function Phone({ status, onForget }: { status: LinkStatus; onForget: () => void }) {
   const [panes, setPanes] = useState<PhonePane[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [hash, setHash] = useState(() => location.hash);
@@ -184,7 +180,7 @@ export function Phone({ status, onForget }: { status: RemoteStatus; onForget: ()
   );
 }
 
-function MobilePane({ pane, status }: { pane: PhonePane; status: RemoteStatus }) {
+function MobilePane({ pane, status }: { pane: PhonePane; status: LinkStatus }) {
   const { id } = pane;
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(pane.alive);
@@ -301,7 +297,7 @@ function MobilePane({ pane, status }: { pane: PhonePane; status: RemoteStatus })
           slug={pane.slug ?? undefined}
           name={pane.name ?? "Claude"}
           live={alive && status === "open"}
-          unavailable={alive ? "PC 와 다시 잇는 중" : "PC 에서 이 칸의 claude 가 멈췄다"}
+          unavailable={alive ? LINK_TEXT[status] || "PC 와 잇는 중" : "PC 에서 이 칸의 claude 가 멈췄다"}
           working={st.busy}
           transport={transport}
           extra={extra}
