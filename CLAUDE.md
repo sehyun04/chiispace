@@ -33,7 +33,8 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
 - **폰 연결(11월 14일·18일, 1단계).** 아이폰 홈 화면 앱(PWA)이 밖에서 사용자의 Cloudflare 중계(`relay/`)를 거쳐 PC 의 Claude 대화창 칸에
   붙어 말하고 권한에 답한다(`remote.rs`, `ui/Mobile.tsx`, [작업 정리 42절](docs/WORKLOG.md#42-11월-14일18일-추가-폰-연결-1단계--cloudflare-중계로-밖에서-아이폰으로)).
   처음엔 Tailscale 로 만들었다가 사용자가 "Tailscale 말고"라고 해 중계로 바꿨다. PC 옆칸 맨 아래 폰 단추 → [폰 연결].
-  중계는 사용자가 자기 계정에 한 번 올린다(`relay` 에서 `npx wrangler login`·`npx wrangler deploy`) — 아직 안 올렸다.
+  중계는 사용자 계정에 11월 18일 올렸다(`https://chiispace-relay.ds187.workers.dev`, 로그인은 사용자가 브라우저에서 허락). 사용자 앱 설정(`remote.json`)에
+  주소를 넣고 켜 두었다. 실제 중계로 격리 앱 검증은 통과했고, 아이폰으로 짝짓는 것은 사용자 확인이 남았다.
 
 - **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 18일 19:37(`3c67e94`, 폰 연결 Cloudflare 중계판 — `/memory`·`/export`·`/copy` 포함).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
