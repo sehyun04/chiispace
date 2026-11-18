@@ -79,13 +79,21 @@ const LINK_TEXT: Record<LinkStatus, string> = {
   "pc-offline": "PC 가 안 보인다 · chiispace 와 [폰 연결]이 켜져 있어야 한다",
 };
 
-function Link({ status }: { status: LinkStatus }) {
-  if (status === "open") return null;
-  return <div className={status === "pc-offline" ? "m-link off" : "m-link"} role="status">{LINK_TEXT[status]}</div>;
+function Link({ status, stale }: { status: LinkStatus; stale: boolean }) {
+  return (
+    <>
+      {stale ? (
+        <button className="m-update" onClick={() => location.reload()}>
+          새 판이 있다 · 눌러서 새로고침
+        </button>
+      ) : null}
+      {status === "open" ? null : <div className={status === "pc-offline" ? "m-link off" : "m-link"} role="status">{LINK_TEXT[status]}</div>}
+    </>
+  );
 }
 
 /** 칸 목록과 고른 칸. 목록은 계속 새로 받아 둔다 — 칸 화면에서도 대화 id 가 바뀌면(`/clear`) 따라가야 한다. */
-export function Phone({ status, onForget }: { status: LinkStatus; onForget: () => void }) {
+export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: boolean; onForget: () => void }) {
   const [panes, setPanes] = useState<PhonePane[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [hash, setHash] = useState(() => location.hash);
@@ -132,7 +140,7 @@ export function Phone({ status, onForget }: { status: LinkStatus; onForget: () =
       </main>
     );
   }
-  if (open) return <MobilePane key={open.id} pane={open} status={status} />;
+  if (open) return <MobilePane key={open.id} pane={open} status={status} stale={stale} />;
   return (
     <main className="m-app">
       <header className="m-head">
@@ -141,7 +149,7 @@ export function Phone({ status, onForget }: { status: LinkStatus; onForget: () =
           <div className="m-sub">PC 의 Claude 대화창</div>
         </div>
       </header>
-      <Link status={status} />
+      <Link status={status} stale={stale} />
       <div className="m-list">
         {err ? <p className="m-bad">{err}</p> : null}
         {panes === null ? (
@@ -180,7 +188,7 @@ export function Phone({ status, onForget }: { status: LinkStatus; onForget: () =
   );
 }
 
-function MobilePane({ pane, status }: { pane: PhonePane; status: LinkStatus }) {
+function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStatus; stale: boolean }) {
   const { id } = pane;
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(pane.alive);
@@ -284,7 +292,7 @@ function MobilePane({ pane, status }: { pane: PhonePane; status: LinkStatus }) {
           </div>
         </div>
       </header>
-      <Link status={status} />
+      <Link status={status} stale={stale} />
       <div className="m-body">
         {/* 대화창은 칸 몸통 자리를 재서 그 위에 선다(ChatPane). 폰에서는 몸통이 곧 이 자리다. */}
         <div className="pane-body" />

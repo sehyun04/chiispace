@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { listenerTable } from "../ui/remote-shim.ts";
-import { fromSnapshot, deviceName, folderName, paneState, paneHash, paneFromHash } from "../ui/phone.ts";
+import { fromSnapshot, deviceName, folderName, paneState, paneHash, paneFromHash, updateAction } from "../ui/phone.ts";
 import { b64u, unb64u, commitOf, loadKey, newKey, open, sasOf, seal, sessionKeys } from "../ui/phone-crypto.ts";
 import { socketUrl } from "../ui/phone-link.ts";
 
@@ -92,6 +92,19 @@ test("칸 목록의 상태 글은 허락 기다림이 먼저다", () => {
   assert.deepEqual(paneState({ alive: true, busy: true, waiting: 0 }), { text: "일하는 중", tone: "busy" });
   assert.deepEqual(paneState({ alive: true, busy: false, waiting: 0 }), { text: "쉬는 중", tone: "idle" });
   assert.deepEqual(paneState({ alive: false, busy: true, waiting: 1 }), { text: "멈춤", tone: "off" });
+});
+
+test("PC 판이 바뀌면 새로 불러오되, 쓰던 말이 있거나 한 번 해 봤으면 묻는다", () => {
+  const own = "mobile-AAA.js";
+  assert.equal(updateAction(own, "assets/mobile-AAA.js", false, null), "none", "같은 판");
+  assert.equal(updateAction(own, "assets/mobile-BBB.js", false, null), "reload");
+  assert.equal(updateAction(own, "assets/mobile-BBB.js", true, null), "ask", "쓰던 말이 날아간다");
+  assert.equal(updateAction(own, "assets/mobile-BBB.js", false, "mobile-BBB.js"), "ask", "새로 불러와도 그대로면 돌지 않는다");
+  assert.equal(updateAction(own, "assets/mobile-BBB.js", false, "mobile-CCC.js"), "reload");
+  // 개발 판(vite)이나 이름을 모를 때는 두지 않는다.
+  assert.equal(updateAction("phone-main.tsx", "assets/mobile-BBB.js", false, null), "none");
+  assert.equal(updateAction(null, "assets/mobile-BBB.js", false, null), "none");
+  assert.equal(updateAction(own, "", false, null), "none");
 });
 
 test("폰 이름과 칸 주소", () => {

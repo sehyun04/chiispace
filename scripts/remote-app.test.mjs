@@ -440,9 +440,12 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       let status = null;
       const statuses = [];
       let unpaired = false;
-      link = new Link({ url: wsUrl, paired, onStatus: (s) => statuses.push((status = s)), onEvent: (e, p) => events.push({ e, p }), onUnpaired: () => (unpaired = true) });
+      let version = null;
+      link = new Link({ url: wsUrl, paired, onVersion: (v) => (version = v), onStatus: (s) => statuses.push((status = s)), onEvent: (e, p) => events.push({ e, p }), onUnpaired: () => (unpaired = true) });
       link.start();
       assert.ok(await until(() => status === "open", 100), "평소 연결이 안 열림: " + status);
+      // 붙을 때 PC 가 지금 판(폰 화면의 시작 파일)을 알려 준다. 폰은 제 판과 견줘 다르면 새로 불러온다.
+      assert.equal(version, script, "PC 가 알려 준 판이 폰 화면 파일과 다름");
       assert.ok(await until(() => dom().remote?.subs?.some((t) => /붙은 화면 1/.test(t)), 50), "붙은 화면 수가 안 보임: " + JSON.stringify(dom().remote));
       const call = (cmd, args) => link.invoke(cmd, args);
       const panes = await call("remote_panes", {});
@@ -519,6 +522,8 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         await phone.shot(path.join(root, "phone-sas.png"));
         commands.push({ button: "맞다" });
         assert.ok(await until(() => phone.evaluate("document.querySelectorAll('.m-row').length === 1"), 150), "폰 화면에 칸 목록이 안 뜸");
+        // 같은 판이면 새로 불러오지 않는다. 표시를 남겨 두고 끝에서 그대로인지 본다.
+        await phone.evaluate("window.__sameLoad = true");
         assert.ok(await until(() => dom().remote?.devices?.length === 2, 50), "폰 화면이 짝지어지지 않음: " + JSON.stringify(dom().remote));
         await delay(400);
         await phone.shot(path.join(root, "phone-list.png"));
@@ -547,6 +552,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         assert.ok(await until(() => phone.evaluate("[...document.querySelectorAll('.msg:not(.live) .bubble')].some(b => b.textContent.includes('TOOL_C_AFTER'))"), 400), "폰 화면에서 허락한 뒤 답이 안 옴");
         assert.ok(existsSync(path.join(project, "dir_tool_c")), "폰 화면에서 허락했는데 실행이 안 됨");
         await phone.shot(path.join(root, "phone-after.png"));
+        assert.equal(await phone.evaluate("window.__sameLoad === true && !document.querySelector('.m-update')"), true, "같은 판인데 새로 불러오거나 새 판 띠를 띄움");
       } else {
         console.log("Edge 가 없어 폰 화면 검증은 건너뜀");
       }

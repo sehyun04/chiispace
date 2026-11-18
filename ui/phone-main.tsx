@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Link, pair, socketUrl, type LinkStatus, type Paired } from "./phone-link";
 import { installRemote } from "./remote-shim";
-import { deviceName } from "./phone";
+import { deviceName, updateAction } from "./phone";
 import { Pair, Phone } from "./Mobile";
 import "./theme.css";
 import "./chat.css";
@@ -34,7 +34,34 @@ const write = (p: Paired | null) => {
 
 const url = socketUrl(location.href);
 let link: Link | null = null;
-let ui = { paired: false, status: "connecting" as LinkStatus };
+let ui = { paired: false, status: "connecting" as LinkStatus, stale: false };
+
+// 이 페이지가 도는 판. 구운 묶음에서는 시작 파일(`assets/mobile-<해시>.js`)이고, PC 가 붙을 때 알려 주는 판과 견준다.
+const own = (() => {
+  try {
+    return new URL(import.meta.url).pathname.split("/").pop() ?? null;
+  } catch {
+    return null;
+  }
+})();
+const TRIED = "chiispace.reloaded-for";
+/** PC 가 새로 구워져 판이 바뀌었으면 새로 불러온다. 홈 화면 앱은 뒤로 보냈다 다시 열면 옛 판이 그대로 남아 있다. */
+function onVersion(v: string) {
+  const draft = document.querySelector<HTMLTextAreaElement>(".composer textarea")?.value.trim() || document.querySelector(".composer-pic");
+  let tried: string | null = null;
+  try {
+    tried = sessionStorage.getItem(TRIED);
+  } catch {
+    // 저장소를 못 쓰면 한 번 물어 보는 쪽으로 간다.
+  }
+  const act = updateAction(own, v, !!draft, tried);
+  if (act === "reload") {
+    try {
+      sessionStorage.setItem(TRIED, v.split("/").pop() ?? v);
+    } catch {}
+    location.reload();
+  } else update({ stale: act === "ask" });
+}
 let setUi: ((s: typeof ui) => void) | null = null;
 const update = (patch: Partial<typeof ui>) => {
   ui = { ...ui, ...patch };
@@ -50,6 +77,7 @@ function begin(p: Paired) {
     paired: p,
     onStatus: (status) => update({ status }),
     onEvent: shim.emit,
+    onVersion,
     onUnpaired: () => {
       link = null;
       write(null);
@@ -98,6 +126,7 @@ function Root() {
   return (
     <Phone
       status={s.status}
+      stale={s.stale}
       onForget={() => {
         link?.stop();
         link = null;

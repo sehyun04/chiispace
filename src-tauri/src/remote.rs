@@ -592,6 +592,25 @@ fn on_relay(app: &AppHandle, v: &Value) {
 
 /// 앱에 구워 넣은 폰 묶음 파일 이름들. Tauri 의 자산 조회는 없는 파일을 물으면 데스크톱 `index.html` 로 대신 답하므로
 /// (manager `get_asset` 의 마지막 대체), 정확히 있는 이름인지 먼저 이 목록으로 본다.
+/// 폰 묶음의 시작 파일 이름(`assets/mobile-<해시>.js`). 판이 바뀌면 이름도 바뀐다. 인사(`hi`)에 실어 보내면 폰이 제가 도는 판과
+/// 견줘 다르면 새로 불러온다 — 홈 화면 앱은 뒤로 보냈다 다시 열면 옛 판이 그대로 남는다.
+fn entry_of(html: &str) -> Option<String> {
+    let at = html.find("src=\"./assets/")? + "src=\"./".len();
+    let end = html[at..].find('"')? + at;
+    let name = &html[at..end];
+    (name.ends_with(".js") && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))).then(|| name.to_string())
+}
+
+fn phone_build(app: &AppHandle) -> &'static str {
+    static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUILD.get_or_init(|| {
+        app.asset_resolver()
+            .get("m/mobile.html".into())
+            .and_then(|a| entry_of(&String::from_utf8_lossy(a.bytes())))
+            .unwrap_or_default()
+    })
+}
+
 fn phone_files(app: &AppHandle) -> &'static std::collections::HashSet<String> {
     static FILES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
     FILES.get_or_init(|| {
@@ -670,7 +689,7 @@ fn on_phone(app: &AppHandle, phone: &str, m: &Value) {
             let Ok(nb) = rc::random::<16>() else { return };
             let keys = rc::session_keys(&pc, &phone_pub, &na, &nb, &dev);
             inner.sessions.insert(phone.to_string(), Session { dev, keys, rx: 0, tx: 0, parts: Vec::new() });
-            plain(&inner, phone, json!({ "k": "hi", "nb": rc::b64u(&nb) }));
+            plain(&inner, phone, json!({ "k": "hi", "nb": rc::b64u(&nb), "v": phone_build(app) }));
         }
         Some("x") => {
             let Some(session) = inner.sessions.get_mut(phone) else { return };
@@ -897,6 +916,15 @@ mod tests {
         for bad in ["http://relay.example", "ftp://x", "https://", "https://a.workers.dev/path", "https://a b", "relay.workers.dev", "http://127.0.0.1.evil.com:80"] {
             assert!(relay_ws(bad).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_build_name_is_the_entry_script_of_the_phone_page() {
+        let html = r#"<head><link rel="manifest" href="./mobile.webmanifest" /><script type="module" crossorigin src="./assets/mobile-C94PaQpb.js"></script>"#;
+        assert_eq!(entry_of(html).as_deref(), Some("assets/mobile-C94PaQpb.js"));
+        assert_eq!(entry_of("<html></html>"), None);
+        assert_eq!(entry_of(r#"src="./assets/x.css""#), None);
+        assert_eq!(entry_of(r#"src="./assets/a b.js""#), None);
     }
 
     #[test]

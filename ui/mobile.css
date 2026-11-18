@@ -120,6 +120,18 @@ body {
 .m-link.off {
   color: var(--bad);
 }
+/* 새 판 띠. 쓰던 말이 있어 저절로 새로 불러오지 않은 때만 뜬다. */
+.m-update {
+  flex: none;
+  width: 100%;
+  padding: 8px 16px;
+  border: 0;
+  background: var(--sun);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
 
 .m-list {
   flex: 1;

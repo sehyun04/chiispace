@@ -102,6 +102,8 @@ type Options = {
   onEvent: (name: string, payload: unknown) => void;
   /** PC 가 이 폰을 모른다(잊었다). */
   onUnpaired: () => void;
+  /** 붙을 때마다 PC 가 알려 주는 폰 묶음의 판(시작 파일 이름). */
+  onVersion?: (v: string) => void;
 };
 
 /** 짝지은 폰의 평소 연결. 끊기면 다시 잇고, 다시 이어지면 `remote:resync` 를 낸다 — 끊긴 사이의 이벤트는 돌아오지 않는다. */
@@ -263,6 +265,7 @@ export class Link {
       this.parts = [];
       this.wait = 1000;
       this.o.onStatus("open");
+      if (typeof m.v === "string" && m.v) this.o.onVersion?.(m.v);
       if (this.everOpen) this.o.onEvent("remote:resync", null);
       this.everOpen = true;
       this.waiting.splice(0).forEach((go) => go());

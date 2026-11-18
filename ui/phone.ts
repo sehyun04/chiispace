@@ -34,6 +34,15 @@ export function fromSnapshot(snap: Snapshot, queued: unknown[] = []): StreamStat
   return s;
 }
 
+/** 폰이 도는 판(`own`, 시작 파일 이름)과 PC 의 판을 견준다. 다르면 새로 불러온다. 입력바에 쓰던 말·붙인 그림이 있으면(`busy`)
+ *  날아가지 않게 묻고(띠), 이 판으로 이미 한 번 새로 불러왔는데도 그대로면(`tried`) 다시 돌지 않게 묻는다. 개발 판처럼 이름을 모르면 두지 않는다. */
+export function updateAction(own: string | null, pc: string | undefined, busy: boolean, tried: string | null): "none" | "reload" | "ask" {
+  const name = (s: string) => s.split("/").pop() ?? s;
+  if (!own || !pc || !/^mobile-[\w-]+\.js$/.test(name(own))) return "none";
+  if (name(own) === name(pc)) return "none";
+  return busy || tried === name(pc) ? "ask" : "reload";
+}
+
 /** PC 의 짝지은 폰 목록에 보일 이름. 폰이 스스로 밝히는 것이라 구별용일 뿐이다. */
 export function deviceName(ua: string): string {
   if (/iPhone/.test(ua)) return "iPhone";
