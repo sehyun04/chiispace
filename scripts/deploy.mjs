@@ -74,13 +74,17 @@ if (appUp && !dry && !flag("--allow-running")) die("앱이 떠 있다. 사용자
 // 3. 그 커밋 그대로의 워크트리
 const wt = path.join(os.tmpdir(), `chiispace-deploy-${short}-${stamp()}`);
 must("git", ["worktree", "add", "-q", "--detach", wt, commit]);
+// 폰 연결 검증은 relay 의 wrangler 로 중계를 이 PC 안에 띄운다. 그 node_modules 도 이어야 검증이 건너뛰어지지 않는다.
+const modules = ["node_modules", path.join("relay", "node_modules")].filter((m) => existsSync(path.join(repo, m)));
 const cleanup = () => {
   // junction 은 rmdir 로만 걷는다 — 재귀 삭제는 원본 node_modules 를 지울 수 있다.
-  sh("cmd", ["/c", "rmdir", path.join(wt, "node_modules")]);
+  for (const m of modules) sh("cmd", ["/c", "rmdir", path.join(wt, m)]);
   sh("git", ["worktree", "remove", "--force", wt]);
 };
 process.on("exit", cleanup);
-must("cmd", ["/c", "mklink", "/J", path.join(wt, "node_modules"), path.join(repo, "node_modules")]);
+for (const m of modules) {
+  if (existsSync(path.dirname(path.join(wt, m)))) must("cmd", ["/c", "mklink", "/J", path.join(wt, m), path.join(repo, m)]);
+}
 const license = "src-tauri/CONPTY-LICENSE.txt";
 const blob = spawnSync("git", ["cat-file", "blob", `${commit}:${license}`], { cwd: repo }).stdout;
 if (!blob || !readFileSync(path.join(wt, license)).equals(blob)) die(`${license} 바이트가 커밋과 다르다(줄바꿈 변환). .gitattributes 를 본다`);
