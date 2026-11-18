@@ -13,6 +13,8 @@
 const ROOM = /^\/(pc|r)\/([0-9a-f]{32})(\/.*)?$/;
 /** 한 방에 붙는 폰 화면 수. 짝짓지 않은 접속이 방을 채우지 못하게 묶는다. */
 const MAX_PHONES = 8;
+/** 폰 화면 파일을 PC 에 묻고 다음 조각을 기다리는 시간. */
+const PART_WAIT = 20000;
 
 export default {
   async fetch(req, env) {
@@ -21,6 +23,19 @@ export default {
     return env.ROOM.get(env.ROOM.idFromName(m[2])).fetch(req);
   },
 };
+
+const open = (ws) => ws.readyState === WebSocket.OPEN;
+
+/** 보내기. 그새 닫힌 연결이면 조용히 버린다 — 한 연결의 마무리 때문에 방 전체가 예외로 멈추면 안 된다. */
+function tell(ws, text) {
+  if (!ws) return false;
+  try {
+    ws.send(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function sha256hex(text) {
   const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -51,12 +66,14 @@ export class Room {
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
+  /** 지금 열린 PC 연결. PC 가 다시 붙으면 앞 연결은 닫는데, 닫힌 연결도 상대가 마무리할 때까지 목록에 남는다 —
+   *  맨 앞 것을 고르면 닫힌 연결에 보내다 예외로 죽는다(Cloudflare 1101, 11월 18일 사용자). 열린 것 중 가장 새것을 고른다. */
   pc() {
-    return this.ctx.getWebSockets("pc")[0];
+    return this.ctx.getWebSockets("pc").filter(open).at(-1);
   }
 
   phones() {
-    return this.ctx.getWebSockets("phone");
+    return this.ctx.getWebSockets("phone").filter(open);
   }
 
   idOf(ws) {
@@ -89,8 +106,8 @@ export class Room {
       }
       const { 0: client, 1: server } = new WebSocketPair();
       this.ctx.acceptWebSocket(server, ["pc"]);
-      server.send(JSON.stringify({ t: "hello", phones: this.phones().map((p) => this.idOf(p)) }));
-      for (const p of this.phones()) p.send(JSON.stringify({ relay: "pc-online" }));
+      tell(server, JSON.stringify({ t: "hello", phones: this.phones().map((p) => this.idOf(p)) }));
+      for (const p of this.phones()) tell(p, JSON.stringify({ relay: "pc-online" }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -102,8 +119,8 @@ export class Room {
       this.ctx.acceptWebSocket(server, ["phone"]);
       server.serializeAttachment({ id });
       const pc = this.pc();
-      server.send(JSON.stringify({ relay: pc ? "pc-online" : "pc-offline" }));
-      pc?.send(JSON.stringify({ t: "open", p: id }));
+      tell(server, JSON.stringify({ relay: pc ? "pc-online" : "pc-offline" }));
+      tell(pc, JSON.stringify({ t: "open", p: id }));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -112,13 +129,24 @@ export class Room {
     if (!pc) return page(503, "PC 가 안 보인다", "집 PC 의 chiispace 가 꺼져 있거나 [폰 연결]이 꺼져 있다.");
     const q = crypto.randomUUID();
     const path = rest === "/" ? "" : decodeURIComponent(rest.slice(1));
+    // PC 가 휴대폰 망(테더링)에 있으면 큰 파일(글꼴 2MB)은 다 받기까지 수십 초가 걸린다. 다 받을 때까지가 아니라 조각 사이를
+    // 재서, 조각이 오는 동안은 기다린다.
     const res = await new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      const w = { resolve, parts: [], timer: 0 };
+      w.arm = () => {
+        clearTimeout(w.timer);
+        w.timer = setTimeout(() => {
+          this.pending.delete(q);
+          resolve(null);
+        }, PART_WAIT);
+      };
+      w.arm();
+      this.pending.set(q, w);
+      if (!tell(pc, JSON.stringify({ t: "get", q, path }))) {
+        clearTimeout(w.timer);
         this.pending.delete(q);
         resolve(null);
-      }, 20000);
-      this.pending.set(q, { resolve, timer, parts: [] });
-      pc.send(JSON.stringify({ t: "get", q, path }));
+      }
     });
     if (!res) return page(504, "PC 가 답하지 않는다", "잠시 뒤 다시 열어 줘.");
     const headers = {
@@ -140,7 +168,7 @@ export class Room {
     const [tag] = this.ctx.getTags(ws);
     if (tag === "phone") {
       // 폰의 말은 열지 않고 PC 로 넘긴다. 짝짓기 말 말고는 암호문이다.
-      this.pc()?.send(JSON.stringify({ t: "msg", p: this.idOf(ws), d: msg }));
+      tell(this.pc(), JSON.stringify({ t: "msg", p: this.idOf(ws), d: msg }));
       return;
     }
     let m;
@@ -149,7 +177,7 @@ export class Room {
     } catch {
       return;
     }
-    if (m.t === "msg" && typeof m.d === "string") this.phone(m.p)?.send(m.d);
+    if (m.t === "msg" && typeof m.d === "string") tell(this.phone(m.p), m.d);
     else if (m.t === "kick") {
       try {
         this.phone(m.p)?.close(4001, "kicked");
@@ -158,7 +186,7 @@ export class Room {
       const w = this.pending.get(m.q);
       if (!w) return;
       w.parts.push(m.b ?? "");
-      if (m.more) return;
+      if (m.more) return w.arm();
       clearTimeout(w.timer);
       this.pending.delete(m.q);
       const bin = atob(w.parts.join(""));
@@ -170,12 +198,16 @@ export class Room {
 
   webSocketClose(ws, code, reason) {
     const [tag] = this.ctx.getTags(ws);
-    if (tag === "phone") this.pc()?.send(JSON.stringify({ t: "gone", p: this.idOf(ws) }));
-    else if (!this.pc() || this.pc() === ws) {
-      for (const p of this.phones()) p.send(JSON.stringify({ relay: "pc-offline" }));
+    if (tag === "phone") tell(this.pc(), JSON.stringify({ t: "gone", p: this.idOf(ws) }));
+    // 닫힌 것이 앞 PC 연결이고 새 연결이 열려 있으면 폰에 알릴 것이 없다.
+    else if (!this.pc()) {
+      for (const p of this.phones()) tell(p, JSON.stringify({ relay: "pc-offline" }));
     }
+    // 닫기를 마무리해야 목록에서 빠진다. 앱이 갑자기 꺼지면 1006 이 오는데 그 번호는 close() 에 줄 수 없어(1000·3000~4999 만)
+    // 예외가 나고 닫힌 연결이 그대로 남았다.
+    const ok = code === 1000 || (code >= 3000 && code <= 4999);
     try {
-      ws.close(code === 1005 ? 1000 : code, reason);
+      ws.close(ok ? code : 1000, ok ? reason : "");
     } catch {}
   }
 

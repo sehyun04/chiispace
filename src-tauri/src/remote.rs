@@ -40,6 +40,9 @@ const CHUNK: usize = 240_000;
 const MAX_MESSAGE: usize = 48 * 1024 * 1024;
 /// 이보다 긴 말은 암호화 전에 gzip 으로 줄인다. 원문 JSON 은 다섯 배쯤 준다.
 const SQUEEZE: usize = 4096;
+/// 중계에 숨 쉬는 줄을 보내는 간격과, 그 답조차 없으면 연결이 죽은 것으로 보는 시간.
+const PING_EVERY: Duration = Duration::from_secs(20);
+const SILENT_LIMIT: Duration = Duration::from_secs(45);
 /// 폰으로 넘기는 이벤트. 대화창이 듣는 것뿐이다.
 const EVENTS: &[&str] = &["claude:chat", "claude:chat-exit", "claude:chat-answered", "chat:live", "chat:sub"];
 /// 폰이 보낼 수 있는 제어 요청. 하던 일 멈추기만 연다 — 모델·권한 모드 바꾸기는 PC 에서 한다.
@@ -511,10 +514,10 @@ async fn serve(app: &AppHandle, ws: Ws, epoch: u64) {
             }
         }
     });
-    // 중계·회선이 조용한 연결을 끊지 않게 숨 쉬는 줄을 보낸다. 중계는 이 줄에 잠에서 깨지 않고 답한다.
+    // 중계·회선이 조용한 연결을 끊지 않게 숨 쉬는 줄을 보낸다. 중계는 이 줄에 잠에서 깨지 않고 바로 답한다(pong).
     let pinger = tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(25)).await;
+            tokio::time::sleep(PING_EVERY).await;
             if tx.send("ping".into()).is_err() {
                 break;
             }
@@ -523,7 +526,14 @@ async fn serve(app: &AppHandle, ws: Ws, epoch: u64) {
     // [끄기]는 이 함수를 도중에 버린다(`stop` 의 abort). 그때도 두 일을 거둬야 한다 — 쓰기 쪽이 소켓 반쪽을 쥔 채 숨을
     // 계속 쉬면 중계는 PC 가 아직 있다고 보고, 폰의 화면 요청을 답 없는 PC 에 넘겨 20초씩 붙잡았다.
     let _tasks = AbortOnDrop(vec![writer, pinger]);
-    while let Some(Ok(msg)) = stream.next().await {
+    loop {
+        // 숨 쉬는 줄의 답조차 한참 없으면 반쯤 끊긴 연결이다. 휴대폰 망(테더링)은 조용한 연결을 소리 없이 버리는데, 그때
+        // 쓰기는 OS 버퍼에 쌓이기만 해 몇 분씩 오류가 안 난다. 그동안 앱은 붙은 줄 알고 중계는 죽은 연결에 폰 요청을 넘겨
+        // 폰에는 504 만 보였다(11월 18일 사용자). 기다리지 않고 끊고 다시 붙는다.
+        let msg = match tokio::time::timeout(SILENT_LIMIT, stream.next()).await {
+            Ok(Some(Ok(m))) => m,
+            _ => break,
+        };
         let Message::Text(text) = msg else { continue };
         if text.as_str() == "pong" {
             continue;

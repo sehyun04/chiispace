@@ -362,6 +362,26 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.equal((await fetch(page + "mobile.webmanifest")).headers.get("content-type"), "application/manifest+json");
       assert.equal((await fetch(page + "index.html")).status, 404, "데스크톱 화면 파일을 내줌");
       assert.equal((await fetch(`${relayBase}/r/${randomBytes(16).toString("hex")}/`)).status, 503, "다른 방이 PC 를 봄");
+      // PC 가 다시 붙으면 중계는 앞 연결을 닫는다. 닫힌 연결은 한동안 목록에 남는데, 거기에 보내다 예외로 죽으면 폰에는
+      // Cloudflare 1101 만 보인다(11월 18일 사용자). 맞는 비밀로 한 번 끼어들어 앱을 밀어낸 뒤, 앱이 다시 붙고 화면이 나오는지 본다.
+      assert.equal(await pcUpgrade(secret), 101, "맞는 비밀로 PC 자리에 못 붙음");
+      assert.ok(
+        await until(async () => (await fetch(page, { signal: AbortSignal.timeout(5000) }).then((r) => r.status, () => 0)) === 200, 100),
+        "PC 가 다시 붙은 뒤 폰 화면이 안 나옴",
+      );
+      assert.ok(await until(() => /중계에 붙음/.test(dom().remote?.state ?? ""), 100), "밀려난 앱이 다시 안 붙음: " + JSON.stringify(dom().remote));
+      // 앱이 갑자기 꺼졌다 다시 켜져도(중계에는 비정상 종료 1006 이 간다) 새 연결로 화면이 나와야 한다.
+      app.kill();
+      for (let i = 0; i < 50 && app.exitCode === null; i++) await delay(100);
+      latest = {};
+      app = launch();
+      assert.ok(await until(() => dom().input && !dom().inputDisabled, 600), "다시 켠 앱의 claude 가 안 켜짐: " + JSON.stringify(dom()));
+      commands.push({ in: "side", click: ".side-remote" });
+      assert.ok(await until(() => /중계에 붙음/.test(dom().remote?.state ?? ""), 200), "다시 켠 앱이 중계에 안 붙음: " + JSON.stringify(dom().remote));
+      assert.ok(
+        await until(async () => (await fetch(page, { signal: AbortSignal.timeout(5000) }).then((r) => r.status, () => 0)) === 200, 60),
+        "앱을 다시 켠 뒤 폰 화면이 안 나옴",
+      );
       // 방 주인은 처음 붙은 PC 의 비밀이다. 다른 비밀로는 PC 자리에 못 붙는다.
       assert.equal(await pcUpgrade(randomBytes(32).toString("hex")), 403, "다른 비밀로 PC 자리에 붙음");
 
@@ -433,8 +453,10 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("HELLO_A_REPLY")) && dom().mine?.some((t) => t.includes("HELLO_A")), 400), "폰에서 보낸 말이 PC 칸에 안 남음: " + JSON.stringify(dom()));
       const seen = () => JSON.stringify({ statuses, events: Object.entries(events.reduce((n, x) => ((n[x.e] = (n[x.e] ?? 0) + 1), n), {})), wire: wire.length, live: events.filter((x) => x.e === "chat:live").map((x) => x.p.phase) });
       assert.ok(await until(() => events.some((x) => x.e === "chat:live" && JSON.stringify(x.p).includes("HELLO_A_REPLY")), 50), "쓰이는 중인 답이 폰에 안 옴: " + seen());
-      const lines = events.filter((x) => x.e === "claude:chat").map((x) => x.p.line);
-      assert.ok(lines.some((l) => l.includes('"type":"result"')), "통로 줄이 폰에 안 옴");
+      // 실제 망에서는 턴 끝 줄(result)도 PC 화면의 말풍선보다 늦게 닿는다.
+      const chatLines = () => events.filter((x) => x.e === "claude:chat").map((x) => x.p.line);
+      assert.ok(await until(() => chatLines().some((l) => l.includes('"type":"result"')), 50), "통로 줄이 폰에 안 옴: " + seen());
+      const lines = chatLines();
       assert.ok(!lines.some((l) => l.startsWith('{"type":"stream_event"')), "답의 조각을 폰 망에 두 번 실음");
       const rawText = await call("claude_transcript_raw", { root: cwd, id: sid });
       assert.match(rawText, /HELLO_A_REPLY/, "폰이 대화 원문을 못 읽음");
