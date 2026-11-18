@@ -35,7 +35,7 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   처음엔 Tailscale 로 만들었다가 사용자가 "Tailscale 말고"라고 해 중계로 바꿨다. PC 옆칸 맨 아래 폰 단추 → [폰 연결].
   중계는 사용자가 자기 계정에 한 번 올린다(`relay` 에서 `npx wrangler login`·`npx wrangler deploy`) — 아직 안 올렸다.
 
-- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 12일 22:34(`e865788`, Claude 대화창 그림 넣기 판).
+- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 18일 19:37(`3c67e94`, 폰 연결 Cloudflare 중계판 — `/memory`·`/export`·`/copy` 포함).
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
 - **사용자 실사용 확인이 남은 것:** 이번 Codex 첫 연결 안내와 터미널 왕복, 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
   실제 모델 변경 뒤 연속 대화. 자동 검증 통과를 실사용 해결로 간주하지 않는다(9월 16일 사용자 재신고 뒤의 원칙).
