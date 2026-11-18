@@ -36,7 +36,7 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   중계는 사용자 계정에 11월 18일 올렸다(`https://chiispace-relay.ds187.workers.dev`, 로그인은 사용자가 브라우저에서 허락). 사용자 앱 설정(`remote.json`)에
   주소를 넣고 켜 두었다. 실제 중계로 격리 앱 검증은 통과했고, 아이폰으로 짝짓는 것은 사용자 확인이 남았다.
 
-- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 18일 19:37(`3c67e94`, 폰 연결 Cloudflare 중계판 — `/memory`·`/export`·`/copy` 포함).
+- **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 18일 20:42(`57d6240`, 폰 연결 중계 1101 수정·45초 무응답이면 다시 붙기 판). 앱이 떠 있어 `--allow-running` 으로 바꿨다 — 다시 켜야 적용된다.
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
 - **사용자 실사용 확인이 남은 것:** 이번 Codex 첫 연결 안내와 터미널 왕복, 켤 때 터미널 없는 칸으로 옮겨진 Claude 칸, 새 Codex 칸 수정판(첫 턴 이름),
   실제 모델 변경 뒤 연속 대화. 자동 검증 통과를 실사용 해결로 간주하지 않는다(9월 16일 사용자 재신고 뒤의 원칙).
