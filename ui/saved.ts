@@ -61,6 +61,38 @@ export function readSaved(raw: string | null): SavedSession | null {
 
 export const leavesOf = (tabs: Tab[]): string[] => tabs.flatMap((t) => (t.layout ? L.leaves(t.layout) : []));
 
+const samePath = (a: string, b: string | null) => {
+  const n = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return b !== null && n(a) === n(b);
+};
+
+/** 대화창 하나뿐인 탭은 그 칸의 폴더를 탭 폴더로 따라간다. 대화창은 폴더 칩·`/resume` 으로 폴더를 바꾸는데,
+ *  탭이 처음 폴더에 남으면 옆칸 묶음 이름·git 가지·거기서 새로 나눈 칸의 폴더가 옛 폴더를 가리킨다.
+ *
+ *  칸의 폴더가 **바뀌었을 때만** 따라간다(`seen` 은 칸마다 마지막에 본 폴더, 이 함수가 고친다). 늘 맞추면 폴더 단추로
+ *  고른 탭 폴더를 곧바로 되돌린다. 켠 뒤 처음 보는 칸도 바뀐 것으로 친다 — 이 규칙 전에 어긋난 채 저장된 탭이 켤 때 고쳐진다.
+ *  서브에이전트 칸은 본 칸 폴더를 그대로 보여 주는 칸이라 세지 않는다. 빈 폴더(홈에서 연 대화창)는 따라가지 않는다.
+ *  돌려주는 것은 바꿀 탭 키와 새 폴더다. 부른 쪽은 그때의 탭 목록에 이것만 덧입힌다(그 사이 다른 변경을 덮지 않게). */
+export function followRoots(
+  tabs: Tab[],
+  streams: Record<string, StreamChat>,
+  subPanes: Record<string, unknown>,
+  seen: Map<string, string>,
+): Record<string, string> {
+  const moved: Record<string, string> = {};
+  for (const t of tabs) {
+    const ids = t.layout ? L.leaves(t.layout).filter((id) => !subPanes[id]) : [];
+    const id = ids.length === 1 ? ids[0] : undefined;
+    const cwd = id ? streams[id]?.cwd : undefined;
+    if (!id || !cwd) continue;
+    const before = seen.get(id);
+    seen.set(id, cwd);
+    if ((before !== undefined && samePath(cwd, before)) || samePath(cwd, t.root)) continue;
+    moved[t.key] = cwd;
+  }
+  return moved;
+}
+
 /** 켤 때 터미널 없는 칸으로 옮길 Claude 칸을 고른다. 대화 파일이 그 폴더에 실제로 있는 것만 —
  *  다른 폴더에서 열었던 대화라 못 찾으면 새 대화로 덮게 되므로 예전처럼 터미널로 연다.
  *  `transcriptSize` 는 앱에서는 `claude_transcript_size` 이고, 검증에서는 흉내 낸다. */

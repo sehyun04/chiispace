@@ -21,7 +21,7 @@ import { SplitPicker, type SplitChoice } from "./SplitPicker";
 import { useGit } from "./git";
 import * as L from "./layout";
 import { usePaneBridge } from "./bridge";
-import { bootStreams, leavesOf, readSaved, savedJson, savedSubPanes, type Tab } from "./saved";
+import { bootStreams, followRoots, leavesOf, readSaved, savedJson, savedSubPanes, type Tab } from "./saved";
 import { usePaneAgents } from "./usePaneAgents";
 import { useStreams } from "./useStreams";
 import { RemotePanel, useRemotePanes } from "./RemotePanel";
@@ -307,6 +307,14 @@ export default function App() {
     // ref 라 바뀌어도 다시 그리지 않는다)이 폴링을 따라 저장되게 하려는 것이다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabs, active, fontSize, booted, stat, names, paneTitles, casting, sideOpen, streamMap, keepTerm, subs.subPanes]);
+
+  // 대화창 하나뿐인 탭은 그 칸이 폴더를 바꾸면 탭 폴더도 따라간다(saved.ts followRoots).
+  const seenCwd = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!booted) return;
+    const moved = followRoots(tabs, streamMap, subs.subPanes, seenCwd.current);
+    if (Object.keys(moved).length) setTabs((ts) => ts.map((t) => (moved[t.key] ? { ...t, root: moved[t.key] } : t)));
+  }, [booted, tabs, streamMap, subs.subPanes]);
 
   useTabCleanup(tabs, tabsNow, setTabs, setActive);
   useShortcuts(cur, tabs.length, chats, {

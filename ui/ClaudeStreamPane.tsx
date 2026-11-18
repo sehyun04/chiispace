@@ -194,6 +194,24 @@ export function ClaudeStreamPane({
     if (st.session && st.session !== session) onSession(id, st.session);
   }, [st.session, session, id, onSession]);
 
+  // `/rename` 으로 붙인 대화 이름을 칸 이름으로 쓴다. claude 는 그 이름을 대화 파일에만 적고 통로로는 알려 주지
+  // 않으므로, 칸이 켜질 때·대화가 바뀔 때·`/rename` 을 보낸 뒤 파일에서 읽는다. 콜백은 ref 로 들어 읽기가 렌더마다 돌지 않게 한다.
+  const titleRef = useRef(onTitle);
+  titleRef.current = onTitle;
+  const [renamed, setRenamed] = useState(0);
+  const conversationId = st.session ?? session;
+  useEffect(() => {
+    if (!conversationId) return;
+    let live = true;
+    invoke<string>("claude_custom_title", { root: cwd, id: conversationId }).then(
+      (t) => live && t && titleRef.current(id, t),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, cwd, conversationId, renamed]);
+
   // 칸을 막 열었을 때는 claude 가 아직 안 떠 입력바가 꺼져 있어 App 이 준 포커스를 못 받는다.
   // 켜지는 순간 잡힌 칸이면 다시 준다 — 안 그러면 새 대화를 열고도 한 번 더 눌러야 친다.
   useEffect(() => {
@@ -219,6 +237,14 @@ export function ClaudeStreamPane({
         if (title) {
           titled.current = true;
           onTitle(id, title);
+        }
+        const rename = /^\/rename(?:\s+([\s\S]*))?$/i.exec(text.trim());
+        if (rename) {
+          // 이름을 적었으면 바로 보인다. 안 적으면 claude 가 지으므로 파일에서 읽는다. 명령이 언제 끝나는지는
+          // 통로가 따로 알려 주지 않아 두 번 늦게 읽는다 — 앞엣것이 이르면 뒤엣것이 잡는다.
+          const named = rename[1]?.trim().split(/\r?\n/)[0];
+          if (named) onTitle(id, named);
+          for (const ms of [1500, 5000]) window.setTimeout(() => setRenamed((n) => n + 1), ms);
         }
       },
       interrupt: () => void send(interruptLine()).catch(() => {}),

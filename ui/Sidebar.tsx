@@ -125,7 +125,7 @@ export function Sidebar({
             return (
               <div key={t.key} className={ti === active ? "tgroup on" : "tgroup"}>
                 <div className="tg-head" onMouseDown={() => onSelectPane(ti)}>
-                  <span className="tg-name">{t.root?.split("/").pop() ?? "shell"}</span>
+                  <span className="tg-name">{t.root?.split(/[\\/]/).filter(Boolean).pop() ?? "shell"}</span>
                   {t.shell ? <span className="tg-shell">{shellName(t.shell)}</span> : null}
                   {ti === active && git.branch ? (
                     <span className="tg-branch">
@@ -149,6 +149,8 @@ export function Sidebar({
                   const st = stat[sl.id];
                   const here = ti === active;
                   const nm = names[sl.id] || paneTitles[sl.id] || label(sl.id, stat, titles);
+                  // 칸마다 제 폴더를 보인다. 한 탭 안에서도 대화창은 폴더 칩으로, 셸은 cd 로 탭 폴더를 떠난다.
+                  const where = (st?.cwd || t.root)?.replace(/\\/g, "/") ?? null;
                   return (
                     <div
                       key={sl.id}
@@ -173,7 +175,7 @@ export function Sidebar({
                       </button>
                       <span className="pmeta">
                         <span className="nm">{nm}</span>
-                        <span className="sub">{shortPath(t.root)}</span>
+                        <span className="sub">{shortPath(where)}</span>
                       </span>
                       {st?.busy ? <span className="work" /> : null}
                       <button

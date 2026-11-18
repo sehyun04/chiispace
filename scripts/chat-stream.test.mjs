@@ -134,6 +134,9 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
       const texts = (sel) => [...(over?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
       const dom = {
         tabs: side?.querySelectorAll('.tgroup').length ?? 0,
+        sideGroup: side?.querySelector('.tgroup.on .tg-name')?.textContent ?? null,
+        sideNames: [...(side?.querySelectorAll('.tgroup.on .prow .nm') ?? [])].map(e => e.textContent),
+        sideSubs: [...(side?.querySelectorAll('.tgroup.on .prow .sub') ?? [])].map(e => e.textContent),
         slot: !!slot,
         xterm: !!slot?.querySelector('.xterm'),
         termButton: !!over?.querySelector('.composer-term'),
@@ -441,6 +444,22 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.equal(requests.find(r => r.mark === "STREAM_CLEARED").hello, false, "/clear 뒤에도 지난 말이 실림");
     assert.ok(await until(() => dom().title === "STREAM_CLEARED 새로", 50), "새 대화의 첫 말이 이름이 안 됨: " + dom().title);
 
+    // /rename: claude 는 이름을 대화 파일에만 적고 통로로는 알려 주지 않는다. 칸 머리줄·옆칸 이름이 그 이름을 따라가고,
+    // 그 이름은 앱이 꾸민 것이 아니라 claude 가 대화 파일에 적은 것과 같다.
+    commands.push({ send: "/rename STREAM_RENAMED 이름" });
+    assert.ok(await until(() => dom().title === "STREAM_RENAMED 이름" && (dom().sideNames ?? []).includes("STREAM_RENAMED 이름"), 100),
+      "/rename 이 칸 이름에 안 옴: " + JSON.stringify({ title: dom().title, side: dom().sideNames }));
+    const renamedSid = saved().streams["%1"].session;
+    const transcriptOf = (id) => {
+      for (const d of readdirSync(path.join(home, "projects"))) {
+        const f = path.join(home, "projects", d, id + ".jsonl");
+        if (existsSync(f)) return readFileSync(f, "utf8");
+      }
+      return "";
+    };
+    assert.ok(await until(() => transcriptOf(renamedSid).includes('"customTitle":"STREAM_RENAMED 이름"'), 100), "claude 가 대화 파일에 이름을 안 적음");
+    assert.ok(await until(() => saved().paneTitles?.["%1"] === "STREAM_RENAMED 이름", 50), "바꾼 이름이 세션에 안 남음: " + JSON.stringify(saved().paneTitles));
+
     // /resume: 이 폴더의 지난 대화 목록에서 /clear 앞의 대화를 골라 그 대화로 다시 연다. 목록은 보여 주기만 하고
     // 고르는 것은 사람이다. 지금 대화에는 "지금"이 붙는다.
     const afterClear = saved().streams?.["%1"]?.session;
@@ -472,6 +491,11 @@ test("새 대화의 Claude 는 터미널 없이 대화창만으로 주고받고,
     assert.ok(await until(() => same(saved().streams?.["%1"]?.cwd ?? "", root) && saved().streams["%1"].session !== cleared, 100),
       "폴더를 바꿨는데 그 폴더의 새 대화가 안 됨: " + JSON.stringify(saved().streams));
     assert.ok(await until(() => dom().folder === path.basename(root) && dom().title === "새 대화" && !dom().inputDisabled, 200), "새 폴더로 다시 안 열림: " + JSON.stringify(dom()));
+    // 대화창 하나뿐인 탭이라 옆칸 묶음 이름과 칸 줄의 폴더도 새 폴더를 따라간다. 처음 폴더(project)에 남지 않는다.
+    assert.ok(await until(() => dom().sideGroup === path.basename(root) && (dom().sideSubs ?? []).some(s => s.endsWith(path.basename(root))), 100),
+      "옆칸이 옛 폴더에 남음: " + JSON.stringify({ group: dom().sideGroup, subs: dom().sideSubs }));
+    assert.ok(await until(() => same(saved().tabs?.find(t => JSON.stringify(t.layout).includes('"%1"'))?.root ?? "", root), 50),
+      "탭 폴더가 저장에 안 남음: " + JSON.stringify(saved().tabs));
     assert.ok(!dom().theirs.some(t => t.includes("STREAM_CLEARED")), "폴더를 바꿨는데 지난 대화를 그림");
     // 앞 폴더의 claude 는 이번 실행에서 --resume sid 로 떴다(/clear 뒤에도 그 명령줄 그대로다).
     assert.ok(await until(() => streamProcs(sid) === 0, 80), "폴더를 바꿨는데 앞 폴더의 claude 가 남음");

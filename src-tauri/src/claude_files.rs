@@ -112,10 +112,15 @@ pub struct Conversation {
 /// 대화 파일 하나의 이름. 사용자가 `/rename` 으로 붙인 이름, claude 가 지은 이름, 마지막에 보낸 말 순으로 고른다.
 /// 이 기록들은 파일 앞뒤에 붙으므로 수 MB 대화를 통째로 읽지 않고 앞·뒤만 본다.
 fn conversation_title(path: &std::path::Path) -> String {
+    let (head, tail) = head_tail(path);
+    title_from(&head, &tail)
+}
+
+fn head_tail(path: &std::path::Path) -> (String, String) {
     use std::io::{Read, Seek, SeekFrom};
     const HEAD: u64 = 64 * 1024;
     const TAIL: u64 = 256 * 1024;
-    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let Ok(mut f) = std::fs::File::open(path) else { return (String::new(), String::new()) };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let mut head = vec![0; HEAD.min(len) as usize];
     let _ = f.read_exact(&mut head);
@@ -124,33 +129,58 @@ fn conversation_title(path: &std::path::Path) -> String {
         let _ = f.seek(SeekFrom::Start(len.saturating_sub(TAIL).max(HEAD)));
         let _ = f.read_to_end(&mut tail);
     }
-    title_from(&String::from_utf8_lossy(&head), &String::from_utf8_lossy(&tail))
+    (String::from_utf8_lossy(&head).into_owned(), String::from_utf8_lossy(&tail).into_owned())
 }
 
-fn title_from(head: &str, tail: &str) -> String {
-    // 자른 자리의 반 토막 줄은 파싱되지 않아 저절로 빠진다.
-    let records = || head.lines().chain(tail.lines()).filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok());
-    let last = |kind: &str, key: &str| {
-        records()
-            .filter(|v| v["type"] == kind)
-            .filter_map(|v| v[key].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from))
-            .last()
-    };
-    let first_prompt = || {
-        records().filter(|v| v["type"] == "user" && v["isMeta"] != true).find_map(|v| {
-            let text = v["message"]["content"].as_str()?.trim();
-            // 명령·훅이 남긴 꼬리표 줄은 사용자가 친 말이 아니다.
-            (!text.is_empty() && !text.starts_with('<')).then(|| text.to_string())
-        })
-    };
-    let title = last("custom-title", "customTitle")
-        .or_else(|| last("ai-title", "aiTitle"))
-        .or_else(|| last("last-prompt", "lastPrompt"))
-        .or_else(first_prompt)
-        .unwrap_or_default();
+/// 그 종류의 기록 중 마지막 것. 자른 자리의 반 토막 줄은 파싱되지 않아 저절로 빠진다.
+fn last_record(head: &str, tail: &str, kind: &str, key: &str) -> Option<String> {
+    head.lines()
+        .chain(tail.lines())
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["type"] == kind)
+        .filter_map(|v| v[key].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from))
+        .last()
+}
+
+fn one_line(title: &str) -> String {
     let line = title.lines().next().unwrap_or_default();
     let chars: Vec<char> = line.chars().collect();
     if chars.len() > 60 { chars[..60].iter().collect::<String>() + "…" } else { line.to_string() }
+}
+
+fn title_from(head: &str, tail: &str) -> String {
+    let first_prompt = || {
+        head.lines()
+            .chain(tail.lines())
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["type"] == "user" && v["isMeta"] != true)
+            .find_map(|v| {
+                let text = v["message"]["content"].as_str()?.trim();
+                // 명령·훅이 남긴 꼬리표 줄은 사용자가 친 말이 아니다.
+                (!text.is_empty() && !text.starts_with('<')).then(|| text.to_string())
+            })
+    };
+    let title = last_record(head, tail, "custom-title", "customTitle")
+        .or_else(|| last_record(head, tail, "ai-title", "aiTitle"))
+        .or_else(|| last_record(head, tail, "last-prompt", "lastPrompt"))
+        .or_else(first_prompt)
+        .unwrap_or_default();
+    one_line(&title)
+}
+
+/// 사용자가 `/rename` 으로 붙인 대화 이름. 없으면 빈 값.
+///
+/// 대화창 칸은 첫 말로 이름을 짓는데, `/rename` 은 claude 가 대화 파일에만 적고 통로로는 알려 주지 않는다.
+/// 그래서 칸이 켜질 때와 `/rename` 을 보낸 뒤 여기서 읽는다. claude 가 지은 이름(ai-title)은 주지 않는다 —
+/// 그것까지 받으면 첫 말로 지은 칸 이름이 켤 때마다 claude 이름으로 바뀐다. 어느 대화인지는 부른 쪽이 준 id 다.
+#[tauri::command]
+pub fn claude_custom_title(app: AppHandle, root: String, id: String) -> String {
+    session_file(&app, &root, &id)
+        .map(|p| {
+            let (head, tail) = head_tail(&p);
+            last_record(&head, &tail, "custom-title", "customTitle").map(|t| one_line(&t)).unwrap_or_default()
+        })
+        .unwrap_or_default()
 }
 
 /// 그 폴더의 대화들, 최근 것부터 30개. 빈 폴더(`cwd` 빈 값)는 홈이다 — 폴더 없이 연 대화창은 홈에서 돈다(claude_chat.rs).
@@ -503,7 +533,7 @@ mod session_of_pid_tests {
 
 #[cfg(test)]
 mod conversation_tests {
-    use super::title_from;
+    use super::{last_record, title_from};
 
     #[test]
     fn names_come_from_rename_then_claude_then_last_prompt() {
@@ -519,5 +549,14 @@ mod conversation_tests {
         // 자른 자리의 반 토막 줄과 긴 이름.
         let long = format!(r#"{{"type":"custom-title","customTitle":"{}"}}"#, "가".repeat(80));
         assert_eq!(title_from("", &format!("le\":\"x\"}}\n{long}")), format!("{}…", "가".repeat(60)));
+    }
+
+    #[test]
+    fn custom_title_is_only_the_renamed_one() {
+        let ai = r#"{"type":"ai-title","aiTitle":"claude 가 지은 이름"}"#;
+        let old = r#"{"type":"custom-title","customTitle":"옛 이름"}"#;
+        let new = r#"{"type":"custom-title","customTitle":"치이OS"}"#;
+        assert_eq!(last_record(ai, "", "custom-title", "customTitle"), None, "claude 가 지은 이름은 칸 이름을 덮지 않는다");
+        assert_eq!(last_record(&[old, ai].join("\n"), new, "custom-title", "customTitle").as_deref(), Some("치이OS"));
     }
 }

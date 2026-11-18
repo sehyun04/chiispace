@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bootStreams, leavesOf, readSaved, savedJson, savedSubPanes } from "../ui/saved.ts";
+import { bootStreams, followRoots, leavesOf, readSaved, savedJson, savedSubPanes } from "../ui/saved.ts";
 
 const sid = "12345678-2222-4222-8222-222222222222";
 const other = "87654321-3333-4333-8333-333333333333";
@@ -83,4 +83,25 @@ test("서브에이전트 칸은 모양이 맞는 것만 되살리고, 다시 켤
   assert.equal(read["%2"].done, true);
   assert.equal(read["%6"].label, "서브에이전트");
   for (const bad of [null, [], "x", 3]) assert.deepEqual(savedSubPanes(bad), {});
+});
+
+test("대화창 하나뿐인 탭은 그 칸이 폴더를 바꾸면 탭 폴더도 따라간다", () => {
+  const chat = (cwd) => ({ agent: "claude", session: sid, cwd });
+  const one = [{ key: "t37", layout: leaf("%89"), root: "C:/Users/me/Desktop/sehyun/kasaspace", focus: "%89" }];
+  const seen = new Map();
+  // 이 규칙 전에 어긋난 채 저장된 탭: 켤 때 처음 보는 칸이라 바로 고쳐진다.
+  assert.deepEqual(followRoots(one, { "%89": chat("C:/Users/me/Desktop/sehyun/chiiOS") }, {}, seen), { t37: "C:/Users/me/Desktop/sehyun/chiiOS" });
+  // 폴더 단추로 탭 폴더를 따로 골랐으면 칸 폴더가 그대로인 동안은 되돌리지 않는다.
+  const picked = [{ ...one[0], root: "C:/elsewhere" }];
+  assert.deepEqual(followRoots(picked, { "%89": chat("C:/Users/me/Desktop/sehyun/chiiOS") }, {}, seen), {});
+  // 폴더 칩으로 다시 바꾸면 따라간다. 대소문자·구분자·끝 슬래시만 다른 것은 같은 폴더다.
+  assert.deepEqual(followRoots(picked, { "%89": chat("C:\\work\\") }, {}, seen), { t37: "C:\\work\\" });
+  assert.deepEqual(followRoots([{ ...one[0], root: "c:/WORK" }], { "%89": chat("C:/work/") }, {}, new Map()), {});
+  // 홈에서 연 대화창(빈 폴더)·칸이 여럿인 탭·셸만 든 탭은 그대로 둔다.
+  assert.deepEqual(followRoots(one, { "%89": chat("") }, {}, new Map()), {});
+  assert.deepEqual(followRoots(tabs, { "%1": chat("C:/x") }, {}, new Map()), {});
+  assert.deepEqual(followRoots(one, {}, {}, new Map()), {});
+  // 서브에이전트 칸은 세지 않는다.
+  const withSub = [{ key: "t1", layout: { kind: "split", dir: "h", ratio: 0.5, a: leaf("%1"), b: leaf("%2") }, root: "C:/old", focus: "%1" }];
+  assert.deepEqual(followRoots(withSub, { "%1": chat("C:/new") }, { "%2": { parent: "%1" } }, new Map()), { t1: "C:/new" });
 });

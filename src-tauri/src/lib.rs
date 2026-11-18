@@ -344,6 +344,7 @@ pub fn run() {
             claude_files::claude_transcript_raw,
             claude_files::claude_transcript_size,
             claude_files::claude_conversations,
+            claude_files::claude_custom_title,
             claude_files::claude_subagents,
             claude_files::claude_subagent_raw,
             claude_files::claude_subagent_size,
