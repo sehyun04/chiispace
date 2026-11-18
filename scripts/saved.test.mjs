@@ -78,10 +78,13 @@ test("서브에이전트 칸은 모양이 맞는 것만 되살리고, 다시 켤
     "%5": { ...ok, parent: "main" },
     "x": ok,
     "%6": { ...ok, label: 7 },
+    "%7": { ...ok, harness: "codex", agent: other },
   });
-  assert.deepEqual(Object.keys(read).sort(), ["%2", "%6"]);
+  assert.deepEqual(Object.keys(read).sort(), ["%2", "%6", "%7"]);
   assert.equal(read["%2"].done, true);
+  assert.equal(read["%2"].harness, undefined);
   assert.equal(read["%6"].label, "서브에이전트");
+  assert.deepEqual(read["%7"], { ...ok, harness: "codex", agent: other, done: true });
   for (const bad of [null, [], "x", 3]) assert.deepEqual(savedSubPanes(bad), {});
 });
 

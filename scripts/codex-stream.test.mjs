@@ -128,16 +128,42 @@ test("서브에이전트 상태·활동은 끝난 호출과 끝난 에이전트�
   assert.equal(s.agents.filter(agentActive).length, 0);
   s = reduceCodex(s, notice({ id: "resume", type: "collabAgentToolCall", tool: "resumeAgent", receiverThreadIds: ["child"], agentsStates: { child: { status: "running" } } }));
   assert.equal(s.agents.filter(agentActive).length, 1);
-  s = reduceCodex(s, { method: "item/tool/requestUserInput", id: 99, params: { threadId: "child", questions: [] } });
-  assert.equal(s.prompts.length, 0, "자식 질문이 본 대화의 질문으로 들어옴");
+  s = reduceCodex(s, { method: "item/tool/requestUserInput", id: 99, params: { threadId: "child", turnId: "child-turn", questions: [] } });
+  assert.deepEqual(s.prompts.map(p => p.params.threadId), ["child"]);
+});
+
+test("자식 질문·승인은 부모와 별개로 표시하고 그 대화의 해결·완료만 따른다", () => {
+  let s = start(opened());
+  s = reduceCodex(s, event("item/completed", { turnId: "turn-a", item: { type: "collabAgentToolCall", receiverThreadIds: ["child", "sibling"] } }));
+  s = reduceCodex(s, event("turn/started", { threadId: "child", turn: { id: "turn-a", status: "inProgress" } }));
+  const ask = { ...event("item/tool/requestUserInput", { threadId: "child", turnId: "turn-a", isBlocking: false, questions: [] }), id: 1 };
+  const approve = { ...event("item/fileChange/requestApproval", { threadId: "sibling", turnId: "turn-a" }), id: 2 };
+  const parent = { ...event("item/commandExecution/requestApproval", { turnId: "turn-a" }), id: 3 };
+  for (const prompt of [ask, ask, approve, parent]) s = reduceCodex(s, prompt);
+  assert.equal(s.prompts.length, 3);
+  assert.equal(blockingPrompt(s.prompts[0]), false);
+  assert.equal(reduceCodex(s, { ...ask, id: 4, params: { ...ask.params, threadId: "unknown" } }), s);
+  s = reduceCodex(s, event("serverRequest/resolved", { requestId: 1 }));
+  assert.equal(s.prompts.length, 3, "부모의 잘못된 해결 알림으로 자식 질문이 걷힘");
+  s = done(s);
+  assert.deepEqual(s.prompts.map(p => p.id), [1, 2]);
+  assert.equal(s.busy, false);
+  assert.ok(s.agents.every(a => a.live));
+  s = reduceCodex(s, event("serverRequest/resolved", { requestId: 1, threadId: "child" }));
+  assert.deepEqual(s.prompts.map(p => p.id), [2]);
+  s = reduceCodex(s, event("turn/completed", { threadId: "sibling", turn: { id: "turn-a", status: "interrupted" } }));
+  assert.equal(s.prompts.length, 0);
+  assert.equal(reduceCodex(s, { ...approve, id: 5 }), s);
 });
 
 test("복원된 서브에이전트는 읽어 확인하며 늦은 이력 읽기가 현재 진행 상태를 덮지 않는다", () => {
   let s = resumedCodex({ id: "thread-a", turns: [{ id: "old", status: "completed", items: [{ id: "spawn", type: "collabAgentToolCall", receiverThreadIds: ["child"], agentsStates: { child: { status: "pendingInit" } } }] }] });
   assert.equal(s.agents[0].status, "unknown");
+  assert.equal(s.agents[0].live, false);
   s = reduceCodex(s, { method: "turn/started", params: { threadId: "child", turn: { id: "new" } } });
   s = hydrateCodexAgent(s, { id: "child", agentNickname: "검토자", turns: [] });
   assert.equal(s.agents[0].label, "검토자");
   assert.equal(s.agents[0].turn, "new");
   assert.equal(s.agents[0].status, "running");
+  assert.equal(s.agents[0].live, true);
 });

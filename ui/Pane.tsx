@@ -7,6 +7,7 @@ import { useRef } from "react";
 import { bySlug, DanceFace, Face, faceUrl } from "./roster";
 import { isAgentWorking, isSessionId, type PaneStat, type Seed } from "./session";
 import type { StreamChat } from "./stream-session";
+import type { CodexAgent } from "./codex-stream";
 import { Term } from "./Term";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { CodexStreamPane } from "./CodexStreamPane";
@@ -35,6 +36,7 @@ export type PaneProps = {
   stream?: StreamChat;
   /** 본 대화가 부른 서브에이전트를 보이는 칸이면 그 서브에이전트(useSubPanes). 읽기만 한다. */
   sub?: SubPaneInfo;
+  codexSubRun?: string;
   streamBusy: boolean;
   switching?: boolean;
   switchError?: string;
@@ -57,6 +59,8 @@ export type PaneProps = {
   onStreamBusy: (id: string, busy: boolean) => void;
   onStreamSession: (id: string, session: string) => void;
   onCodexChange: (id: string, patch: Partial<CodexChat>) => void;
+  onCodexAgents: (id: string, session: string, run: string, agents: CodexAgent[]) => void;
+  onCodexDisconnect: (id: string, session: string, run: string) => void;
   onFolder: (id: string, agent: StreamChat["agent"], cwd: string) => void;
   onResume: (id: string, session: string) => void;
   onTerminal: (cmd: string, title: string) => void;
@@ -107,6 +111,8 @@ export function Pane(p: PaneProps) {
             chat={!!p.stream}
             toTerminal={p.streamBusy
               ? "일하는 중에는 옮기지 않는다 — 하던 답이 끊긴다"
+              : p.stream?.agent === "codex" && p.stream.settingsPending
+                ? "모델·추론·권한 변경을 적용한 뒤 터미널로 옮겨 줘"
               : p.stream?.agent === "codex" && !p.stream.unstarted && p.stream.session && !isSessionId(p.stream.session)
                 ? "Codex가 준 대화 ID를 확인할 수 없어 터미널로 옮기지 않는다"
                 : null}
@@ -154,13 +160,14 @@ export function Pane(p: PaneProps) {
         )
       ) : null}
       {p.sub ? (
-        <SubPane id={id} sub={p.sub} slug={slug} onTitle={p.onStreamTitle} />
+        <SubPane id={id} sub={p.sub} slug={slug} onTitle={p.onStreamTitle} codexRun={p.codexSubRun} />
       ) : p.stream?.agent === "codex" ? (
         // 폴더를 바꾸거나(새 대화) /resume 으로 다른 대화를 고르면 칸을 새로 그려 통로도 새로 연다.
         <CodexStreamPane key={`${p.stream.cwd}#${p.streamEpoch}`} id={id} chat={p.stream as CodexChat}
           slug={slug} name={who}
           focused={p.on}
           onTitle={p.onStreamTitle} onBusy={p.onStreamBusy} onChange={p.onCodexChange} onFolder={p.onFolder}
+          onAgents={p.onCodexAgents} onDisconnect={p.onCodexDisconnect}
           onResume={p.onResume} onTerminal={p.onTerminal} />
       ) : p.stream ? (
         <ClaudeStreamPane

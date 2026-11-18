@@ -26,5 +26,7 @@ test("조회 결과는 서버·스킬의 표시 필드만 쓰며 설정·인증 
 test("사용 한도 표시는 한도·사용률만 받고 계정 원문을 노출하지 않는다", () => {
   const usage = usageReport({ rateLimitsByLimitId: { codex: { limitName: "Codex", primary: { usedPercent: 23, limitWindowMinutes: 300 } } }, token: "SECRET" });
   assert.match(usage, /300분 한도 · 23%/); assert.ok(!usage.includes("SECRET"));
+  assert.match(usageReport({ rateLimits: { secondary: { usedPercent: 40, windowDurationMins: 10080 } } }), /10080분 한도 · 40%/);
+  assert.match(usageReport({ rateLimits: { primary: { windowDurationMins: 300 } } }), /정보가 없다/);
   assert.match(usageReport({}), /정보가 없다/);
 });

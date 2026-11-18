@@ -31,8 +31,8 @@ export type SavedSession = {
   subPanes?: unknown;
 };
 
-/** 본 대화가 부른 서브에이전트를 옆에서 보이는 칸. 읽기만 한다 — 그 서브에이전트의 대화 파일을 그린다. */
-export type SubPaneInfo = { parent: string; root: string; session: string; agent: string; label: string; done?: boolean };
+/** 예전 저장 파일은 harness 없이 모두 Claude 칸이다. */
+export type SubPaneInfo = { parent: string; root: string; session: string; agent: string; label: string; done?: boolean; harness?: "codex" };
 
 /** 저장된 서브에이전트 칸. 다시 켤 때는 그 서브에이전트가 이미 내려갔으므로 모두 끝난 것으로 읽는다.
  *  대화 id 와 에이전트 id 는 파일 경로가 되므로 모양이 맞는 것만 받는다. */
@@ -44,7 +44,8 @@ export function savedSubPanes(value: unknown): Record<string, SubPaneInfo> {
     if (typeof s.session !== "string" || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(s.session)) return [];
     if (typeof s.agent !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(s.agent)) return [];
     const label = typeof s.label === "string" ? s.label.slice(0, 200) : "서브에이전트";
-    return [[id, { parent: s.parent, root: s.root, session: s.session, agent: s.agent, label, done: true }]];
+    return [[id, { parent: s.parent, root: s.root, session: s.session, agent: s.agent, label, done: true,
+      ...(s.harness === "codex" ? { harness: "codex" } : {}) }]];
   }));
 }
 

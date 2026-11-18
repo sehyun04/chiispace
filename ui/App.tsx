@@ -433,6 +433,7 @@ export default function App() {
                         renaming={renaming === s.id}
                         stream={streamMap[s.id]}
                         sub={subs.subPanes[s.id]}
+                        codexSubRun={subs.codexRunFor(s.id)}
                         streamBusy={!!streams.streamBusy[s.id]}
                         switching={!!streams.switching[s.id]}
                         switchError={streams.switchError[s.id]}
@@ -471,6 +472,8 @@ export default function App() {
                         onStreamBusy={streams.onBusy}
                         onStreamSession={streams.onSession}
                         onCodexChange={streams.onCodexChange}
+                        onCodexAgents={subs.syncCodex}
+                        onCodexDisconnect={subs.disconnectCodex}
                       />
                     </div>
                   ))}

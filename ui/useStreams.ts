@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { isSessionId, type PaneStat, type Seed } from "./session";
-import type { StreamChat } from "./stream-session";
+import { selectStreamThread, type StreamChat } from "./stream-session";
 import type { Tab } from "./saved";
 import { without } from "./records";
 import * as L from "./layout";
@@ -64,9 +64,8 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   /** `/resume` 으로 사용자가 고른 지난 대화를 이 칸에서 연다. 고르는 것은 사람이다 — 앱이 목록에서 고르지 않는다.
    *  Codex 는 서버가 준 대화 id 라 그대로 `thread/resume` 하고, 이미 보낸 대화라 빈 칸 표시를 끈다. */
   const resume = useCallback((id: string, session: string) => {
-    const c = streamsNow.current[id];
-    if (!c) return;
-    setStreams((st) => ({ ...st, [id]: c.agent === "codex" ? { ...c, session, unstarted: false } : { ...c, session } }));
+    if (!streamsNow.current[id]) return;
+    setStreams((st) => (st[id] ? { ...st, [id]: selectStreamThread(st[id], session) } : st));
     setEpoch((e) => ({ ...e, [id]: (e[id] ?? 0) + 1 }));
   }, []);
 
@@ -81,6 +80,7 @@ export function useStreams(booted: boolean, tabs: Tab[], stat: Record<string, Pa
   const toTerminal = useCallback(async (id: string, seed: (id: string, s: Seed) => void) => {
     const c = streamsNow.current[id];
     if (!c || streamBusy[id]) return;
+    if (c.agent === "codex" && c.settingsPending) return;
     // 두 통로 모두 폴더 없이 연 대화창은 홈에서 돈다. 터미널도 같은 자리에서 열어야 한다.
     const cwd = c.cwd || ((await invoke<string | null>("home_dir").catch(() => null)) ?? "");
     if (!cwd) return;

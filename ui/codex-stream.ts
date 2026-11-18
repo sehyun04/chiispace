@@ -1,9 +1,10 @@
 import type { Item } from "./transcript";
+import { codexUserImages } from "./codex-images.ts";
 
 // 버전마다 확장되는 프로토콜은 경계에서 확인하고, 알 수 없는 항목은 원문을 버리지 않는다.
 export type Data = Record<string, any>;
-export type Request = { id: string | number; method: string; params: Data };
-export type CodexAgent = { thread: string; label: string; task?: string; status: string; turn: string | null; settled: string[]; step?: Data };
+export type Request = { id: string | number; method: string; params: Data & { threadId: string } };
+export type CodexAgent = { thread: string; label: string; task?: string; status: string; turn: string | null; settled: string[]; step?: Data; live?: boolean };
 export type CodexStream = {
   thread: string;
   turn: string | null;
@@ -36,6 +37,7 @@ function linkAgents(s: CodexStream, item: Data, replay = false): CodexStream {
     const status = item.agentsStates?.[thread]?.status ?? (item.kind === "completed" ? "completed" : item.kind === "interrupted" ? "interrupted" : "running");
     const a: CodexAgent = { thread, label: old?.label ?? (item.agentPath || `서브에이전트 ${agents.length + 1}`),
       task: item.prompt ?? old?.task, turn: old?.turn ?? null, settled: old?.settled ?? [], step: old?.step,
+      live: old?.live || !replay,
       status: replay ? old?.status ?? "unknown"
         : old && old.settled.length && !old.turn && ["running", "pendingInit"].includes(status)
           && !["sendInput", "resumeAgent", "followupTask"].includes(item.tool) ? old.status : status };
@@ -59,17 +61,35 @@ function childEvent(s: CodexStream, agent: CodexAgent, message: Data): CodexStre
   let next = agent;
   if (method === "turn/started") next = { ...agent, status: "running", turn, step: undefined };
   else if (method === "turn/completed") {
-    if (agent.turn && agent.turn !== turn) return s;
-    next = { ...agent, status: p.turn.status, turn: null, settled: [...agent.settled, turn] };
+    next = agent.turn && agent.turn !== turn ? { ...agent, settled: [...agent.settled, turn] }
+      : { ...agent, status: p.turn.status, turn: null, settled: [...agent.settled, turn] };
+  } else if (method === "thread/closed") {
+    if (agentActive(agent)) next = { ...agent, status: "completed", turn: null };
   } else if (p.turnId && agent.turn && p.turnId !== agent.turn) return s;
   else if (method === "item/started" || method === "item/completed") {
     if (p.item.type !== "userMessage") next = { ...agent, step: p.item };
   } else if (method === "item/agentMessage/delta") {
     const text = agent.step?.id === p.itemId ? agent.step?.text ?? "" : "";
     next = { ...agent, step: { type: "agentMessage", id: p.itemId, text: text + p.delta } };
-  } else if (message.id !== undefined) next = { ...agent, step: { type: "waiting", text: "질문이나 승인을 기다리는 중" } };
-  if (next === agent) return s;
-  return { ...s, agents: s.agents.map(a => a === agent ? next : a) };
+  }
+  const prompts = updatePrompts(s.prompts, message);
+  if (prompts.length > s.prompts.length && !agentActive(next)) next = { ...next, status: "running", turn: turn ?? null };
+  if (next === agent && prompts === s.prompts) return s;
+  const live = !!agent.live || next !== agent || message.id !== undefined;
+  return { ...s, prompts, agents: s.agents.map(a => a.thread === agent.thread ? { ...next, live } : a) };
+}
+
+function updatePrompts(prompts: Request[], message: Data): Request[] {
+  const p = message.params ?? {}, method = message.method;
+  if (typeof p.threadId !== "string") return prompts;
+  if (typeof method === "string" && (typeof message.id === "string" || typeof message.id === "number")) {
+    if (prompts.some(q => q.id === message.id)) return prompts;
+    return [...prompts, { id: message.id, method, params: { ...p, threadId: p.threadId } }];
+  }
+  if (method === "serverRequest/resolved") return prompts.filter(q => q.params.threadId !== p.threadId || q.id !== p.requestId);
+  if (method === "turn/completed") return prompts.filter(q => q.params.threadId !== p.threadId || q.params.turnId !== p.turn?.id);
+  if (method === "thread/closed") return prompts.filter(q => q.params.threadId !== p.threadId);
+  return prompts;
 }
 function upsert(entries: Data[], item: Data, turn: string): Data[] {
   const index = entries.findIndex(i => i.id === item.id && i._turn === turn);
@@ -80,9 +100,12 @@ export function reduceCodex(s: CodexStream, message: Data): CodexStream {
   const p = message.params ?? {};
   if (p.threadId && p.threadId !== s.thread) {
     const agent = s.agents.find(a => a.thread === p.threadId);
-    return agent ? childEvent(linkAgents(s, p.item), agent, message) : s;
+    if (!agent) return s;
+    const next = linkAgents(s, p.item);
+    return childEvent(next, next.agents.find(a => a.thread === agent.thread) ?? agent, message);
   }
-  if (message.method === "thread/started" && (p.thread?.parentThreadId ?? p.thread?.source?.subAgent?.thread_spawn?.parent_thread_id) === s.thread) {
+  const parent = p.thread?.parentThreadId ?? p.thread?.source?.subAgent?.thread_spawn?.parent_thread_id;
+  if (message.method === "thread/started" && parent && (parent === s.thread || s.agents.some(a => a.thread === parent))) {
     return linkAgents(s, { type: "subAgentActivity", agentThreadId: p.thread.id, agentPath: p.thread.agentNickname, kind: "started" });
   }
   const method = message.method;
@@ -91,17 +114,18 @@ export function reduceCodex(s: CodexStream, message: Data): CodexStream {
   if (turn && s.settled.includes(turn)) return linkAgents(s, p.item);
   if (message.id !== undefined && typeof method === "string") {
     if (p.turnId && s.turn && p.turnId !== s.turn) return s;
-    const r: Request = { id: message.id, method, params: p };
-    return { ...s, prompts: [...s.prompts.filter(q => q.id !== r.id), r] };
+    const prompts = s.thread && p.threadId === s.thread ? updatePrompts(s.prompts, message) : s.prompts;
+    return prompts === s.prompts ? s : { ...s, prompts };
   }
-  if (method === "serverRequest/resolved") return { ...s, prompts: s.prompts.filter(q => q.id !== p.requestId) };
+  if (method === "serverRequest/resolved" || method === "thread/closed") return { ...s, prompts: updatePrompts(s.prompts, message) };
   if (method === "turn/started") return { ...s, turn: p.turn.id, busy: true, error: undefined };
   if (method === "turn/completed") {
-    if (s.turn && s.turn !== p.turn.id) return s;
+    const prompts = updatePrompts(s.prompts, message);
+    if (s.turn && s.turn !== p.turn.id) return prompts === s.prompts ? s : { ...s, prompts };
     let entries = s.entries;
     for (const item of p.turn.items ?? []) entries = upsert(entries, item, p.turn.id);
     if (p.turn.status === "interrupted") entries = upsert(entries, { id: `interrupted-${p.turn.id}`, type: "interrupted" }, p.turn.id);
-    return { ...s, entries, busy: false, turn: null, settled: [...s.settled, p.turn.id], prompts: s.prompts.filter(q => q.params.turnId !== p.turn.id), error: p.turn.error?.message };
+    return { ...s, entries, busy: false, turn: null, settled: [...s.settled, p.turn.id], prompts, error: p.turn.error?.message };
   }
   if (p.turnId && s.turn && p.turnId !== s.turn) return s;
   if (method === "item/started" || method === "item/completed") return { ...linkAgents(s, p.item), entries: upsert(s.entries, p.item, p.turnId) };
@@ -128,7 +152,7 @@ export function codexItems(entries: Data[]): Item[] {
   return entries.flatMap((i): Item[] => {
     const uuid = `${i._turn}:${i.id}`;
     if (i.type === "userMessage") return [{ kind: "bubble", role: "user", uuid,
-      text: (i.content ?? []).filter((c: Data) => c.type === "text").map((c: Data) => c.text).join("\n") }];
+      text: (i.content ?? []).filter((c: Data) => c.type === "text").map((c: Data) => c.text).join("\n"), images: codexUserImages(i.content) }];
     if (i.type === "agentMessage") return i.text ? [{ kind: "bubble", role: "assistant", uuid, text: i.text }] : [];
     if (i.type === "reasoning") return i.summary?.length ? [{ kind: "thinking", text: i.summary.join("\n") }] : [];
     if (i.type === "hookPrompt") return [];

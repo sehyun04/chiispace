@@ -19,7 +19,7 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
   mkdirSync(home); mkdirSync(project); mkdirSync(empty);
   const guard = watchUserFiles([path.join(os.homedir(), ".codex", "config.toml"), path.join(os.homedir(), ".codex", "hooks.json"),
     ...["com.sehyun.chiispace", "com.sehyun.kasaspace"].map(s => path.join(process.env.APPDATA, s, "session.json"))], { root, exe });
-  let latest = {}, initialSession;
+  let latest = {}, initialSession, selectedApproval;
   const commands = [], apps = [], requests = [], placeholders = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -84,6 +84,7 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
             error: [...slot.querySelectorAll('[role="alert"]')].map(e => e.textContent),
             disabled: over?.querySelector('.composer textarea')?.disabled,
             placeholder: over?.querySelector('.composer textarea')?.placeholder,
+            approval: over?.querySelector('select[aria-label="Codex 승인"]')?.value,
             cursor: b ? [b.cursorX, b.cursorY, b.getLine(b.baseY + b.cursorY)?.translateToString(true)] : null,
             theirs: [...(over?.querySelectorAll('.msg:not(.mine) .bubble') ?? [])].map(e => e.textContent),
             buttons: [...slot.querySelectorAll('.pane-head .mode button')].map(e => ({ text: e.textContent, disabled: e.disabled, pressed: e.getAttribute('aria-pressed') })),
@@ -94,6 +95,10 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
           const slot = document.querySelector('[data-pane="' + c.id + '"]');
           if (c.input !== undefined) window.__terms?.[c.id]?.input(c.input);
           if (c.button) [...(slot?.querySelectorAll('.pane-head .mode button') ?? [])].find(e => e.textContent === c.button)?.click();
+          if (c.approval) {
+            const select = slot?.querySelector('select[aria-label="Codex 승인"]');
+            if (select) { select.value = c.approval; select.dispatchEvent(new Event('change', {bubbles:true})); }
+          }
           if (c.send) {
             const input = slot?.querySelector('.composer textarea'); if (!input) continue;
             Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
@@ -122,11 +127,20 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
       await until(() => saved().streams?.["%0"]?.session && pane("%0").disabled === false, "서버 대화 ID 저장");
       assert.ok(!placeholders.some(p => p.includes("떠 있지 않다")), "연결 중을 Codex 없음으로 표시");
       assert.deepEqual(pane("%0").buttons.map(b => b.text), ["터미널", "대화창"]);
+      selectedApproval = pane("%0").approval === "untrusted" ? "on-request" : "untrusted";
+      commands.push({ id: "%0", approval: selectedApproval });
+      await until(() => saved().streams?.["%0"]?.settingsPending === true
+        && pane("%0").approval === selectedApproval && pane("%0").buttons.some(b => b.text === "터미널" && b.disabled), "미적용 승인 변경은 전환 잠금");
+      await close(app);
+      app = await launch();
+      await until(() => pane("%0").disabled === false && pane("%0").approval === selectedApproval
+        && pane("%0").buttons.some(b => b.text === "터미널" && b.disabled), "꺼졌다 켜도 같은 칸의 미적용 승인 변경 보존");
       commands.push({ id: "%0", send: "SWITCH_MARK" });
       await until(() => pane("%0").buttons.some(b => b.text === "터미널" && b.disabled), "작업 중 전환 잠금");
       commands.push({ id: "%0", button: "터미널" });
       await until(() => pane("%0").theirs?.includes("SWITCH_REPLY"), "대화창 첫 답");
       await until(() => pane("%0").buttons.some(b => b.text === "터미널" && !b.disabled), "완료 뒤 전환 해제");
+      await until(() => saved().streams?.["%0"]?.settingsPending !== true, "승인 변경 적용 뒤 전환 잠금 저장 해제");
       assert.equal(pane("%0").stream, true, "하던 답을 끊고 터미널로 옮김");
       const session = saved().streams["%0"].session;
       initialSession = session;
@@ -157,6 +171,7 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
       assert.ok(!pane("%0").error?.length);
       await until(() => saved().streams?.["%0"]?.session, "복귀한 대화 ID 저장");
       assert.equal(saved().streams["%0"].session, initialSession);
+      assert.equal(pane("%0").approval, selectedApproval, "왕복할 때 적용한 승인 정책을 서버에서 복원하지 못함");
       const oldSession = saved().streams["%0"].session;
       commands.push({ id: "%0", button: "터미널" });
       await until(() => pane("%0").xterm && pane("%0").screen?.includes("SWITCH_REPLY"), "다시 터미널로 이동");

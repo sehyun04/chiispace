@@ -12,7 +12,7 @@ const exe = process.env.CHIISPACE_TEST_EXE;
 const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
-test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·복원·종료", { skip: !exe || !codex, timeout: 240000 }, async () => {
+test("터미널 없는 Codex: 두 칸·승인·질문·서브에이전트·그림·한도·복원·종료", { skip: !exe || !codex, timeout: 240000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-codex-stream-"));
   const home = path.join(root, "codex-state"), project = path.join(root, "project"), state = path.join(root, "session.json");
   mkdirSync(home); mkdirSync(project);
@@ -43,19 +43,28 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
       if (req.url !== "/v1/responses") { res.writeHead(404).end(); return; }
       const data = JSON.parse(body), input = data.input ?? [];
       const user = [...input].reverse().find(i => i.role === "user");
-      const mark = JSON.stringify(user).match(/CS_[A-Z]+/)?.[0] ?? "CS_NONE";
+      const imageInput = user?.content?.filter(part => part.type === "input_image") ?? [];
+      const mark = JSON.stringify(user ?? {}).match(/CS_[A-Z]+/)?.[0] ?? (imageInput.length ? "CS_IMAGE" : "CS_NONE");
       const afterTool = input.at(-1)?.type === "function_call_output";
       requests.push({ ...data, mark, afterTool });
       const n = requests.length, id = `resp_${n}`;
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        ...(mark === "CS_FIRST" ? {
+          "x-codex-primary-used-percent": "28",
+          "x-codex-primary-window-minutes": "300",
+          "x-codex-secondary-used-percent": "41",
+          "x-codex-secondary-window-minutes": "10080",
+        } : {}),
+      });
       const emit = (type, rest) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...rest })}\n\n`);
       emit("response.created", { response: { id, status: "in_progress", output: [] } });
-      if (!afterTool && ["CS_ALLOW", "CS_DENY", "CS_ASK", "CS_SUB"].includes(mark)) {
+      if (!afterTool && ["CS_ALLOW", "CS_DENY", "CS_ASK", "CS_SUB", "CS_CHILD"].includes(mark)) {
         const names = (data.tools ?? []).map(t => t.name);
         const spawnTool = (data.tools ?? []).flatMap(t => t.type === "namespace" ? (t.tools ?? []).map(x => ({ ...x, namespace: t.name })) : [t]).find(t => t.name === "spawn_agent");
         if (mark === "CS_SUB") assert.ok(spawnTool, "격리 Codex에 spawn_agent가 없음");
         const name = mark === "CS_SUB" ? spawnTool.name : mark === "CS_ASK" ? "request_user_input" : names.includes("exec_command") ? "exec_command" : "shell_command";
-        const dir = mark === "CS_ALLOW" ? "allowed_dir" : "denied_dir";
+        const dir = mark === "CS_CHILD" ? "child_allowed_dir" : mark === "CS_ALLOW" ? "allowed_dir" : "denied_dir";
         const args = mark === "CS_SUB" ? { message: "CS_CHILD 맡긴 일 — 합성 답만 반환" }
           : mark === "CS_ASK" ? { questions: [{ id: "direction", header: "방향", question: "어느 쪽으로 갈까?", options: [{ label: "왼쪽", description: "첫 선택" }, { label: "오른쪽", description: "둘째 선택" }] }] }
           : { [name === "exec_command" ? "cmd" : "command"]: `New-Item -ItemType Directory -Path ${dir}`, workdir: project, sandbox_permissions: "require_escalated", justification: "격리 테스트 폴더 생성 허락" };
@@ -109,7 +118,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
       try {
         const side = document.querySelector('.side'), panes = {};
         for (const slot of document.querySelectorAll('[data-pane]')) {
-          const over = slot.querySelector('.chat-over'), input = over?.querySelector('.composer textarea');
+          const over = slot.querySelector('.chat-over'), input = over?.querySelector('.composer textarea'), sub = slot.querySelector('.sub-body');
           const texts = sel => [...(over?.querySelector('.chat')?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
           panes[slot.dataset.pane] = { over: !!over, xterm: !!slot.querySelector('.xterm'), termButton: !!slot.querySelector('.composer-term'),
             input: !!input, disabled: input?.disabled, value: input?.value, focused: input === document.activeElement,
@@ -118,7 +127,12 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
             error: texts('[role="alert"]'), stop: !!over?.querySelector('.composer-stop'), status: over?.querySelector('.codex-status')?.textContent,
             models: [...(over?.querySelectorAll('select[aria-label="Codex 모델"] option') ?? [])].map(o => o.value),
             model: over?.querySelector('select[aria-label="Codex 모델"]')?.value, title: slot.querySelector('.pane-head .title')?.textContent,
-            palette: texts('.palette-row') };
+            palette: texts('.palette-row'), pics: over?.querySelectorAll('.composer-pic').length,
+            mineImages: over?.querySelectorAll('.msg.mine:not(.sending) .msg-img').length,
+            barMeter: over?.querySelector('.bar-meter .gauge-num')?.textContent,
+            statusMeters: texts('.codex-status .status-meter'),
+            sub: sub ? { task: sub.querySelector('.subview-task')?.textContent, text: sub.textContent,
+              done: sub.querySelector('.sub-done')?.textContent, editable: !!sub.querySelector('textarea, [contenteditable="true"]') } : null };
           panes[slot.dataset.pane].report = over?.querySelector('.codex-report')?.textContent ?? null;
           panes[slot.dataset.pane].subs = texts('.subs .sub');
           const v = over?.querySelector('.subview');
@@ -131,8 +145,15 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
           if (c.button) [...(over?.querySelectorAll('button') ?? [])].find(b => b.textContent === c.button)?.click();
           // 키 사이에 화면이 다시 그려져야 한다. 몰아 보내면 Enter 가 화살표로 옮기기 전의 줄을 고른다.
           if (c.key) { over?.querySelector('.composer textarea')?.dispatchEvent(new KeyboardEvent('keydown', {key:c.key, bubbles:true, cancelable:true})); await new Promise(r => setTimeout(r, 80)); }
-          if (c.send) {
-            const input = over?.querySelector('.composer textarea'); if (!input) continue;
+          const input = over?.querySelector('.composer textarea');
+          if (c.pasteImage && input) {
+            const canvas = document.createElement('canvas'); canvas.width = 3; canvas.height = 2;
+            canvas.getContext('2d').fillRect(0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+            input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles:true, cancelable:true }));
+          }
+          if (c.send !== undefined && input) {
             Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
             input.dispatchEvent(new Event('input', {bubbles:true})); await new Promise(r => setTimeout(r, 50));
             input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
@@ -178,6 +199,20 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.ok(observations.some(o => o.panes?.["%1"]?.theirs.includes("CS_FIRST_")), "실시간 조각 누락");
     await until(() => saved().streams?.["%1"]?.session, "대화 ID 저장");
     const first = saved().streams["%1"].session;
+
+    await until(() => pane().barMeter === "28%", "응답 알림의 5시간 게이지");
+    commands.push({ click: ".bar-meter" });
+    await until(() => pane().statusMeters?.some(t => t.includes("7일") && t.includes("41%")), "7일 한도 상태 표시");
+    commands.push({ click: ".bar-meter" });
+    await until(() => !pane().status, "상태 표시 닫기");
+    commands.push({ pasteImage: true });
+    await until(() => pane().pics === 1, "붙여넣은 그림 미리보기");
+    commands.push({ send: "" });
+    await until(() => pane().theirs?.includes("CS_IMAGE_REPLY") && !pane().stop && pane().mineImages === 1 && pane().pics === 0, "그림만 보내고 대화에 표시");
+    const imageMessage = requests.find(r => r.mark === "CS_IMAGE").input.filter(i => i.role === "user").at(-1);
+    assert.deepEqual(imageMessage.content.map(p => p.type), ["input_image"], "그림만 보낸 입력");
+    assert.match(imageMessage.content[0].image_url, /^data:image\//);
+
     const queriesBefore = requests.length;
     for (const [command, mark] of [["/mcp", "fixture_tool"], ["/skills", "parity-fixture"], ["/diff", "UNTRACKED_CMD_MARK"], ["/cwd", project], ["/warnings", "경고"]]) {
       commands.push({ send: command });
@@ -198,6 +233,7 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.notEqual(saved().streams["%2"].session, first);
     assert.ok(pane("%1").mine.includes("CS_FIRST 한글\n다음 줄"));
     assert.deepEqual(pane("%2").mine, ["CS_SECOND 한글\n다음 줄"]);
+    assert.equal(pane("%2").barMeter, "28%", "다른 Codex 칸도 같은 계정 사용량 표시");
 
     commands.push({ id: "%2", send: "CS_ALLOW" });
     await until(() => pane("%2").perm?.includes("allowed_dir"), "실행 승인 카드");
@@ -220,10 +256,23 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.ok(requests.some(r => r.mark === "CS_ASK" && JSON.stringify(r.input).includes("오른쪽")), "질문 답 유실");
 
     commands.push({ id: "%2", send: "CS_SUB" });
-    await until(() => pane("%2").theirs?.includes("CS_SUB_AFTER_TOOL") && !pane("%2").stop && pane("%2").subs?.length, "본 대화 완료 뒤 자식 진행 줄 유지");
+    await until(() => pane("%2").theirs?.includes("CS_SUB_AFTER_TOOL") && !pane("%2").stop &&
+      pane("%2").subs?.length && pane("%2").perm?.includes("child_allowed_dir"), "본 대화 완료 뒤 자식 승인과 진행 줄 유지");
+    assert.equal(existsSync(path.join(project, "child_allowed_dir")), false, "자식 명령이 승인 전에 실행됨");
+    let childPane;
+    await until(() => {
+      childPane = Object.keys(latest.panes).find(id => pane(id).sub?.task?.includes("CS_CHILD"));
+      return childPane && saved().subPanes?.[childPane]?.parent === "%2";
+    }, "맡긴 일이 보이는 자식 칸 저장");
+    assert.equal(saved().subPanes[childPane].harness, "codex");
+    assert.equal(saved().subPanes[childPane].session, saved().streams["%2"].session);
+    assert.equal(pane(childPane).sub.editable, false);
+    assert.equal(pane(childPane).xterm, false);
+    assert.equal(pane("%2").focused, true, "자식 칸을 띄우며 본 입력바의 포커스를 빼앗음");
+    assert.equal(childPids(app).length, 2, "자식 칸을 위한 별도 Codex 프로세스가 생김");
     assert.ok(!pane("%2").theirs.some(t => t.includes("CS_CHILD")), "자식 말이 본 대화에 섞임");
     commands.push({ id: "%2", send: "CS_SLOW" });
-    await until(() => pane("%2").stop, "서브에이전트와 본 대화 동시 진행");
+    await until(() => pane("%2").stop && pane("%2").theirs?.includes("CS_SLOW_"), "자식 승인 대기 중에도 본 대화 시작");
     commands.push({ id: "%2", click: ".subs .sub" });
     await until(() => pane("%2").view?.task?.includes("CS_CHILD"), "자식 thread/read 상세 보기");
     shot(app, "subagent");
@@ -232,16 +281,20 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.ok(pane("%2").stop, "상세 화면 Esc가 본 대화를 중단함");
     commands.push({ id: "%2", click: ".composer-stop" });
     await until(() => !pane("%2").stop, "본 대화 중단"); slow?.destroy();
-    assert.ok(finishChild, "자식 모델 요청 없음"); finishChild();
-    await until(() => !pane("%2").subs?.length, "자식 완료 뒤 진행 줄 걷기");
+    assert.match(pane("%2").perm, /child_allowed_dir/, "본 대화 중단이 자식 승인을 닫음");
+    commands.push({ id: "%2", click: ".ask.perm .ask-go:first-child" });
+    await until(() => finishChild && existsSync(path.join(project, "child_allowed_dir")) && !pane("%2").perm, "승인한 자식 명령 실행");
+    finishChild();
+    await until(() => !pane("%2").subs?.length && pane(childPane).sub?.text?.includes("CS_CHILD_AFTER_TOOL") &&
+      pane(childPane).sub?.done?.includes("다 했어") && saved().subPanes?.[childPane]?.done, "자식 완료 뒤 진행 줄 걷기와 옆 칸 최종 답");
     commands.push({ id: "%2", click: ".note.launch" });
-    await until(() => pane("%2").view?.text?.includes("CS_CHILD_REPLY"), "완료 뒤 부름 줄의 자식 대화");
+    await until(() => pane("%2").view?.text?.includes("CS_CHILD_AFTER_TOOL"), "완료 뒤 부름 줄의 자식 대화");
     commands.push({ id: "%2", esc: true });
     await until(() => !pane("%2").view, "자식 대화 닫기");
     commands.push({ id: "%2", send: "/agents" });
     await until(() => pane("%2").value === "/agents " && pane("%2").palette?.length, "서브에이전트 명령 목록");
     commands.push({ id: "%2", key: "Enter" });
-    await until(() => pane("%2").view?.text?.includes("CS_CHILD_REPLY"), "명령에서 고른 자식 대화");
+    await until(() => pane("%2").view?.text?.includes("CS_CHILD_AFTER_TOOL"), "명령에서 고른 자식 대화");
     commands.push({ id: "%2", esc: true });
     await until(() => !pane("%2").view, "명령으로 연 자식 대화 닫기");
     assert.ok(!pane("%2").theirs.some(t => t.includes("CS_CHILD")), "완료한 자식 말이 본 대화에 섞임");
@@ -264,6 +317,10 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     assert.equal(saved().streams["%1"].session, first);
     assert.equal(pane("%1").title, "CS_FIRST 한글");
     assert.ok(!pane("%1").mine.includes("CS_SECOND 한글\n다음 줄"));
+    assert.equal(pane("%1").mineImages, 1, "재시작 뒤 보낸 그림 복원");
+    await until(() => pane(childPane).sub?.text?.includes("CS_CHILD_AFTER_TOOL"), "재시작 뒤 자식 칸 대화 복원");
+    assert.equal(pane(childPane).sub.editable, false);
+    assert.equal(pane(childPane).xterm, false);
     await reply("CS_RESUME", "%2");
     assert.ok(JSON.stringify(requests.find(r => r.mark === "CS_RESUME").input).includes("CS_SECOND"));
     assert.equal(pane("%2").model, model);
@@ -290,31 +347,37 @@ test("터미널 없는 Codex: 두 칸·승인·질문·중단·모델·상태·�
     await until(() => !latest.panes?.["%2"] && !saved().streams?.["%2"], "칸 닫기");
     await until(() => alive(remaining) === 1, "닫은 칸의 Codex 회수", 12000);
     assert.equal(app.exitCode, null, "칸 닫기가 앱 종료로 전파됨");
-    await pick(); await until(() => pane("%3").input && !pane("%3").disabled && saved().streams?.["%3"]?.session, "빈 새 칸 준비");
-    const empty = saved().streams["%3"].session;
+    const existing = new Set(Object.keys(latest.panes));
+    let emptyPane;
+    await pick();
+    await until(() => {
+      emptyPane = Object.keys(latest.panes).find(id => !existing.has(id) && pane(id).input && !pane(id).disabled);
+      return emptyPane && saved().streams?.[emptyPane]?.session;
+    }, "빈 새 칸 준비");
+    const empty = saved().streams[emptyPane].session;
     await close(app); app = await launch();
-    await until(() => pane("%3").input && !pane("%3").disabled, "한 번도 말하지 않은 새 칸 복원");
-    await until(() => saved().streams?.["%3"]?.session !== empty, "미전송 칸은 새 빈 대화로 열기");
-    assert.equal(pane("%3").mine.length, 0);
-    commands.push({ id: "%3", send: "/rename 수동 이름" });
-    await until(() => pane("%3").title === "수동 이름", "빈 대화의 이름 바꾸기");
-    assert.deepEqual(pane("%3").error, []);
-    await reply("CS_EMPTY", "%3");
-    assert.equal(pane("%3").title, "수동 이름");
-    assert.deepEqual(pane("%3").error, [], "복원한 빈 대화 첫 턴의 이름 저장 오류");
-    commands.push({ id: "%3", send: "/unsupported-command" });
-    await until(() => pane("%3").value === "/unsupported-command" && pane("%3").error.length > 0, "실패한 입력 초안 복구");
-    assert.ok(!pane("%3").sending.length);
-    await reply("CS_RECOVER", "%3");
-    assert.equal(pane("%3").error.length, 0);
+    await until(() => pane(emptyPane).input && !pane(emptyPane).disabled, "한 번도 말하지 않은 새 칸 복원");
+    await until(() => saved().streams?.[emptyPane]?.session !== empty, "미전송 칸은 새 빈 대화로 열기");
+    assert.equal(pane(emptyPane).mine.length, 0);
+    commands.push({ id: emptyPane, send: "/rename 수동 이름" });
+    await until(() => pane(emptyPane).title === "수동 이름", "빈 대화의 이름 바꾸기");
+    assert.deepEqual(pane(emptyPane).error, []);
+    await reply("CS_EMPTY", emptyPane);
+    assert.equal(pane(emptyPane).title, "수동 이름");
+    assert.deepEqual(pane(emptyPane).error, [], "복원한 빈 대화 첫 턴의 이름 저장 오류");
+    commands.push({ id: emptyPane, send: "/unsupported-command" });
+    await until(() => pane(emptyPane).value === "/unsupported-command" && pane(emptyPane).error.length > 0, "실패한 입력 초안 복구");
+    assert.ok(!pane(emptyPane).sending.length);
+    await reply("CS_RECOVER", emptyPane);
+    assert.equal(pane(emptyPane).error.length, 0);
     shot(app, "resumed");
-    const renamedThread = saved().streams["%3"].session;
+    const renamedThread = saved().streams[emptyPane].session;
     await close(app); app = await launch();
-    await until(() => pane("%3").title === "수동 이름" && !pane("%3").disabled, "수동 이름 재시작 복원");
-    assert.equal(saved().streams["%3"].session, renamedThread);
+    await until(() => pane(emptyPane).title === "수동 이름" && !pane(emptyPane).disabled, "수동 이름 재시작 복원");
+    assert.equal(saved().streams[emptyPane].session, renamedThread);
     assert.equal(existsSync(path.join(home, "hooks.json")), false, "추가 훅 신뢰 요구");
     assert.equal(readFileSync(path.join(home, "config.toml"), "utf8"), configBefore, "대화창 명령이 설정 파일을 고침");
-    console.log("터미널·훅 없이 두 칸 대화, 실승인·거절·질문·중단·모델·상태·복원·종료 확인");
+    console.log("터미널·훅 없이 두 칸 대화, 승인·질문·서브에이전트 옆칸·그림·한도·복원·종료 확인");
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, requests, observations })); throw e;
   } finally {

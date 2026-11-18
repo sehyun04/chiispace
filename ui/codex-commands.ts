@@ -1,5 +1,6 @@
 import type { PaletteCommand } from "./palette";
 import type { Data } from "./codex-stream";
+import { codexLimitWindow } from "./codex-usage.ts";
 
 export const CODEX_COMMANDS: PaletteCommand[] = [
   { name: "compact", hint: "지난 대화를 줄여 문맥 비우기" },
@@ -41,8 +42,17 @@ export function skillsReport(entries: Data[]): string {
 }
 
 export function usageReport(data: Data): string {
-  const limits = data.rateLimitsByLimitId ?? (data.rateLimits ? { 기본: data.rateLimits } : {});
-  return Object.entries<Data>(limits).map(([id, limit]) => [limit.limitName || id,
-    ...["primary", "secondary"].flatMap(k => limit[k] ? [`  ${limit[k].limitWindowMinutes ?? ""}분 한도 · ${limit[k].usedPercent ?? 0}% 사용` +
-      (limit[k].resetsAt ? ` · ${new Date(limit[k].resetsAt * 1000).toLocaleString("ko-KR")}에 초기화` : "")] : [])].join("\n")).join("\n\n") || "이 계정의 사용 한도 정보가 없다";
+  const buckets = Object.entries<Data>(data.rateLimitsByLimitId ?? {});
+  if (!buckets.length && data.rateLimits) buckets.push([data.rateLimits.limitId ?? "기본", data.rateLimits]);
+  const reports = buckets.flatMap(([id, limit]) => {
+    const windows = [limit?.primary, limit?.secondary].flatMap(value => {
+      const window = codexLimitWindow(value);
+      if (!window) return [];
+      const duration = window.minutes ? `${window.minutes}분 한도 · ` : "";
+      const reset = window.resetsAt ? ` · ${new Date(window.resetsAt).toLocaleString("ko-KR")}에 초기화` : "";
+      return [`  ${duration}${window.used}% 사용${reset}`];
+    });
+    return windows.length ? [[limit.limitName || id, ...windows].join("\n")] : [];
+  });
+  return reports.join("\n\n") || "이 계정의 사용 한도 정보가 없다";
 }
