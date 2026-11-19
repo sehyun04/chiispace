@@ -39,6 +39,10 @@ struct Seen {
     busy: bool,
     /// 마지막 system init 줄 — 모델·권한 모드·대화 id 가 거기 있다.
     init: Option<String>,
+    /// 서브에이전트가 도는 동안의 마지막 `background_tasks_changed` 줄과 그 수. claude 는 서브에이전트를 백그라운드로 돌려
+    /// 본 대화의 턴이 먼저 끝나므로, 뒤늦게 붙은 화면은 이것으로 아직 일하는 중인 것과 그 서브에이전트를 안다.
+    tasks: Option<String>,
+    agents: usize,
     /// 아직 답하지 않은 권한 묻기·질문(`can_use_tool`) — 요청 id 와 줄 그대로.
     prompts: Vec<(String, String)>,
 }
@@ -53,6 +57,12 @@ fn observe(seen: &mut Seen, line: &str) {
     let Ok(v) = serde_json::from_str::<Value>(line) else { return };
     match v.get("type").and_then(Value::as_str) {
         Some("system") if v.get("subtype").and_then(Value::as_str) == Some("init") => seen.init = Some(line.to_string()),
+        Some("system") if v.get("subtype").and_then(Value::as_str) == Some("background_tasks_changed") => {
+            // 백그라운드 셸(띄워 둔 서버 등)은 일하는 중이 아니다. 서브에이전트만 센다.
+            let agent = |t: &&Value| t.get("task_type").and_then(Value::as_str).is_some_and(|k| k.contains("agent"));
+            seen.agents = v.get("tasks").and_then(Value::as_array).map_or(0, |a| a.iter().filter(agent).count());
+            seen.tasks = (seen.agents > 0).then(|| line.to_string());
+        }
         Some("stream_event" | "assistant") => seen.busy = true,
         Some("result") => {
             seen.busy = false;
@@ -98,6 +108,11 @@ pub struct Snapshot {
     pub alive: bool,
     pub busy: bool,
     pub init: Option<String>,
+    /// 서브에이전트가 도는 동안의 `background_tasks_changed` 줄. 화면은 init 처럼 이 줄을 통로 해석에 다시 태운다.
+    pub tasks: Option<String>,
+    /// 그 줄의 서브에이전트 수. 칸 목록이 쓴다.
+    #[serde(skip)]
+    pub agents: usize,
     pub prompts: Vec<String>,
 }
 
@@ -109,9 +124,11 @@ pub fn snapshot(app: &AppHandle, id: &str) -> Snapshot {
             alive: true,
             busy: p.seen.busy,
             init: p.seen.init.clone(),
+            tasks: p.seen.tasks.clone(),
+            agents: p.seen.agents,
             prompts: p.seen.prompts.iter().map(|(_, l)| l.clone()).collect(),
         },
-        None => Snapshot { alive: false, busy: false, init: None, prompts: Vec::new() },
+        None => Snapshot { alive: false, busy: false, init: None, tasks: None, agents: 0, prompts: Vec::new() },
     }
 }
 
@@ -384,6 +401,24 @@ mod tests {
         assert_eq!(s.prompts.len(), 1);
         observe(&mut s, r#"{"type":"result","subtype":"success"}"#);
         assert!(!s.busy && s.prompts.is_empty());
+    }
+
+    #[test]
+    fn background_subagents_outlive_the_turn() {
+        // claude 2.1.328 이 실제로 낸 순서: 서브에이전트를 띄우고 본 대화의 턴이 먼저 끝난 뒤, 서브에이전트가 끝나면 빈 목록이 온다.
+        let mut s = Seen::default();
+        let running = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a7c9ae52f4cfba48c","task_type":"local_agent","subagent_type":"general-purpose","description":"로그 찾기"},{"task_id":"b1","task_type":"local_bash","description":"npm run dev"}]}"#;
+        observe(&mut s, running);
+        observe(&mut s, r#"{"type":"result","subtype":"success"}"#);
+        assert!(!s.busy);
+        assert_eq!(s.agents, 1, "백그라운드 셸은 일하는 서브에이전트가 아니다");
+        assert_eq!(s.tasks.as_deref(), Some(running));
+        // 띄워 둔 셸만 남으면 일하는 중이 아니다.
+        observe(&mut s, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"npm run dev"}]}"#);
+        assert_eq!((s.agents, s.tasks.is_none()), (0, true));
+        observe(&mut s, running);
+        observe(&mut s, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        assert_eq!((s.agents, s.tasks.is_none()), (0, true));
     }
 
     #[test]

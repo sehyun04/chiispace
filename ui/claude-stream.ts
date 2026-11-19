@@ -78,11 +78,17 @@ export function settingsModel(body: unknown, models: ModelChoice[]): string | un
 /** claude 가 이 세션에서 받는 슬래시 명령. 스킬·사용자 명령도 여기 든다. */
 export type AgentCommand = { name: string; description?: string; argumentHint?: string; aliases?: string[] };
 
+/** 백그라운드로 도는 서브에이전트. id 는 프록시가 가르는 에이전트 id(`chat:sub` 의 `agent`)와 같다. */
+export type AgentTask = { id: string; label: string };
+
 export type StreamState = {
   /** 초기화에 답이 왔다. 모델 목록은 그때 온다. */
   ready: boolean;
   /** 턴이 도는 중. 보낸 뒤부터 결과가 올 때까지다. */
   busy: boolean;
+  /** 지금 도는 서브에이전트. claude 2.1.3xx 는 서브에이전트를 백그라운드로 돌려 본 대화의 턴(`result`)이 먼저 끝난다 —
+   *  `busy` 만 보면 서브에이전트가 일하는 동안 쉬는 것으로 보인다. */
+  tasks: AgentTask[];
   prompts: Prompt[];
   models: ModelChoice[];
   commands: AgentCommand[];
@@ -100,7 +106,7 @@ export type StreamState = {
   exited?: { code: number | null; error: string };
 };
 
-export const initialStream: StreamState = { ready: false, busy: false, prompts: [], models: [], commands: [] };
+export const initialStream: StreamState = { ready: false, busy: false, tasks: [], prompts: [], models: [], commands: [] };
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {});
@@ -153,6 +159,16 @@ export function reduceStream(s: StreamState, msg: unknown): StreamState {
       };
     }
     case "system": {
+      // 지금 도는 백그라운드 일 전체가 매번 새로 온다. 백그라운드 셸(띄워 둔 서버 등)은 일하는 중이 아니라 뺀다.
+      if (m.subtype === "background_tasks_changed")
+        return {
+          ...s,
+          tasks: (Array.isArray(m.tasks) ? m.tasks : []).flatMap((raw) => {
+            const t = obj(raw);
+            const id = str(t.task_id);
+            return id && /agent/.test(str(t.task_type) ?? "") ? [{ id, label: str(t.description) ?? str(t.subagent_type) ?? "서브에이전트" }] : [];
+          }),
+        };
       if (m.subtype !== "init") return s;
       // 고른 이름(`default`)이 이 실제 이름으로 풀리는 것이면 고른 이름을 둔다. 바꾸면 턴마다 줄이 "Opus 5.5 (기본)"과
       // "Opus 5.5" 사이를 오간다.

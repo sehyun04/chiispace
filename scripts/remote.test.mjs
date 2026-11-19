@@ -84,6 +84,12 @@ test("뒤늦게 붙은 폰은 PC 와 같은 해석으로 지금 상태를 세운
   const idle = fromSnapshot({ alive: true, busy: false, init: null, prompts: [] });
   assert.equal(idle.busy, false);
   assert.deepEqual(idle.prompts, []);
+  assert.deepEqual(idle.tasks, []);
+  // 본 대화의 턴은 끝났지만 서브에이전트가 도는 중에 붙은 화면. 그 서브에이전트를 claude 가 적은 짧은 설명으로 안다.
+  const tasks = JSON.stringify({ type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "a7c9ae52f4cfba48c", task_type: "local_agent", description: "로그 찾기" }, { task_id: "b1", task_type: "local_bash", description: "npm run dev" }] });
+  const behind = fromSnapshot({ alive: true, busy: false, init, tasks, prompts: [] });
+  assert.equal(behind.busy, false);
+  assert.deepEqual(behind.tasks, [{ id: "a7c9ae52f4cfba48c", label: "로그 찾기" }]);
 });
 
 test("칸 목록의 상태 글은 허락 기다림이 먼저다", () => {
@@ -91,6 +97,9 @@ test("칸 목록의 상태 글은 허락 기다림이 먼저다", () => {
   assert.deepEqual(paneState({ alive: true, busy: true, waiting: 1 }), { text: "허락 기다림", tone: "wait" });
   assert.deepEqual(paneState({ alive: true, busy: true, waiting: 0 }), { text: "일하는 중", tone: "busy" });
   assert.deepEqual(paneState({ alive: true, busy: false, waiting: 0 }), { text: "쉬는 중", tone: "idle" });
+  // 본 대화의 턴이 끝났어도 서브에이전트가 돌면 일하는 중이다.
+  assert.deepEqual(paneState({ alive: true, busy: false, tasks: 2, waiting: 0 }), { text: "일하는 중", tone: "busy" });
+  assert.deepEqual(paneState({ alive: true, busy: false, tasks: 1, waiting: 1 }), { text: "허락 기다림", tone: "wait" });
   assert.deepEqual(paneState({ alive: false, busy: true, waiting: 1 }), { text: "멈춤", tone: "off" });
 });
 

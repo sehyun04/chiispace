@@ -835,6 +835,8 @@ struct PhonePane {
     info: PaneInfo,
     alive: bool,
     busy: bool,
+    /// 지금 도는 서브에이전트 수. 본 대화의 턴이 끝나도 이것이 있으면 일하는 중이다.
+    tasks: usize,
     waiting: usize,
 }
 
@@ -856,7 +858,7 @@ fn dispatch(app: &AppHandle, cmd: &str, args: &Value) -> Result<Value, String> {
             .iter()
             .map(|p| {
                 let snap = crate::claude_chat::snapshot(app, &p.id);
-                PhonePane { info: p.clone(), alive: snap.alive, busy: snap.busy, waiting: snap.prompts.len() }
+                PhonePane { info: p.clone(), alive: snap.alive, busy: snap.busy, tasks: snap.agents, waiting: snap.prompts.len() }
             })
             .collect::<Vec<_>>())),
         "claude_chat_snapshot" => {

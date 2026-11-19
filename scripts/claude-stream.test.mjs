@@ -86,6 +86,20 @@ test("중단은 실패로 보이지 않고, 모델 오류는 까닭이 남는다
   assert.equal(sentStream(run({ type: "result", is_error: true, subtype: "success", result: "x" })).error, undefined);
 });
 
+test("서브에이전트는 본 대화의 턴이 끝난 뒤에도 돈다 — 통로가 알려 준 목록으로 안다", () => {
+  // claude 2.1.328 이 실제로 낸 순서(서브에이전트를 백그라운드로 띄우고 본 대화가 먼저 답한다).
+  const changed = (tasks) => ({ type: "system", subtype: "background_tasks_changed", tasks });
+  const agent = { task_id: "a7c9ae52f4cfba48c", run_id: "r", task_type: "local_agent", subagent_type: "general-purpose", description: "로그 찾기" };
+  let s = run({ type: "assistant", message: { content: [] } }, changed([agent]), { type: "system", subtype: "task_started", task_id: agent.task_id }, { type: "result", subtype: "success" });
+  assert.equal(s.busy, false);
+  assert.deepEqual(s.tasks, [{ id: "a7c9ae52f4cfba48c", label: "로그 찾기" }]);
+  // 띄워 둔 셸은 일하는 서브에이전트가 아니다. 설명이 없으면 종류 이름을 쓴다.
+  s = reduceStream(s, changed([{ task_id: "b1", task_type: "local_bash", description: "npm run dev" }, { task_id: "c1", task_type: "remote_agent", subagent_type: "Explore" }]));
+  assert.deepEqual(s.tasks, [{ id: "c1", label: "Explore" }]);
+  assert.deepEqual(reduceStream(s, changed([])).tasks, []);
+  assert.deepEqual(reduceStream(s, { type: "system", subtype: "background_tasks_changed" }).tasks, []);
+});
+
 test("/clear 로 새 대화가 되면 그 id 를 따라간다", () => {
   let s = run({ type: "system", subtype: "init", session_id: "a", model: "m" });
   assert.equal(s.session, "a");

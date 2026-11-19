@@ -122,7 +122,8 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
     customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] },
   };
   for (const config of [path.join(home, ".claude.json"), home + ".json"]) writeFileSync(config, JSON.stringify(settings));
-  writeFileSync(path.join(home, "settings.json"), JSON.stringify({ permissions: { defaultMode: "default" } }));
+  // 서브에이전트는 허락을 묻지 않고 부르게 한다(폰 화면 서브에이전트 단계). 다른 도구는 그대로 묻는다.
+  writeFileSync(path.join(home, "settings.json"), JSON.stringify({ permissions: { defaultMode: "default", allow: ["Agent", "Task"] } }));
   const sid = randomUUID();
   const cwd = project.replaceAll("\\", "/");
   const state = path.join(root, "session.json");
@@ -164,6 +165,9 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   let latest = {};
   const commands = [];
   const requests = [];
+  // 서브에이전트의 답을 붙잡아 두는 동안 폰 화면을 본다.
+  let releaseSub;
+  const subHeld = new Promise((r) => (releaseSub = r));
   const sse = (res, type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
   const server = http.createServer((req, res) => {
     if (req.url === probe) {
@@ -197,12 +201,25 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...message, content: [{ type: "text", text: "제목" }], stop_reason: "end_turn" }));
         return;
       }
-      const marks = ["HELLO_A", "TOOL_A", "TOOL_B", "UI_HELLO", "TOOL_C"];
+      const marks = ["HELLO_A", "TOOL_A", "TOOL_B", "UI_HELLO", "TOOL_C", "SUB_ASK"];
       const [mark, at] = marks.map((k) => [k, all.lastIndexOf(k)]).sort((x, y) => y[1] - x[1])[0];
       const afterTool = all.lastIndexOf("tool_result") > at;
-      if (at >= 0) requests.push({ mark, afterTool });
+      // 서브에이전트는 헤더로 가른다. 본 대화의 다음 요청에도 맡긴 일이 실려 있어 본문으로는 못 가른다.
+      const isSub = !!req.headers["x-claude-code-agent-id"];
+      if (at >= 0 && !isSub) requests.push({ mark, afterTool });
       res.writeHead(200, { "content-type": "text/event-stream" });
       sse(res, "message_start", { message });
+      if (isSub) {
+        sse(res, "content_block_start", { index: 0, content_block: { type: "text", text: "" } });
+        sse(res, "content_block_delta", { index: 0, delta: { type: "text_delta", text: "SUB_WORKING 찾는 중" } });
+        await Promise.race([subHeld, delay(120000)]);
+        sse(res, "content_block_delta", { index: 0, delta: { type: "text_delta", text: " SUB_DONE" } });
+        sse(res, "content_block_stop", { index: 0 });
+        sse(res, "message_delta", { delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 9 } });
+        sse(res, "message_stop", {});
+        res.end();
+        return;
+      }
       const text = async (parts) => {
         sse(res, "content_block_start", { index: 0, content_block: { type: "text", text: "" } });
         for (const p of parts) {
@@ -219,6 +236,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         sse(res, "message_delta", { delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 20 } });
       };
       if (afterTool) await text(["도구 ", "결과 ", `받음 ${mark}_AFTER`]);
+      else if (mark === "SUB_ASK") tool("Agent", { description: "로그 찾기", prompt: "SUB_TASK 로그에서 실패 원인 찾기", subagent_type: "general-purpose" });
       else if (mark.startsWith("TOOL_")) tool("Bash", { command: `mkdir dir_${mark.toLowerCase()}`, description: `${mark} 폴더 만들기` });
       else await text(["안녕 ", `${mark}_REPLY`]);
       if (!res.writableEnded && !res.destroyed) {
@@ -553,6 +571,43 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         assert.ok(existsSync(path.join(project, "dir_tool_c")), "폰 화면에서 허락했는데 실행이 안 됨");
         await phone.shot(path.join(root, "phone-after.png"));
         assert.equal(await phone.evaluate("window.__sameLoad === true && !document.querySelector('.m-update')"), true, "같은 판인데 새로 불러오거나 새 판 띠를 띄움");
+
+        // 서브에이전트(11월 19일 사용자 — 폰에 서브에이전트가 안 뜨고, 일하는 중인데 쉬는 중으로 보였다). claude 2.1.3xx 는
+        // 서브에이전트를 백그라운드로 돌려 본 대화의 턴(result)이 먼저 끝난다. 서브에이전트의 답을 붙잡아 둔 동안 본다.
+        const look = () =>
+          phone.evaluate(`({
+            state: document.querySelector('.m-state')?.textContent ?? null,
+            subs: [...document.querySelectorAll('.sub')].map(e => e.textContent),
+            after: [...document.querySelectorAll('.msg:not(.live) .bubble')].filter(b => b.textContent.includes('SUB_ASK_AFTER')).length,
+          })`);
+        await type("SUB_ASK 폰 화면 서브에이전트");
+        await phone.evaluate("document.querySelector('.composer-send').click()");
+        assert.ok(await until(async () => (await look()).after > 0, 300), "본 대화가 서브에이전트를 부른 뒤 답하지 않음: " + JSON.stringify(await look()));
+        assert.ok(await until(async () => (await look()).subs.some((t) => t.includes("SUB_WORKING")), 300), "폰 화면에 서브에이전트 줄이 안 뜸: " + JSON.stringify(await look()));
+        assert.ok(await until(async () => (await look()).state === "일하는 중", 50), "서브에이전트가 일하는데 폰 칸이 일하는 중이 아님: " + JSON.stringify(await look()));
+        const listed = (await call("remote_panes", {}))[0];
+        assert.equal(listed.tasks, 1, "칸 목록에 일하는 서브에이전트가 안 실림: " + JSON.stringify(listed));
+        await phone.shot(path.join(root, "phone-sub.png"));
+        // 뒤늦게 연 화면(홈 화면 앱을 다시 연 것과 같다). 서브에이전트가 붙잡혀 새 조각이 안 와도 지금 도는 것이 보여야 한다.
+        await phone.evaluate("location.reload()");
+        assert.ok(await until(async () => (await look().catch(() => ({ subs: [] }))).subs.some((t) => t.includes("로그 찾기")), 150), "다시 연 폰 화면에 일하는 서브에이전트가 안 보임: " + JSON.stringify(await look()));
+        assert.equal((await look()).state, "일하는 중", "다시 연 폰 화면이 일하는 중이 아님");
+        await phone.evaluate("location.hash = ''");
+        assert.ok(await until(() => phone.evaluate("document.querySelector('.m-row .m-chip')?.textContent === '일하는 중'"), 100), "칸 목록이 일하는 중이 아님");
+        await phone.shot(path.join(root, "phone-sub-list.png"));
+        // 칸을 다시 열어도, 지금 상태를 받기 전부터 쉬는 중으로 깜빡이지 않는다.
+        await phone.evaluate(`(() => {
+          window.__states = [];
+          new MutationObserver(() => window.__states.push(document.querySelector('.m-state')?.textContent ?? null)).observe(document.body, { subtree: true, childList: true, characterData: true });
+          document.querySelector('.m-row').click();
+        })()`);
+        assert.ok(await until(async () => (await look()).subs.some((t) => t.includes("로그 찾기")), 100), "다시 연 칸에 서브에이전트 줄이 안 보임: " + JSON.stringify(await look()));
+        const flicker = await phone.evaluate("window.__states.filter(Boolean)");
+        assert.ok(flicker.length && flicker.every((t) => t === "일하는 중"), "칸을 열 때 일하는 칸이 다른 상태로 보임: " + JSON.stringify(flicker));
+        // 서브에이전트가 끝나면 줄이 걷히고 쉬는 중으로 돌아간다.
+        releaseSub();
+        assert.ok(await until(async () => { const l = await look(); return l.state === "쉬는 중" && !l.subs.length; }, 300), "서브에이전트가 끝났는데 폰 칸이 그대로: " + JSON.stringify(await look()));
+        assert.equal((await call("remote_panes", {}))[0].tasks, 0, "서브에이전트가 끝났는데 칸 목록에 남음");
       } else {
         console.log("Edge 가 없어 폰 화면 검증은 건너뜀");
       }
@@ -573,6 +628,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.equal(after.devices.length, edge ? 1 : 0);
       assert.equal(after.room, room, "방이 바뀜");
     } finally {
+      releaseSub();
       globalThis.WebSocket = RealWebSocket;
       link?.stop();
       phone?.close();

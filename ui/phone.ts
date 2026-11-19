@@ -2,7 +2,7 @@
 import { initialStream, reduceStream, type StreamState } from "./claude-stream.ts";
 
 /** 통로가 들고 있던 지금 상태(claude_chat.rs `snapshot`). */
-export type Snapshot = { alive: boolean; busy: boolean; init?: string | null; prompts: string[] };
+export type Snapshot = { alive: boolean; busy: boolean; init?: string | null; tasks?: string | null; prompts: string[] };
 
 /** PC 가 알려 준 칸 한 줄과 그 통로의 지금 상태(remote.rs `PhonePane`). */
 export type PhonePane = {
@@ -14,6 +14,8 @@ export type PhonePane = {
   name?: string | null;
   alive: boolean;
   busy: boolean;
+  /** 지금 도는 서브에이전트 수. 본 대화의 턴은 그보다 먼저 끝난다. */
+  tasks?: number;
   waiting: number;
 };
 
@@ -21,7 +23,7 @@ export type PhonePane = {
  *  지금 상태를 받는 사이에 온 줄(`queued`)은 그 뒤에 얹는다 — 그 사이에 뜬 권한 묻기를 잃지 않게. */
 export function fromSnapshot(snap: Snapshot, queued: unknown[] = []): StreamState {
   let s = initialStream;
-  for (const line of [snap.init, ...snap.prompts]) {
+  for (const line of [snap.init, snap.tasks, ...snap.prompts]) {
     if (!line) continue;
     try {
       s = reduceStream(s, JSON.parse(line));
@@ -51,11 +53,12 @@ export function deviceName(ua: string): string {
   return "브라우저";
 }
 
-/** 칸 목록 한 줄의 상태 글. 답을 기다리는 것이 가장 먼저다 — 그것 때문에 폰을 연다. */
-export function paneState(p: Pick<PhonePane, "alive" | "busy" | "waiting">): { text: string; tone: "wait" | "busy" | "idle" | "off" } {
+/** 칸 목록 한 줄의 상태 글. 답을 기다리는 것이 가장 먼저다 — 그것 때문에 폰을 연다. 본 대화의 턴이 끝났어도 서브에이전트가
+ *  돌고 있으면 일하는 중이다(PC 에서는 옆 서브에이전트 칸이 일하는 것이 보인다). */
+export function paneState(p: Pick<PhonePane, "alive" | "busy" | "waiting" | "tasks">): { text: string; tone: "wait" | "busy" | "idle" | "off" } {
   if (!p.alive) return { text: "멈춤", tone: "off" };
   if (p.waiting) return { text: p.waiting > 1 ? `허락 기다림 ${p.waiting}` : "허락 기다림", tone: "wait" };
-  if (p.busy) return { text: "일하는 중", tone: "busy" };
+  if (p.busy || p.tasks) return { text: "일하는 중", tone: "busy" };
   return { text: "쉬는 중", tone: "idle" };
 }
 

@@ -144,7 +144,7 @@ export function ClaudeStreamPane({
     const onExit = listen<ExitEvent>("claude:chat-exit", (e) => {
       if (e.payload.id !== id) return;
       setAlive(false);
-      setSt((s) => ({ ...s, busy: false, prompts: [], exited: { code: e.payload.code, error: e.payload.error } }));
+      setSt((s) => ({ ...s, busy: false, tasks: [], prompts: [], exited: { code: e.payload.code, error: e.payload.error } }));
     });
     // 폰(remote.rs)이 같은 칸의 권한 묻기에 답했다. 이 화면의 카드도 걷는다 — 남겨 두면 다시 눌러 엉뚱한 답이 간다.
     const onAnswered = listen<AnsweredEvent>("claude:chat-answered", (e) => {

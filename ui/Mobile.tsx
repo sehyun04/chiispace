@@ -10,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { AskCard, PermissionCard } from "./ClaudeStreamPane";
 import { Face } from "./roster";
+import { SubAgents } from "./SubAgents";
 import { answerLine, answeredStream, allowLine, denyLine, initialStream, interruptLine, reduceStream, sentStream, userLine, type Prompt, type StreamState } from "./claude-stream";
 import { folderName, fromSnapshot, paneFromHash, paneHash, paneState, type PhonePane, type Snapshot } from "./phone";
 import type { LinkStatus } from "./phone-link";
@@ -216,7 +217,7 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
       listen<ExitEvent>("claude:chat-exit", (e) => {
         if (e.payload.id !== id) return;
         setAlive(false);
-        setSt((s) => ({ ...s, busy: false, prompts: [], exited: { code: e.payload.code, error: e.payload.error } }));
+        setSt((s) => ({ ...s, busy: false, tasks: [], prompts: [], exited: { code: e.payload.code, error: e.payload.error } }));
       }),
       listen<AnsweredEvent>("claude:chat-answered", (e) => {
         if (e.payload.id === id) setSt((s) => answeredStream(s, e.payload.request_id));
@@ -259,7 +260,8 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
     // PC 에서 먼저 답했으면 서버가 거절한다. 카드는 이미 걷혔으니 따로 알릴 것이 없다.
     void send(msg).catch(() => {});
   };
-  const s = paneState({ alive, busy: st.busy, waiting: st.prompts.length });
+  // 지금 상태를 받기 전에는 칸 목록이 준 상태를 쓴다. 빈 상태로 그리면 일하는 칸이 잠깐 쉬는 중으로 보인다.
+  const s = loaded.current ? paneState({ alive, busy: st.busy, tasks: st.tasks.length, waiting: st.prompts.length }) : paneState(pane);
   const session = st.session ?? pane.session;
 
   const extra = (
@@ -309,6 +311,8 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
           working={st.busy}
           transport={transport}
           extra={extra}
+          // 폰은 뒤늦게 붙는다. 붙기 전부터 돌던 서브에이전트는 통로가 알려 준 목록으로 채운다.
+          activity={<SubAgents session={session} running={st.tasks} />}
           touch
         />
       </div>
