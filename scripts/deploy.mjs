@@ -14,15 +14,19 @@
  *    node scripts/deploy.mjs --dry-run            굽고 검증까지만
  *    node scripts/deploy.mjs --label <이름>        백업 폴더 이름(before-<이름>-<시각>)
  *
- *  끝나면 `docs/DEPLOYS.md` 에 한 줄을 붙인다. 커밋은 부른 쪽이 한다. */
+ *    node scripts/deploy.mjs --no-release         GitHub 릴리스는 올리지 않는다
+ *
+ *  끝나면 `docs/DEPLOYS.md` 에 한 줄을 붙인다. 커밋은 부른 쪽이 한다.
+ *  그리고 같은 exe 를 GitHub 릴리스로 올린다(scripts/release.mjs). 다른 PC 는 그걸 받아 같은 판을 쓴다. */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishRelease } from "./release.mjs";
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repo =path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
 const opt = (name) => {
   const i = argv.indexOf(name);
@@ -162,3 +166,18 @@ if (existsSync(log)) {
   appendFileSync(log, row);
   say(`기록 docs/DEPLOYS.md 에 한 줄 붙임 — 커밋은 따로 한다`);
 } else console.log(row);
+
+// 9. 릴리스 — 소스·빌드 도구가 없는 다른 PC(데스크톱)가 바로가기로 같은 판을 받아 가게.
+// 실패해도 이 PC 배포는 이미 끝났으니 멈추지 않고 알리기만 한다.
+if (!flag("--no-release")) {
+  const updater = path.join(wt, "scripts", "chiispace-update.ps1");
+  const rel = publishRelease({
+    app: staged.app,
+    cli: staged.cli,
+    ...(existsSync(updater) ? { updater } : {}),
+    commit,
+    subject,
+    when,
+  });
+  say(rel.ok ? `릴리스 ${rel.tag} — 다른 PC 는 chiispace 바로가기를 누르면 받는다` : `릴리스 실패(이 PC 배포는 끝남, 손으로: node scripts/release.mjs): ${rel.message}`);
+}
