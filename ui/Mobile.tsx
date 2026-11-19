@@ -1,14 +1,18 @@
-/** 폰 화면 — 이 PC 에 떠 있는 Claude 대화창 칸을 고르고, 그 칸에서 말하고 권한에 답한다.
+/** 폰 화면 — 이 PC 에 떠 있는 대화창 칸을 고르고, 그 칸에서 말하고 권한에 답한다.
  *
- *  칸을 새로 띄우지 않는다. PC 에서 연 칸에 붙어 같은 claude 와 같은 대화 파일을 본다 — 밖에서 하던 일을 이어 보려는
+ *  칸을 새로 띄우지 않는다. PC 에서 연 칸에 붙어 같은 대화를 본다 — 밖에서 하던 일을 이어 보려는
  *  것이지 폰에서 따로 일을 벌이려는 것이 아니다. 말풍선·쓰이는 중인 답·카드는 PC 대화창 부품 그대로다(Chat·ChatPane·
  *  PermissionCard·AskCard). 다른 것은 칸의 지금 상태를 처음에 통로에서 한 번 받아 온다는 것뿐이다(`claude_chat_snapshot`).
  *  시작점은 phone-main.tsx 다. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChatPane, type Transport } from "./Chat";
 import { AskCard, PermissionCard } from "./ClaudeStreamPane";
+import { CodexRequestCards } from "./CodexRequestCards";
+import { CodexSubagents, CodexSubagentView } from "./CodexSubagents";
+import { agentActive, blockingPrompt, codexItems, initialCodex, type Data, type Request } from "./codex-stream";
+import { codexPhoneEvent, type CodexPhoneAction, type CodexPhoneEvent, type CodexPhoneSnapshot } from "./codex-phone";
 import { Face } from "./roster";
 import { SubAgents } from "./SubAgents";
 import { answerLine, answeredStream, allowLine, denyLine, initialStream, interruptLine, reduceStream, sentStream, userLine, type Prompt, type StreamState } from "./claude-stream";
@@ -141,13 +145,14 @@ export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: 
       </main>
     );
   }
-  if (open) return <MobilePane key={open.id} pane={open} status={status} stale={stale} />;
+  if (open?.agent === "codex") return <MobileCodexPane key={`${open.id}:${open.session}`} pane={open} status={status} stale={stale} />;
+  if (open) return <MobileClaudePane key={open.id} pane={open} status={status} stale={stale} />;
   return (
     <main className="m-app">
       <header className="m-head">
         <div className="m-head-text">
           <div className="m-title">chiispace</div>
-          <div className="m-sub">PC 의 Claude 대화창</div>
+          <div className="m-sub">PC 의 대화창</div>
         </div>
       </header>
       <Link status={status} stale={stale} />
@@ -156,7 +161,7 @@ export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: 
         {panes === null ? (
           <p className="m-empty">칸을 받는 중</p>
         ) : panes.length === 0 ? (
-          <p className="m-empty">PC 에 열린 Claude 대화창이 없다. PC 에서 새 대화 → Claude 로 열면 여기 뜬다.</p>
+          <p className="m-empty">PC 에 열린 대화창이 없다. PC 에서 Claude나 Codex 대화창을 열면 여기 뜬다.</p>
         ) : (
           panes.map((p) => {
             const s = paneState(p);
@@ -166,8 +171,8 @@ export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: 
                   <Face slug={p.slug ?? undefined} agent />
                 </span>
                 <span className="m-row-text">
-                  <span className="m-row-title">{p.title || p.name || "Claude"}</span>
-                  <span className="m-row-sub" title={p.cwd}>{folderName(p.cwd)}</span>
+                  <span className="m-row-title">{p.title || p.name || agentName(p)}</span>
+                  <span className="m-row-sub" title={p.cwd}>{folderName(p.cwd)} · {agentName(p)}</span>
                 </span>
                 <span className={`m-chip ${s.tone}`}>{s.text}</span>
               </a>
@@ -189,7 +194,10 @@ export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: 
   );
 }
 
-function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStatus; stale: boolean }) {
+type PaneProps = { pane: PhonePane; status: LinkStatus; stale: boolean };
+const agentName = (p: PhonePane) => p.agent === "codex" ? "Codex" : "Claude";
+
+function MobileClaudePane({ pane, status, stale }: PaneProps) {
   const { id } = pane;
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(pane.alive);
@@ -278,6 +286,28 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
     </>
   );
 
+  return <MobilePaneFrame pane={pane} status={status} stale={stale} state={s}>
+    <ChatPane
+      key={session}
+      agent="claude"
+      root={pane.cwd}
+      id={session}
+      paneId={`phone:${id}`}
+      slug={pane.slug ?? undefined}
+      name={pane.name ?? "Claude"}
+      live={alive && status === "open"}
+      unavailable={alive ? LINK_TEXT[status] || "PC 와 잇는 중" : "PC 에서 이 칸의 claude 가 멈췄다"}
+      working={st.busy}
+      transport={transport}
+      extra={extra}
+      // 폰은 뒤늦게 붙는다. 붙기 전부터 돌던 서브에이전트는 통로가 알려 준 목록으로 채운다.
+      activity={<SubAgents session={session} running={st.tasks} />}
+      touch
+    />
+  </MobilePaneFrame>;
+}
+
+function MobilePaneFrame({ pane, status, stale, state: s, children }: PaneProps & { state: ReturnType<typeof paneState>; children: ReactNode }) {
   return (
     <main className="m-app m-pane">
       <header className="m-head">
@@ -288,9 +318,9 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
           <Face slug={pane.slug ?? undefined} agent />
         </span>
         <div className="m-head-text">
-          <div className="m-title">{pane.title || pane.name || "Claude"}</div>
+          <div className="m-title">{pane.title || pane.name || agentName(pane)}</div>
           <div className="m-sub">
-            {folderName(pane.cwd)} · <span className={`m-state ${s.tone}`}>{s.text}</span>
+            {folderName(pane.cwd)} · {agentName(pane)} · <span className={`m-state ${s.tone}`}>{s.text}</span>
           </div>
         </div>
       </header>
@@ -298,24 +328,110 @@ function MobilePane({ pane, status, stale }: { pane: PhonePane; status: LinkStat
       <div className="m-body">
         {/* 대화창은 칸 몸통 자리를 재서 그 위에 선다(ChatPane). 폰에서는 몸통이 곧 이 자리다. */}
         <div className="pane-body" />
-        <ChatPane
-          key={session}
-          agent="claude"
-          root={pane.cwd}
-          id={session}
-          paneId={`phone:${id}`}
-          slug={pane.slug ?? undefined}
-          name={pane.name ?? "Claude"}
-          live={alive && status === "open"}
-          unavailable={alive ? LINK_TEXT[status] || "PC 와 잇는 중" : "PC 에서 이 칸의 claude 가 멈췄다"}
-          working={st.busy}
-          transport={transport}
-          extra={extra}
-          // 폰은 뒤늦게 붙는다. 붙기 전부터 돌던 서브에이전트는 통로가 알려 준 목록으로 채운다.
-          activity={<SubAgents session={session} running={st.tasks} />}
-          touch
-        />
+        {children}
       </div>
     </main>
   );
+}
+
+function MobileCodexPane({ pane, status, stale }: PaneProps) {
+  const { id, session } = pane;
+  const [snapshot, setSnapshot] = useState<CodexPhoneSnapshot>();
+  const [sync, setSync] = useState(0);
+  const [synced, setSynced] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [sending, setSending] = useState(false);
+  const [answering, setAnswering] = useState(false);
+  useEffect(() => {
+    setSynced(false);
+    if (!pane.alive || status !== "open") return;
+    let active = true;
+    let current: CodexPhoneSnapshot | undefined;
+    let queued: CodexPhoneEvent[] = [];
+    let timer: number | undefined;
+    let loading = false;
+    const load = async () => {
+      if (loading) return;
+      loading = true;
+      window.clearTimeout(timer);
+      try {
+        const snap = await invoke<CodexPhoneSnapshot>("codex_phone", { id, session, action: { kind: "snapshot" } });
+        if (!active) return;
+        // PC가 이미 반영한 조각은 빼야 재연결 순간 답변이 두 번 붙지 않는다.
+        current = queued.reduce(codexPhoneEvent, snap);
+        queued = [];
+        setSnapshot(current);
+        setSynced(true);
+        if (!current.ready) timer = window.setTimeout(load, 1000);
+      } catch {
+        if (active) timer = window.setTimeout(load, 1500);
+      } finally { loading = false; }
+    };
+    const off = listen<CodexPhoneEvent>("remote:codex", ({ payload: event }) => {
+      if (!active || event.id !== id || event.session !== session) return;
+      if (!current || loading) {
+        queued.push(event);
+      } else if (event.run !== current.run && event.seq > current.seq) {
+        queued.push(event);
+        setSynced(false);
+        void load();
+      } else {
+        current = codexPhoneEvent(current, event);
+        setSnapshot(current);
+      }
+    });
+    void off.then(() => { if (active) void load(); });
+    return () => { active = false; window.clearTimeout(timer); void off.then(fn => fn()); };
+  }, [id, session, pane.alive, status, sync]);
+
+  const state = snapshot?.state ?? initialCodex;
+  const live = pane.alive && status === "open" && synced && !!snapshot?.ready;
+  const call = <T,>(action: CodexPhoneAction) => invoke<T>("codex_phone", { id, session, action });
+  const updateFailure = (e: unknown) => {
+    setFailure(String(e));
+    setSync(n => n + 1);
+  };
+  const transport: Transport = {
+    images: true,
+    send: async (text, images) => {
+      if (!live || !snapshot || sending) throw new Error("PC와 연결을 기다려 줘");
+      setSending(true);
+      setFailure("");
+      try {
+        await call({ kind: "send", run: snapshot.run, turn: state.turn, text, images: images?.map(p => p.url) ?? [] });
+      } catch (e) { updateFailure(e); throw e; }
+      finally { setSending(false); }
+    },
+    interrupt: () => {
+      if (live && snapshot && state.turn) void call({ kind: "interrupt", run: snapshot.run, turn: state.turn }).catch(updateFailure);
+    },
+  };
+  const answer = async (p: Request, result?: Data) => {
+    if (!live || !snapshot || !result || answering) return;
+    setAnswering(true);
+    setFailure("");
+    try {
+      await call({ kind: "answer", run: snapshot.run, requestId: p.id, threadId: p.params.threadId, result });
+    } catch (e) { updateFailure(e); }
+    finally { setAnswering(false); }
+  };
+  const summary = snapshot && synced
+    ? paneState({ alive: pane.alive && snapshot.ready, busy: state.busy, waiting: state.prompts.length, tasks: state.agents.filter(agentActive).length })
+    : paneState(pane);
+  return <MobilePaneFrame pane={pane} status={status} stale={stale} state={summary}>
+    <ChatPane agent="codex" root={pane.cwd} id={session} paneId={`phone:${id}`} slug={pane.slug ?? undefined} name={pane.name ?? "Codex"}
+      live={live && !sending} working={state.busy || sending} waiting={state.prompts.some(p => p.params.threadId === session && blockingPrompt(p))}
+      unavailable={sending ? "메시지 보내는 중" : pane.alive ? LINK_TEXT[status] || "PC의 Codex 대화창에 연결 중" : "PC에서 이 칸의 Codex가 멈췄다"}
+      transport={transport} content={codexItems(state.entries)} touch
+      activity={<CodexSubagents agents={state.agents} prompts={state.prompts} />}
+      subagentView={(target, close) => <CodexSubagentView target={target} entries={state.entries} agents={state.agents}
+        slug={pane.slug ?? undefined} onClose={close} request={async (_method, params) => {
+          if (!live || !snapshot) throw new Error("PC와 연결을 기다려 줘");
+          return call<Data>({ kind: "child", run: snapshot.run, threadId: params.threadId });
+        }} />}
+      extra={<>
+        <CodexRequestCards state={state} disabled={!live || answering} answer={(p, result) => void answer(p, result)} />
+        {(failure || state.error) && <div className="note bad" role="alert">{failure || state.error}</div>}
+      </>} />
+  </MobilePaneFrame>;
 }

@@ -67,7 +67,23 @@ impl Drop for Job {
     }
 }
 #[derive(Clone, Serialize)]
-struct Event { id: String, run: String, message: Value }
+struct Event<'a> { id: &'a str, run: &'a str, seq: u64, message: &'a Value }
+
+fn emit_stream(app: &AppHandle, id: &str, run: &str, phone_root: Option<&str>, message: Value) {
+    let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+    let _ = app.emit("codex:stream", Event { id, run, seq, message: &message });
+    if let Some(root) = phone_root {
+        crate::remote::codex_event(app, id, root, run, seq, &message);
+    }
+}
+
+pub(crate) fn phone_connection(app: &AppHandle, id: &str, session: &str) -> Option<(String, usize)> {
+    let streams = app.state::<CodexStreams>();
+    let map = streams.0.lock().unwrap();
+    let proc = map.get(id)?;
+    let scope = proc.scope.lock().unwrap();
+    (scope.root.as_deref() == Some(session)).then(|| (proc.run.clone(), scope.questions.len()))
+}
 
 fn write(proc: &mut Proc, value: &Value) -> Result<(), String> {
     let mut bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
@@ -124,6 +140,20 @@ enum Incoming { Forward, Ignore, Reject }
 impl ThreadScope {
     fn can_target(&self, method: &str, thread: &str) -> bool {
         can_target(method, thread, self.root.as_deref(), &self.readable)
+    }
+
+    fn phone_root(&self, message: &Value) -> Option<String> {
+        let p = &message["params"];
+        let target = match message["method"].as_str()? {
+            "thread/started" => p["thread"]["parentThreadId"].as_str()
+                .or_else(|| p["thread"]["source"]["subAgent"]["thread_spawn"]["parent_thread_id"].as_str()),
+            "turn/started" | "turn/completed" | "thread/closed" | "item/started" | "item/completed"
+            | "item/agentMessage/delta" | "item/reasoning/summaryTextDelta" | "item/commandExecution/outputDelta"
+            | "item/commandExecution/requestApproval" | "item/fileChange/requestApproval"
+            | "item/permissions/requestApproval" | "item/tool/requestUserInput" | "serverRequest/resolved" => p["threadId"].as_str(),
+            _ => None,
+        }?;
+        if self.can_target("thread/read", target) { self.root.clone() } else { None }
     }
 
     fn sync_history(&mut self, method: &str, response: &Value) {
@@ -292,10 +322,15 @@ fn start(app: AppHandle, id: String, cwd: String) -> Result<String, String> {
                 }
                 continue;
             }
-            let incoming = scope.lock().unwrap().observe(&message);
+            let (incoming, phone_root) = {
+                let mut scope = scope.lock().unwrap();
+                let incoming = scope.observe(&message);
+                let root = if incoming == Incoming::Forward { scope.phone_root(&message) } else { None };
+                (incoming, root)
+            };
             match incoming {
                 Incoming::Forward => {
-                    let _ = app.emit("codex:stream", Event { id: id.clone(), run: token.clone(), message });
+                    emit_stream(&app, &id, &token, phone_root.as_deref(), message);
                 }
                 Incoming::Reject => {
                     let state = app.state::<CodexStreams>();
@@ -316,7 +351,8 @@ fn start(app: AppHandle, id: String, cwd: String) -> Result<String, String> {
         if let Some(mut proc) = own {
             let _ = proc.child.kill();
             let code = proc.child.wait().ok().and_then(|s| s.code());
-            let _ = app.emit("codex:stream", Event { id, run: token, message: json!({"method":"chiispace/exit", "params":{"code":code,"error":errors.lock().unwrap().clone()}}) });
+            let root = scope.lock().unwrap().root.clone();
+            emit_stream(&app, &id, &token, root.as_deref(), json!({"method":"chiispace/exit", "params":{"code":code,"error":errors.lock().unwrap().clone()}}));
         }
     });
     Ok(run)
@@ -372,7 +408,7 @@ pub fn codex_stream_answer(app: AppHandle, id: String, run: String, request_id: 
         // 줄의 일부가 먼저 들어갔을 수 있어 같은 통로로 답을 다시 보내면 안 된다.
         drop(map);
         codex_stream_stop(streams, id.clone(), run.clone());
-        let _ = app.emit("codex:stream", Event { id, run, message: json!({"method":"chiispace/exit", "params":{"error":error}}) });
+        emit_stream(&app, &id, &run, None, json!({"method":"chiispace/exit", "params":{"error":error}}));
         return Err(error);
     }
     Ok(())

@@ -4,7 +4,7 @@ type CodexInput =
   | { type: "text"; text: string; text_elements: [] }
   | { type: "image"; url: string };
 
-export function codexInput(text: string, images: readonly Picture[] = []): CodexInput[] {
+export function codexInput(text: string, images: readonly Pick<Picture, "url">[] = []): CodexInput[] {
   const input: CodexInput[] = text ? [{ type: "text", text, text_elements: [] }] : [];
   return input.concat(images.map(p => ({ type: "image", url: p.url })));
 }

@@ -360,7 +360,7 @@ export default function App() {
   const paneView = useMemo(() => ({ ...streams.paneView, ...subs.view }), [streams.paneView, subs.view]);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const closeRemote = useCallback(() => setRemoteOpen(false), []);
-  useRemotePanes(booted, streams.streams, (id) => names[id] || paneTitles[id] || "", casting);
+  useRemotePanes(booted, streams.streams, (id) => names[id] || paneTitles[id] || "", casting, streams.streamBusy);
   return (
     <div className={sideOpen ? "app" : "app closed"}>
       <button

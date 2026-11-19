@@ -360,6 +360,7 @@ pub fn run() {
             remote::remote_confirm,
             remote::remote_forget,
             remote::remote_publish,
+            remote::remote_codex_reply,
             codex_stream::codex_stream_start,
             codex_stream::codex_stream_request,
             codex_stream::codex_stream_answer,

@@ -10,10 +10,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
+import { codexResponse } from "./fixtures/remote-codex-responses.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
+import { paneHash } from "../ui/phone.ts";
 
 const exe = process.env.CHIISPACE_TEST_EXE;
 const claude = process.env.CHIISPACE_TEST_REAL_CLAUDE;
+const codex = process.env.CHIISPACE_TEST_REAL_CODEX;
 const relayDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "relay");
 const wrangler = path.join(relayDir, "node_modules", ".bin", "wrangler.cmd");
 /** 실제로 올린 중계로 돌릴 때(`CHIISPACE_LIVE_RELAY=https://…workers.dev`). 매번 새 난수 방을 쓰고, 그 방에는 PC 비밀의 해시 하나만 남는다.
@@ -109,6 +112,8 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   mkdirSync(project);
   const home = path.join(root, "claude-state");
   mkdirSync(home);
+  const codexHome = path.join(root, "codex-state");
+  mkdirSync(codexHome);
   const protectedFiles = ["com.sehyun.chiispace", "com.sehyun.kasaspace"].flatMap((id) =>
     ["session.json", "remote.json"].map((f) => path.join(process.env.APPDATA, id, f)),
   );
@@ -128,16 +133,17 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   const cwd = project.replaceAll("\\", "/");
   const state = path.join(root, "session.json");
   const shell = path.join(process.env.SystemRoot, "System32", "cmd.exe");
+  const codexTabs = codex ? [{ key: "t1", focus: "%1", root: cwd, shell, layout: { kind: "leaf", id: "%1" } }] : [];
   writeFileSync(
     state,
     JSON.stringify({
-      tabs: [{ key: "t0", focus: "%0", root: cwd, shell, layout: { kind: "leaf", id: "%0" } }],
+      tabs: [{ key: "t0", focus: "%0", root: cwd, shell, layout: { kind: "leaf", id: "%0" } }, ...codexTabs],
       active: 0,
-      nextPane: 1,
-      nextTab: 1,
+      nextPane: codex ? 2 : 1,
+      nextTab: codex ? 2 : 1,
       restoreMode: "native-continue",
       procs: {},
-      streams: { "%0": { agent: "claude", session: sid, cwd } },
+      streams: { "%0": { agent: "claude", session: sid, cwd }, ...(codex ? { "%1": { agent: "codex", session: "", cwd } } : {}) },
     }),
   );
 
@@ -169,6 +175,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   let releaseSub;
   const subHeld = new Promise((r) => (releaseSub = r));
   const sse = (res, type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+  const codexRequests = [];
   const server = http.createServer((req, res) => {
     if (req.url === probe) {
       res.setHeader("Access-Control-Allow-Origin", "*");
@@ -195,6 +202,10 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       try {
         j = JSON.parse(body);
       } catch {}
+      if (req.url === "/v1/responses") {
+        await codexResponse(res, j, project, codexRequests);
+        return;
+      }
       const all = JSON.stringify(j.messages ?? []);
       const message = { id: "msg_" + randomUUID().slice(0, 8), type: "message", role: "assistant", model: j.model ?? "m", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5, output_tokens: 1 } };
       if (!j.stream) {
@@ -204,6 +215,8 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       const marks = ["HELLO_A", "TOOL_A", "TOOL_B", "UI_HELLO", "TOOL_C", "SUB_ASK"];
       const [mark, at] = marks.map((k) => [k, all.lastIndexOf(k)]).sort((x, y) => y[1] - x[1])[0];
       const afterTool = all.lastIndexOf("tool_result") > at;
+      const last = JSON.stringify(j.messages?.at(-1) ?? {});
+      const taskNotice = last.includes("[SYSTEM NOTIFICATION - NOT USER INPUT]") && last.includes("<task-notification>");
       // 서브에이전트는 헤더로 가른다. 본 대화의 다음 요청에도 맡긴 일이 실려 있어 본문으로는 못 가른다.
       const isSub = !!req.headers["x-claude-code-agent-id"];
       if (at >= 0 && !isSub) requests.push({ mark, afterTool });
@@ -212,7 +225,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       if (isSub) {
         sse(res, "content_block_start", { index: 0, content_block: { type: "text", text: "" } });
         sse(res, "content_block_delta", { index: 0, delta: { type: "text_delta", text: "SUB_WORKING 찾는 중" } });
-        await Promise.race([subHeld, delay(120000)]);
+        await Promise.race([subHeld, new Promise(resolve => setTimeout(resolve, 120000).unref())]);
         sse(res, "content_block_delta", { index: 0, delta: { type: "text_delta", text: " SUB_DONE" } });
         sse(res, "content_block_stop", { index: 0 });
         sse(res, "message_delta", { delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 9 } });
@@ -235,7 +248,9 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         sse(res, "content_block_stop", { index: 0 });
         sse(res, "message_delta", { delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 20 } });
       };
-      if (afterTool) await text(["도구 ", "결과 ", `받음 ${mark}_AFTER`]);
+      // 완료 알림에도 맡긴 일의 문구가 남아 있어, 다시 Agent를 부르면 검증에서 자식이 계속 생긴다.
+      if (taskNotice) await text(["서브에이전트 결과를 받았다"]);
+      else if (afterTool) await text(["도구 ", "결과 ", `받음 ${mark}_AFTER`]);
       else if (mark === "SUB_ASK") tool("Agent", { description: "로그 찾기", prompt: "SUB_TASK 로그에서 실패 원인 찾기", subagent_type: "general-purpose" });
       else if (mark.startsWith("TOOL_")) tool("Bash", { command: `mkdir dir_${mark.toLowerCase()}`, description: `${mark} 폴더 만들기` });
       else await text(["안녕 ", `${mark}_REPLY`]);
@@ -247,13 +262,16 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const apiBase = "http://127.0.0.1:" + server.address().port;
-  const env = { ...process.env, CHIISPACE_STATE: state, CLAUDE_CONFIG_DIR: home };
+  writeFileSync(path.join(codexHome, "config.toml"),
+    `model = "gpt-5.4"\nmodel_provider = "local_test"\napproval_policy = "on-request"\nsandbox_mode = "read-only"\ncheck_for_update_on_startup = false\n[features]\ndefault_mode_request_user_input = true\nmulti_agent = true\n[model_providers.local_test]\nname = "Local phone fixture"\nbase_url = "${apiBase}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
+  const env = { ...process.env, CHIISPACE_STATE: state, CLAUDE_CONFIG_DIR: home, CODEX_HOME: codexHome };
   for (const key of Object.keys(env)) {
-    if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT" || key === "CHIISPACE_PROXY" || /API_KEY|AUTH_TOKEN|CLAUDE_CODE_USE_|ENABLE_TOOL_SEARCH|CLAUDECODE|CLAUDE_CODE_ENTRYPOINT/.test(key)) delete env[key];
+    if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT" || key === "CHIISPACE_PROXY" || /API_KEY|AUTH_TOKEN|CODEX_TUI_RECORD|CODEX_TUI_SESSION_LOG|CLAUDE_CODE_USE_|ENABLE_TOOL_SEARCH|CLAUDECODE|CLAUDE_CODE_ENTRYPOINT/.test(key)) delete env[key];
   }
   Object.assign(env, { ANTHROPIC_API_KEY: "chiispace-fixture-key", ANTHROPIC_BASE_URL: apiBase, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path");
   env[pathKey] = path.dirname(claude) + ";" + env[pathKey];
+  if (codex) env[pathKey] = path.dirname(codex) + ";" + env[pathKey];
   env.CHIISPACE_PROBE_MS = "500";
   env.CHIISPACE_PROBE = `(() => { let pending = false;
   setInterval(async () => {
@@ -467,7 +485,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.ok(await until(() => dom().remote?.subs?.some((t) => /붙은 화면 1/.test(t)), 50), "붙은 화면 수가 안 보임: " + JSON.stringify(dom().remote));
       const call = (cmd, args) => link.invoke(cmd, args);
       const panes = await call("remote_panes", {});
-      assert.deepEqual(panes.map((p) => [p.id, p.session, p.cwd, p.alive, p.waiting]), [["%0", sid, cwd, true, 0]], JSON.stringify(panes));
+      assert.deepEqual(panes.filter(p => p.agent === "claude").map(p => [p.id, p.session, p.cwd, p.alive, p.waiting]), [["%0", sid, cwd, true, 0]], JSON.stringify(panes));
 
       // 5. 폰에서 말하면 PC 칸의 claude 가 받고, PC 대화창에도 그 말과 답이 남는다.
       await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서") });
@@ -527,6 +545,34 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("TOOL_B_AFTER")), 400), "거절 뒤 답이 안 옴");
       assert.equal(existsSync(path.join(project, "dir_tool_b")), false, "거절했는데 실행됨");
 
+      let codexPane;
+      let codexCall;
+      if (codex) {
+        assert.ok(await until(async () => (codexPane = (await call("remote_panes", {})).find(p => p.agent === "codex" && p.alive)), 100), "Codex 칸이 폰 목록에 없다");
+        codexCall = action => call("codex_phone", { id: codexPane.id, session: codexPane.session, action });
+        let snap;
+        assert.ok(await until(async () => (snap = await codexCall({ kind: "snapshot" })).ready, 100), "Codex 입력이 준비되지 않았다");
+        await refuse("codex_phone", { id: "%0", session: sid, action: { kind: "snapshot" } }, "Claude 칸을 Codex로 조회함");
+        await refuse("codex_phone", { id: codexPane.id, session: sid, action: { kind: "snapshot" } }, "다른 대화 ID로 조회함");
+        await refuse("codex_phone", { id: codexPane.id, session: codexPane.session, action: { kind: "send", run: "old", turn: null, text: "x", images: [] } }, "이전 실행에서 보냄");
+        await refuse("codex_phone", { id: codexPane.id, session: codexPane.session, action: { kind: "child", run: snap.run, threadId: sid } }, "관계없는 자식 조회");
+        await refuse("codex_phone", { id: codexPane.id, session: codexPane.session, action: { kind: "settings", run: snap.run } }, "폰에서 설정을 바꿈");
+        await refuse("codex_stream_request", { id: codexPane.id, run: snap.run, method: "thread/list" }, "일반 app-server 요청을 받음");
+        await Promise.all([
+          refuse("codex_phone", { id: codexPane.id, session: codexPane.session,
+            action: { kind: "send", run: "old", turn: null, text: "x".repeat(256_000), images: [] } }, "큰 요청에서 이전 실행을 사용함"),
+          call("remote_panes", {}),
+        ]);
+        await codexCall({ kind: "send", run: snap.run, turn: null, text: "/new PHONE_CODEX_HELLO", images: [] });
+        assert.ok(await until(() => events.some(x => x.e === "remote:codex" && x.p.message.method === "item/agentMessage/delta" && x.p.message.params.delta === "PHONE_CODEX_HELLO"), 100), "Codex의 답 조각이 폰에 안 옴");
+        assert.ok(await until(async () => {
+          const view = (await codexCall({ kind: "snapshot" })).state;
+          return !view.busy && view.entries.some(i => i.text === "PHONE_CODEX_HELLO_ANSWER");
+        }, 100), "폰으로 보낸 말이 같은 Codex 대화에 안 남음");
+        assert.ok(codexRequests.some(r => r.mark === "PHONE_CODEX_HELLO"));
+        assert.ok(!wire.some(w => /PHONE_CODEX_HELLO|remote:codex/.test(w)), "중계에 Codex 대화 평문이 보임");
+      }
+
       // 8. 폰 화면(헤드리스 Edge, 아이폰 크기). 숫자 비교 짝짓기 → 칸 목록 → 칸 → 말하기 → 권한 카드.
       if (edge) {
         phone = await phoneBrowser(path.join(root, "edge-profile"));
@@ -539,7 +585,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         assert.ok(await until(async () => dom().remote?.sas && (await phone.evaluate("document.querySelector('.m-sas')?.dataset.sas ?? null")) === dom().remote.sas, 150), "폰 화면과 PC 의 숫자가 안 맞음");
         await phone.shot(path.join(root, "phone-sas.png"));
         commands.push({ button: "맞다" });
-        assert.ok(await until(() => phone.evaluate("document.querySelectorAll('.m-row').length === 1"), 150), "폰 화면에 칸 목록이 안 뜸");
+        assert.ok(await until(() => phone.evaluate(`document.querySelectorAll('.m-row').length === ${codex ? 2 : 1}`), 150), "폰 화면에 칸 목록이 안 뜸");
         // 같은 판이면 새로 불러오지 않는다. 표시를 남겨 두고 끝에서 그대로인지 본다.
         await phone.evaluate("window.__sameLoad = true");
         assert.ok(await until(() => dom().remote?.devices?.length === 2, 50), "폰 화면이 짝지어지지 않음: " + JSON.stringify(dom().remote));
@@ -585,7 +631,7 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         assert.ok(await until(async () => (await look()).after > 0, 300), "본 대화가 서브에이전트를 부른 뒤 답하지 않음: " + JSON.stringify(await look()));
         assert.ok(await until(async () => (await look()).subs.some((t) => t.includes("SUB_WORKING")), 300), "폰 화면에 서브에이전트 줄이 안 뜸: " + JSON.stringify(await look()));
         assert.ok(await until(async () => (await look()).state === "일하는 중", 50), "서브에이전트가 일하는데 폰 칸이 일하는 중이 아님: " + JSON.stringify(await look()));
-        const listed = (await call("remote_panes", {}))[0];
+        const listed = (await call("remote_panes", {})).find(p => p.id === "%0");
         assert.equal(listed.tasks, 1, "칸 목록에 일하는 서브에이전트가 안 실림: " + JSON.stringify(listed));
         await phone.shot(path.join(root, "phone-sub.png"));
         // 뒤늦게 연 화면(홈 화면 앱을 다시 연 것과 같다). 서브에이전트가 붙잡혀 새 조각이 안 와도 지금 도는 것이 보여야 한다.
@@ -607,7 +653,57 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
         // 서브에이전트가 끝나면 줄이 걷히고 쉬는 중으로 돌아간다.
         releaseSub();
         assert.ok(await until(async () => { const l = await look(); return l.state === "쉬는 중" && !l.subs.length; }, 300), "서브에이전트가 끝났는데 폰 칸이 그대로: " + JSON.stringify(await look()));
-        assert.equal((await call("remote_panes", {}))[0].tasks, 0, "서브에이전트가 끝났는데 칸 목록에 남음");
+        // 프록시의 스트림 끝과 CLI의 작업 완료 통지는 서로 다른 통로에서 온다.
+        assert.ok(await until(async () => (await call("remote_panes", {})).find(p => p.id === "%0")?.tasks === 0, 100), "서브에이전트가 끝났는데 칸 목록에 남음");
+        if (codexPane) {
+          await phone.evaluate(`location.hash = ${JSON.stringify(paneHash(codexPane.id))}`);
+          const codexText = mark => phone.evaluate(`[...document.querySelectorAll('.msg .bubble')].some(b => b.textContent.includes(${JSON.stringify(mark)}))`)
+            .catch(() => false);
+          const codexIdle = () => phone.evaluate("document.querySelector('.m-state')?.textContent === '쉬는 중'").catch(() => false);
+          assert.ok(await until(() => codexText("PHONE_CODEX_HELLO_ANSWER"), 150), "Codex 칸을 열었는데 앞 대화가 안 보임");
+          await type("PHONE_CODEX_TOOL");
+          await phone.evaluate("document.querySelector('.composer-send').click()");
+          const codexApproval = () => phone.evaluate("document.querySelector('.ask.perm')?.textContent.includes('phone_codex_dir') ?? false").catch(() => false);
+          assert.ok(await until(codexApproval, 200), "폰에 Codex 승인 카드가 안 뜸");
+          assert.equal(existsSync(path.join(project, "phone_codex_dir")), false);
+          await phone.evaluate("location.reload()");
+          assert.ok(await until(codexApproval, 150), "다시 연결한 폰에 대기 중인 Codex 승인 카드가 안 뜸");
+          await phone.evaluate("document.querySelector('.ask.perm .ask-go').click()");
+          assert.ok(await until(async () => await codexText("PHONE_CODEX_TOOL_ANSWER") && await codexIdle(), 200), "폰에서 Codex 허락 뒤 답이 안 옴");
+          assert.ok(existsSync(path.join(project, "phone_codex_dir")), "폰에서 허락한 Codex 작업이 실행되지 않았다");
+          await type("PHONE_CODEX_ASK");
+          await phone.evaluate("document.querySelector('.composer-send').click()");
+          assert.ok(await until(() => phone.evaluate("!!document.querySelector('.ask.choose .ask-opt')"), 150), "폰에 Codex 질문 카드가 안 뜸");
+          await phone.evaluate("document.querySelector('.ask.choose .ask-opt:nth-child(2)').click()");
+          await phone.evaluate("document.querySelector('.ask.choose .ask-go').click()");
+          assert.ok(await until(async () => await codexText("PHONE_CODEX_ASK_ANSWER") && await codexIdle(), 180), "폰에서 Codex 질문 답이 안 감");
+          assert.ok(codexRequests.some(r => r.mark === "PHONE_CODEX_ASK" && r.after && JSON.stringify(r.answer).includes("둘째")));
+          await type("PHONE_CODEX_IMAGE");
+          await phone.evaluate(`(async () => {
+            const img = document.createElement('canvas');
+            img.width = img.height = 4;
+            const blob = await new Promise(resolve => img.toBlob(resolve, 'image/png'));
+            const dt = new DataTransfer();
+            dt.items.add(new File([blob], 'phone.png', { type: 'image/png' }));
+            document.querySelector('.composer textarea').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+          })()`);
+          assert.ok(await until(() => phone.evaluate("!!document.querySelector('.composer-pic img')"), 50), "폰 Codex 이미지 미리보기가 안 뜸");
+          await phone.evaluate("document.querySelector('.composer-send').click()");
+          assert.ok(await until(async () => await codexText("PHONE_CODEX_IMAGE_ANSWER") && await codexIdle(), 180), "폰 Codex 그림 전송이 안 됨");
+          assert.ok(codexRequests.some(r => r.mark === "PHONE_CODEX_IMAGE" && r.images), "그림이 Codex 모델 입력에 빠짐");
+          await type("PHONE_CODEX_SUB");
+          await phone.evaluate("document.querySelector('.composer-send').click()");
+          assert.ok(await until(async () => await codexText("PHONE_CODEX_SUB_ANSWER") && await codexIdle(), 200), "폰 Codex에서 부른 자식이 끝나지 않음");
+          await phone.evaluate("document.querySelector('.note.launch').click()");
+          assert.ok(await until(() => phone.evaluate("document.querySelector('.subview')?.textContent.includes('PHONE_CODEX_CHILD_ANSWER') ?? false"), 130), "폰에서 Codex 자식 대화를 못 읽음");
+          await phone.evaluate("document.querySelector('.subview-back').click()");
+          await type("PHONE_CODEX_STOP");
+          await phone.evaluate("document.querySelector('.composer-send').click()");
+          assert.ok(await until(async () => !!(await codexCall({ kind: "snapshot" })).state.turn && await codexText("PHONE_CODEX_STOP"), 150), "Codex 중단 검증 턴이 시작되지 않음");
+          await phone.evaluate("document.querySelector('.composer-stop').click()");
+          assert.ok(await until(async () => !(await codexCall({ kind: "snapshot" })).state.busy, 200), "폰으로 Codex 턴을 중단하지 못함");
+          console.log("폰 Codex 대화와 승인·질문·재연결·중단 확인");
+        }
       } else {
         console.log("Edge 가 없어 폰 화면 검증은 건너뜀");
       }

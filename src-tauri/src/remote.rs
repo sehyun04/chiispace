@@ -1,4 +1,4 @@
-//! 밖에서 폰으로 쓰는 길 — 이 PC 에 떠 있는 Claude 대화창을 폰 화면(ui/Mobile.tsx)에 보인다.
+//! 밖에서 폰으로 쓰는 길 — 이 PC 에 떠 있는 대화창을 폰 화면(ui/Mobile.tsx)에 보인다.
 //!
 //! - 집 PC 는 아무 포트도 열지 않는다. PC 앱이 사용자의 Cloudflare 중계(relay/)에 먼저 웹소켓으로 붙고, 폰도 그 중계로 온다.
 //!   중계 주소는 사용자가 [폰 연결]에 넣는다. 중계를 올리는 일(가입·로그인·배포)은 사용자가 한다 — 앱은 그 인증을 받지 않는다.
@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{mpsc as sync_mpsc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as B64;
@@ -23,7 +24,7 @@ use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Listener, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
@@ -77,7 +78,15 @@ struct Device {
     added: u64,
 }
 
-/// PC 웹뷰가 알려 주는 Claude 대화창 칸. 폰은 이 칸들만 보고 이 칸들의 대화만 읽는다.
+#[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+enum Agent {
+    #[default]
+    Claude,
+    Codex,
+}
+
+/// PC 웹뷰가 알려 주는 대화창 칸. 폰은 이 칸들만 보고 이 칸들의 대화만 읽는다.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct PaneInfo {
     pub id: String,
@@ -86,6 +95,10 @@ pub struct PaneInfo {
     pub session: String,
     pub slug: Option<String>,
     pub name: Option<String>,
+    #[serde(default)]
+    agent: Agent,
+    #[serde(default, rename = "codexBusy", skip_serializing)]
+    busy: bool,
 }
 
 /// 짝짓는 중인 폰 하나. 폰이 먼저 키를 약속하고(commit), PC 가 키와 난수를 낸 뒤에 폰이 키를 연다.
@@ -117,6 +130,7 @@ struct Inner {
     saved: Saved,
     file: Option<PathBuf>,
     panes: Vec<PaneInfo>,
+    codex_calls: HashMap<u64, sync_mpsc::Sender<Result<Value, String>>>,
     pairing: Option<Pairing>,
     sessions: HashMap<String, Session>,
     /// 중계로 나가는 줄. 붙어 있을 때만 있다.
@@ -196,7 +210,7 @@ fn phone_line(line: &str, waiting: impl Fn(&str) -> bool) -> Result<(), &'static
 /// 폰으로 넘길 이벤트(암호화 전의 한 말). 알려 준 칸의 것만 넘긴다.
 fn event_for(name: &str, payload: &str, panes: &[PaneInfo]) -> Option<String> {
     let v: Value = serde_json::from_str(payload).ok()?;
-    let pane = || v.get("id").and_then(Value::as_str).is_some_and(|id| panes.iter().any(|p| p.id == id));
+    let pane = || v.get("id").and_then(Value::as_str).is_some_and(|id| panes.iter().any(|p| p.agent == Agent::Claude && p.id == id));
     let ok = match name {
         // 쓰이는 중인 답의 조각은 프록시(chat:live)가 더 가볍게 준다. 휴대폰 망에 두 번 싣지 않는다.
         "claude:chat" => pane() && !v.get("line").and_then(Value::as_str).unwrap_or("").starts_with(r#"{"type":"stream_event""#),
@@ -204,7 +218,7 @@ fn event_for(name: &str, payload: &str, panes: &[PaneInfo]) -> Option<String> {
         "chat:live" | "chat:sub" => v
             .get("session")
             .and_then(Value::as_str)
-            .is_some_and(|s| panes.iter().any(|p| p.session.eq_ignore_ascii_case(s))),
+            .is_some_and(|s| panes.iter().any(|p| p.agent == Agent::Claude && p.session.eq_ignore_ascii_case(s))),
         _ => false,
     };
     ok.then(|| format!(r#"{{"t":"ev","e":{},"p":{payload}}}"#, json!(name)))
@@ -298,6 +312,7 @@ impl Remote {
             saved,
             file,
             panes: Vec::new(),
+            codex_calls: HashMap::new(),
             pairing: None,
             sessions: HashMap::new(),
             out: None,
@@ -717,6 +732,9 @@ fn on_message(app: &AppHandle, phone: &str, text: &str) {
     let args = v.get("args").cloned().unwrap_or(Value::Null);
     let (app, phone) = (app.clone(), phone.to_string());
     tauri::async_runtime::spawn_blocking(move || {
+        if !app.state::<Remote>().0.lock().unwrap().sessions.contains_key(&phone) {
+            return;
+        }
         let out = dispatch(&app, &cmd, &args);
         let reply = match out {
             Ok(v) => json!({ "t": "ret", "i": id, "ok": true, "v": v }),
@@ -826,6 +844,20 @@ pub fn remote_publish(app: AppHandle, panes: Vec<PaneInfo>) {
     seal_all(&mut inner, r#"{"t":"ev","e":"remote:panes","p":null}"#);
 }
 
+pub(crate) fn codex_event(app: &AppHandle, id: &str, session: &str, run: &str, seq: u64, message: &Value) {
+    let remote = app.state::<Remote>();
+    let mut inner = remote.0.lock().unwrap();
+    if inner.sessions.is_empty() || !inner.panes.iter().any(|p| p.agent == Agent::Codex && p.id == id && p.session == session) {
+        return;
+    }
+    let exit = json!({ "method": "chiispace/exit" });
+    let message = if message["method"] == "chiispace/exit" { &exit } else { message };
+    let text = json!({ "t": "ev", "e": "remote:codex", "p": { "id": id, "session": session, "run": run, "seq": seq, "message": message } }).to_string();
+    if text.len() <= MAX_MESSAGE / 2 {
+        seal_all(&mut inner, &text);
+    }
+}
+
 // ── 폰이 부를 수 있는 명령 ───────────────────────────────────────
 
 /// 폰 칸 목록 한 줄. PC 가 알려 준 것에 통로의 지금 상태를 얹는다.
@@ -840,14 +872,96 @@ struct PhonePane {
     waiting: usize,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
+enum CodexAction {
+    Snapshot,
+    Send { run: String, turn: Option<String>, text: String, images: Vec<String> },
+    Answer { run: String, request_id: Value, thread_id: String, result: Value },
+    Interrupt { run: String, turn: String },
+    Child { run: String, thread_id: String },
+}
+
+impl CodexAction {
+    fn check(&self, current_run: &str) -> Result<(), String> {
+        let run = match self {
+            Self::Snapshot => return Ok(()),
+            Self::Send { run, text, images, .. } => {
+                if text.len() > 1024 * 1024 || (text.trim().is_empty() && images.is_empty())
+                    || images.len() > 8 || !images.iter().all(|url| valid_codex_image(url))
+                {
+                    return Err("Codex에 보낼 글이나 그림을 확인해 줘".into());
+                }
+                run
+            }
+            Self::Answer { run, request_id, thread_id, result } => {
+                if !(request_id.is_i64() || request_id.as_str().is_some_and(|id| id.len() <= 128))
+                    || thread_id.len() > 128 || !result.is_object() || result.to_string().len() > 1024 * 1024
+                {
+                    return Err("답할 Codex 요청을 확인해 줘".into());
+                }
+                run
+            }
+            Self::Interrupt { run, .. } | Self::Child { run, .. } => run,
+        };
+        if run != current_run {
+            return Err("PC의 Codex 실행이 바뀌었다".into());
+        }
+        Ok(())
+    }
+}
+
+fn valid_codex_image(url: &str) -> bool {
+    url.split_once(',').is_some_and(|(format, data)| {
+        matches!(format, "data:image/png;base64" | "data:image/jpeg;base64" | "data:image/gif;base64" | "data:image/webp;base64")
+            && !data.is_empty() && data.len() <= 5_242_880
+            && data.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+    })
+}
+
+fn codex_call(app: &AppHandle, pane: &PaneInfo, args: &Value) -> Result<Value, String> {
+    if args["session"].as_str() != Some(pane.session.as_str()) {
+        return Err("PC 칸의 대화가 바뀌었다".into());
+    }
+    let (run, _) = crate::codex_stream::phone_connection(app, &pane.id, &pane.session).ok_or("PC의 Codex 대화창이 준비되지 않았다")?;
+    let action: CodexAction = serde_json::from_value(args["action"].clone()).map_err(|_| "폰에서는 할 수 없는 Codex 요청이다")?;
+    action.check(&run)?;
+
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let call = NEXT.fetch_add(1, Ordering::Relaxed);
+    let (sender, receiver) = sync_mpsc::channel();
+    let remote = app.state::<Remote>();
+    {
+        let mut inner = remote.0.lock().unwrap();
+        if inner.codex_calls.len() >= 16 {
+            return Err("PC가 Codex 요청을 처리하는 중이다".into());
+        }
+        inner.codex_calls.insert(call, sender);
+    }
+    // PC 입력바와 같은 경로를 써야 현재 모델·권한과 전송 순서를 어느 화면에서 보내도 공유한다.
+    let sent = app.emit_to("main", "remote:codex-call", json!({ "call": call, "id": pane.id, "session": pane.session, "run": run, "action": action }));
+    let result = sent.map_err(|e| e.to_string()).and_then(|_| {
+        receiver.recv_timeout(Duration::from_secs(65)).map_err(|_| "PC의 Codex 대화창이 답하지 않았다".to_string())?
+    });
+    remote.0.lock().unwrap().codex_calls.remove(&call);
+    result
+}
+
+#[tauri::command]
+pub fn remote_codex_reply(app: AppHandle, call: u64, value: Option<Value>, error: Option<String>) {
+    if let Some(sender) = app.state::<Remote>().0.lock().unwrap().codex_calls.remove(&call) {
+        let _ = sender.send(error.map_or_else(|| Ok(value.unwrap_or(Value::Null)), Err));
+    }
+}
+
 fn dispatch(app: &AppHandle, cmd: &str, args: &Value) -> Result<Value, String> {
     let panes = app.state::<Remote>().0.lock().unwrap().panes.clone();
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let pane = |id: &str| panes.iter().find(|p| p.id == id).cloned().ok_or_else(|| "PC 에 없는 칸이다".to_string());
+    let pane = |id: &str, agent| panes.iter().find(|p| p.id == id && p.agent == agent).ok_or_else(|| "PC 에 없는 칸이다".to_string());
     // 대화 읽기는 알려 준 칸의 대화만. 짝지은 폰이라도 이 PC 의 다른 대화를 뒤지지 못하게 한다.
     let conversation = || {
         let (root, id) = (s("root"), s("id"));
-        if panes.iter().any(|p| p.cwd == root && p.session.eq_ignore_ascii_case(&id)) {
+        if panes.iter().any(|p| p.agent == Agent::Claude && p.cwd == root && p.session.eq_ignore_ascii_case(&id)) {
             Ok((root, id))
         } else {
             Err("PC 칸의 대화가 아니다".to_string())
@@ -857,20 +971,25 @@ fn dispatch(app: &AppHandle, cmd: &str, args: &Value) -> Result<Value, String> {
         "remote_panes" => Ok(json!(panes
             .iter()
             .map(|p| {
+                if p.agent == Agent::Codex {
+                    let conn = crate::codex_stream::phone_connection(app, &p.id, &p.session);
+                    return PhonePane { info: p.clone(), alive: conn.is_some(), busy: p.busy, tasks: 0, waiting: conn.map_or(0, |(_, n)| n) };
+                }
                 let snap = crate::claude_chat::snapshot(app, &p.id);
                 PhonePane { info: p.clone(), alive: snap.alive, busy: snap.busy, tasks: snap.agents, waiting: snap.prompts.len() }
             })
             .collect::<Vec<_>>())),
         "claude_chat_snapshot" => {
-            let p = pane(&s("id"))?;
+            let p = pane(&s("id"), Agent::Claude)?;
             Ok(json!(crate::claude_chat::snapshot(app, &p.id)))
         }
         "claude_chat_send" => {
-            let p = pane(&s("id"))?;
+            let p = pane(&s("id"), Agent::Claude)?;
             let line = s("line");
             phone_line(&line, |r| crate::claude_chat::waiting_for(app, &p.id, r))?;
             crate::claude_chat::send_line(app, &p.id, &line).map(|_| Value::Null)
         }
+        "codex_phone" => codex_call(app, pane(&s("id"), Agent::Codex)?, args),
         "claude_transcript_raw" => {
             let (root, id) = conversation()?;
             Ok(json!(crate::claude_files::transcript_tail(app, &root, &id, PHONE_TAIL)))
@@ -908,7 +1027,21 @@ mod tests {
             session: "12345678-1234-4234-8234-123456789abc".into(),
             slug: None,
             name: None,
+            agent: Agent::Claude,
+            busy: false,
         }]
+    }
+
+    #[test]
+    fn phone_codex_actions_match_the_run_and_accept_only_user_input() {
+        let parse = |value| serde_json::from_value::<CodexAction>(value);
+        let send = parse(json!({ "kind":"send", "run":"current", "turn":null, "text":"", "images":["data:image/png;base64,YQ=="] })).unwrap();
+        assert!(send.check("current").is_ok());
+        assert!(send.check("previous").is_err());
+        assert!(parse(json!({ "kind":"send", "run":"current", "turn":null, "text":"hi", "images":[], "approvalPolicy":"never" })).is_err());
+        assert!(parse(json!({ "kind":"thread/start" })).is_err());
+        let external = parse(json!({ "kind":"send", "run":"current", "turn":null, "text":"", "images":["https://example.com/test.png"] })).unwrap();
+        assert!(external.check("current").is_err());
     }
 
     #[test]

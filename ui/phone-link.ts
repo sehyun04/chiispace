@@ -124,6 +124,7 @@ export class Link {
   private everOpen = false;
   private stopped = false;
   private chain: Promise<void> = Promise.resolve();
+  private outgoing: Promise<void> = Promise.resolve();
   private hellos = new WeakMap<WebSocket, Uint8Array>();
   private o: Options;
 
@@ -182,19 +183,27 @@ export class Link {
     });
   }
 
-  private async send(m: Msg) {
+  private send(m: Msg) {
     const ws = this.ws;
     const keys = this.keys;
-    if (!ws || !keys || ws.readyState !== WebSocket.OPEN) throw "PC 와 끊겼다";
-    const n = this.tx++;
-    const c = await seal(keys.up, n, JSON.stringify(m));
-    if (c.length <= CHUNK) return ws.send(JSON.stringify({ k: "x", n, c }));
-    const of = Math.ceil(c.length / CHUNK);
-    for (let i = 0; i < of; i++) ws.send(JSON.stringify({ k: "x", n, c: c.slice(i * CHUNK, (i + 1) * CHUNK), i, of }));
+    // 큰 그림을 암호화하는 동안 작은 칸 목록 요청이 앞질러 가면 PC가 순번 오류로 연결을 닫는다.
+    const send = this.outgoing.then(async () => {
+      const current = () => ws && keys && this.ws === ws && this.keys === keys && ws.readyState === WebSocket.OPEN;
+      if (!ws || !keys || !current()) throw "PC 와 끊겼다";
+      const n = this.tx++;
+      const c = await seal(keys.up, n, JSON.stringify(m));
+      if (!current()) throw "PC 와 끊겼다";
+      if (c.length <= CHUNK) return ws.send(JSON.stringify({ k: "x", n, c }));
+      const of = Math.ceil(c.length / CHUNK);
+      for (let i = 0; i < of; i++) ws.send(JSON.stringify({ k: "x", n, c: c.slice(i * CHUNK, (i + 1) * CHUNK), i, of }));
+    });
+    this.outgoing = send.catch(() => {});
+    return send;
   }
 
   private drop(why: unknown) {
     this.keys = null;
+    this.outgoing = Promise.resolve();
     for (const c of this.calls.values()) c.reject(why);
     this.calls.clear();
   }

@@ -10,6 +10,7 @@ export type PhonePane = {
   title: string;
   cwd: string;
   session: string;
+  agent?: "claude" | "codex";
   slug?: string | null;
   name?: string | null;
   alive: boolean;

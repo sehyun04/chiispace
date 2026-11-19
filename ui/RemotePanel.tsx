@@ -24,17 +24,19 @@ type Status = {
   devices: { id: string; name: string; added: number }[];
 };
 
-/** 폰이 볼 수 있는 칸을 알린다. Claude 대화창 칸만 — 터미널 칸과 Codex 칸은 아직 폰으로 옮기지 않았다. */
+/** 터미널이나 읽기 전용 자식 칸에는 폰이 열 수 있는 입력 경로가 없다. */
 export function useRemotePanes(
   booted: boolean,
   streams: Record<string, StreamChat>,
   titleOf: (id: string) => string,
   casting: Record<string, string>,
+  busy: Record<string, boolean>,
 ) {
   const panes = booted
     ? Object.entries(streams).flatMap(([id, c]) =>
-        c.agent === "claude" && c.session
-          ? [{ id, title: titleOf(id), cwd: c.cwd, session: c.session, slug: casting[id] ?? null, name: bySlug.get(casting[id])?.name ?? null }]
+        c.session
+          ? [{ id, title: titleOf(id), cwd: c.cwd, session: c.session, agent: c.agent, codexBusy: c.agent === "codex" && !!busy[id],
+            slug: casting[id] ?? null, name: bySlug.get(casting[id])?.name ?? null }]
           : [],
       )
     : [];
@@ -120,7 +122,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
             </svg>
           </button>
         </header>
-        <p className="remote-lead">밖에서 폰으로 이 PC 의 Claude 대화창을 본다. 말하기와 권한 답하기까지 된다. 집 PC 에는 열린 포트가 없고, 폰과 PC 사이의 말은 암호화되어 중계를 지난다.</p>
+        <p className="remote-lead">밖에서 폰으로 이 PC 의 Claude·Codex 대화창을 쓰고 권한에 답한다. 집 PC 에는 열린 포트가 없고, 폰과 PC 사이의 말은 암호화되어 중계를 지난다.</p>
         {s ? (
           <>
             <div className="remote-switch">
