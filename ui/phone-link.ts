@@ -5,8 +5,8 @@
  *  React·DOM 에 기대지 않는다(브라우저와 Node 의 WebSocket·WebCrypto 만 쓴다) — 검증이 Node 에서도 폰 노릇을 한다. */
 import { b64u, commitOf, loadKey, newKey, open, openRaw, random, sasOf, seal, sessionKeys, unb64u } from "./phone-crypto.ts";
 
-/** 짝지은 결과. 폰에만 둔다. */
-export type Paired = { dev: string; jwk: JsonWebKey; pc: string };
+/** 짝지은 결과. 폰에만 둔다. `name` 은 짝지은 PC 가 알려 준 제 이름이다(이사 보낼 PC 목록에 쓴다). */
+export type Paired = { dev: string; jwk: JsonWebKey; pc: string; name?: string };
 export type LinkStatus = "connecting" | "open" | "retrying" | "pc-offline";
 
 /** 웹소켓 한 통에 싣는 암호문 조각. PC 쪽(remote.rs `CHUNK`)과 같다. Cloudflare 웹소켓 한 통의 한도(1MiB) 안이다. */
@@ -56,8 +56,9 @@ const opened = (ws: WebSocket) =>
     ws.addEventListener("error", () => reject(new Error("중계에 못 붙었다")), { once: true });
   });
 
-/** 짝짓기. PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 동안만 된다. 두 화면에 같은 여섯 자리가 뜨면 PC 에서 허락한다. */
-export async function pair(url: string, name: string, onSas: (sas: string) => void): Promise<Paired> {
+/** 짝짓기. PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 동안만 된다. 두 화면에 같은 여섯 자리가 뜨면 PC 에서 허락한다.
+ *  `kind` 가 "pc" 면 다른 PC 가 대화를 이사 보내려고 짝짓는 것이다(ui/session-move.ts). 받는 PC 는 그렇게 보여 주고 허락받는다. */
+export async function pair(url: string, name: string, onSas: (sas: string) => void, kind?: "pc"): Promise<Paired> {
   const ws = new WebSocket(url);
   const next = inbox(ws);
   await opened(ws);
@@ -69,7 +70,7 @@ export async function pair(url: string, name: string, onSas: (sas: string) => vo
     const key = await newKey();
     const nA = random(16);
     // 키를 바로 내지 않고 먼저 약속한다. 그래야 중계가 PC 의 난수를 본 뒤 제 키를 골라 여섯 자리를 맞추지 못한다.
-    ws.send(JSON.stringify({ k: "pair1", c: b64u(await commitOf(key.pub, nA)), name }));
+    ws.send(JSON.stringify({ k: "pair1", c: b64u(await commitOf(key.pub, nA)), name, ...(kind ? { kind } : {}) }));
     m = await next(15000);
     if (m.k === "no") throw new Error(String(m.why));
     if (m.k !== "pair2") throw new Error("PC 가 답하지 않는다");
@@ -84,7 +85,7 @@ export async function pair(url: string, name: string, onSas: (sas: string) => vo
     m = await next(300000);
     if (m.k === "no") throw new Error(String(m.why));
     if (m.k !== "paired" || typeof m.dev !== "string") throw new Error(m.timeout ? "PC 에서 답이 없었다" : "짝짓기가 끊겼다");
-    return { dev: m.dev, jwk: key.jwk, pc: b64u(pc) };
+    return { dev: m.dev, jwk: key.jwk, pc: b64u(pc), ...(typeof m.name === "string" ? { name: m.name } : {}) };
   } finally {
     ws.close();
   }

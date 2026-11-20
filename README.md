@@ -42,6 +42,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기 · `/export` 저장(새 파일만) |
 | `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 · 뒤늦게 붙는 폰에 건넬 칸의 지금 상태 |
 | `src-tauri/src/remote.rs`, `src-tauri/src/remote_crypto.rs` | 폰 연결 — 중계에 붙기, 숫자 비교 짝짓기, 암호 통로, 폰이 부를 수 있는 명령 목록, 폰 화면 파일 |
+| `src-tauri/src/session_move.rs` | 세션이사 — 보낼 꾸러미, 받는 PC 의 [받기]·파일 쓰기·폴더 후보 |
 | `relay/` | 사용자 Cloudflare 에 올리는 중계 — PC 와 폰을 잇고 암호문만 나른다 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |
 | `src-tauri/src/shells.rs` | 이 컴퓨터에 실제로 있는 셸 찾기 |
@@ -59,7 +60,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
 | `ui/claude-menus.ts` | Claude 대화창의 `/memory`·`/copy`·`/export` 값 다루기(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도로 줄여 base64 로 읽기(단위 검증) |
-| `ui/RemotePanel.tsx` | PC 쪽 [폰 연결] 창(중계 주소·QR·짝짓기)과 폰이 볼 칸 알리기 |
+| `ui/RemotePanel.tsx` | PC 쪽 [폰 연결] 창(중계 주소·QR·짝짓기·[PC 잇기])과 폰이 볼 칸 알리기 |
+| `ui/MoveCard.tsx`, `ui/MoveOffer.tsx`, `ui/session-move.ts` | 세션이사 — 보내는 칸의 `/move` 카드, 받는 PC 의 [받기] 창, 꾸러미와 안내 글 |
 | `mobile.html`, `vite.mobile.config.ts`, `ui/phone-main.tsx`, `ui/Mobile.tsx`, `ui/phone-link.ts`, `ui/phone-crypto.ts`, `ui/remote-shim.ts`, `ui/phone.ts` | 폰 화면 — 따로 굽는 묶음(`dist/m`), PC 대화창 부품을 그대로 쓰고 `invoke`·`listen` 만 암호 통로로 바꿔 끼운다 |
 | `ui/usage.ts`, `ui/usePlanUsage.ts` | 구독 사용 한도·문맥 게이지 값 · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/roster.tsx`, `ui/casting.ts` | 치이카와 로스터 · 누가 어느 칸을 맡는가(겹치지 않게 고르기는 단위 검증) |
@@ -130,6 +132,12 @@ PC 에서 한 말은 폰에도 남고, 한쪽에서 답한 카드는 다른 쪽�
 chiispace 가 떠 있어야 한다. 짝지은 폰은 [폰 연결]에서 잊을 수 있고, 잊으면 바로 끊긴다. PC 앱을 새로 구우면 폰 화면은 다시 붙을 때 판이
 바뀐 것을 알아채고 저절로 새로 불러온다(입력바에 쓰던 말이 있으면 "새 판이 있다" 띠만 띄운다). 본 대화가 답을 마쳐도 서브에이전트가
 돌고 있으면 폰에는 일하는 중으로 보이고, 폰을 늦게 열어도 그 서브에이전트 줄이 짧은 설명과 함께 보인다.
+
+**세션이사(다른 PC 로 대화 옮기기).** 노트북에서 하던 Claude 대화창 칸을 데스크톱 chiispace 로 옮겨 이어 쓴다. 받는 PC 의 [폰 연결]이 켜져 있어야
+한다. 처음 한 번, 받는 PC 의 [폰 연결]에서 [폰 짝짓기]를 누르고 보내는 PC 의 [폰 연결] → [PC 잇기]에 받는 PC 의 폰 주소를 넣어 숫자를 견줘
+짝짓는다. 그다음 대화창에서 `/move` → PC 고르기 → [보내기]. 받는 PC 에 창이 뜨면 이어 쓸 폴더(같은 git 원격의 폴더를 먼저 권하고, 한 번
+고르면 기억한다)를 고르고 [받기]. 받은 대화는 새 탭의 대화창으로 열리고 보낸 칸은 닫힌다. 대화만 가고 커밋하지 않은 코드 변경은 안 간다 —
+두 화면이 그것을 알린다.
 
 위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 PTY Codex 훅 정리는 10월 16일 반영했다.
 
@@ -367,6 +375,10 @@ node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검�
 `CHIISPACE_LIVE_RELAY=https://chiispace-relay.<이름>.workers.dev` 를 준다 — 매번 새 난수 방을 쓰고 그 방에는 PC 비밀의 해시 하나만 남는다.
 설치된 Codex가 있으면 격리 app-server와 로컬 응답 대역으로 Codex 칸의 말·그림·승인·질문·중단, 다시 붙을 때 대기 카드 복원,
 이전 실행이나 공개하지 않은 대화 접근 차단도 확인한다.
+
+세션이사(`session-move`)는 격리 앱 하나로 두 쪽을 다 본다. 받기는 Node 가 보내는 PC 노릇(`pair`·`Link`)을 하고, 보내기는 Node 가 받는 PC 의
+방을 흉내 낸다(같은 이 PC 안의 중계에 PC 로 붙어 짝짓기·인사·암호 통로를 받는다). `CHIISPACE_TEST_SCREENSHOT=1` 로 직접 돌리면 받는 창·
+[PC 잇기]·이사 카드를 검증 창에서 찍는다.
 
 클립보드·편집기처럼 사용자 것을 건드리는 명령은 실제로 부르지 않는다. 프로브가 앱 명령이 지나는 IPC 요청(`fetch`)을
 가로채 적어 두기만 한다(`chat-stream`). `__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는

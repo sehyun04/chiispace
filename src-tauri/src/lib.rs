@@ -24,6 +24,7 @@ mod codex_stream;
 mod codex_switch;
 mod remote;
 mod remote_crypto;
+mod session_move;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -313,6 +314,7 @@ pub fn run() {
             bridge::start(app.handle())?;
             app.manage(launchers::install(app.path().app_cache_dir()?)?);
             app.manage(remote::Remote::load(app.handle()));
+            app.manage(session_move::Moves::default());
             remote::boot(app.handle());
             arm_autosend(app.handle());
             Ok(())
@@ -361,6 +363,13 @@ pub fn run() {
             remote::remote_forget,
             remote::remote_publish,
             remote::remote_codex_reply,
+            remote::remote_peer_add,
+            remote::remote_peer_forget,
+            remote::remote_peer_key,
+            session_move::session_move_pack,
+            session_move::session_move_answer,
+            session_move::session_move_folders,
+            session_move::this_pc_name,
             codex_stream::codex_stream_start,
             codex_stream::codex_stream_request,
             codex_stream::codex_stream_answer,

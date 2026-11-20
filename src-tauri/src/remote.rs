@@ -67,6 +67,12 @@ struct Saved {
     key: Option<String>,
     #[serde(default)]
     devices: Vec<Device>,
+    /// 이 PC 가 대화를 이사 보낼 다른 PC(그 PC 의 방에 폰처럼 짝지은 것). 받는 쪽은 `devices` 에 PC 로 남는다.
+    #[serde(default)]
+    peers: Vec<Peer>,
+    /// 이사 받을 때 고른 폴더. 보낸 PC 의 git 주소(정리한 것) → 이 PC 의 폴더. 다음 이사에 먼저 권한다.
+    #[serde(default)]
+    move_folders: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -75,6 +81,21 @@ struct Device {
     name: String,
     /// 폰의 공개키(base64url). 비밀키는 폰에만 있다.
     key: String,
+    added: u64,
+    /// "pc" 면 대화를 이사 보내 올 수 있는 다른 PC 다. 없으면 폰. 짝지을 때 받는 PC 에서 사람이 PC 인 것을 보고 허락한다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+}
+
+/// 이사 보낼 다른 PC. 그 PC 의 방에 짝지은 키를 든다(폰이 브라우저에 드는 것과 같다).
+#[derive(Serialize, Deserialize, Clone)]
+struct Peer {
+    id: String,
+    name: String,
+    /// 그 PC 의 폰 주소(`https://중계/r/<방>/`).
+    page: String,
+    /// 짝지은 결과(ui/phone-link.ts `Paired`) — 기기 id, 이 PC 쪽 비밀키(JWK), 그 PC 의 공개키.
+    paired: Value,
     added: u64,
 }
 
@@ -105,6 +126,7 @@ pub struct PaneInfo {
 struct Pend {
     phone: String,
     name: String,
+    kind: Option<String>,
     commit: [u8; 32],
     nb: [u8; 16],
     /// 폰이 키를 연 뒤 두 화면에 보일 여섯 자리와 그 키.
@@ -158,13 +180,25 @@ pub struct Status {
     pairing_left: u64,
     sas: Option<String>,
     sas_name: Option<String>,
+    /// 짝지으려는 쪽이 PC 면 "pc". 허락하면 그 PC 가 이 PC 로 대화를 이사 보내 올 수 있다.
+    sas_kind: Option<String>,
     devices: Vec<DeviceView>,
+    peers: Vec<PeerView>,
 }
 
 #[derive(Serialize)]
 struct DeviceView {
     id: String,
     name: String,
+    added: u64,
+    kind: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PeerView {
+    id: String,
+    name: String,
+    page: String,
     added: u64,
 }
 
@@ -337,7 +371,7 @@ impl Remote {
     fn status(&self) -> Status {
         let inner = self.0.lock().unwrap();
         let pairing = inner.pairing.as_ref().filter(|p| p.until > Instant::now());
-        let sas = pairing.and_then(|p| p.pend.as_ref()).and_then(|p| p.sas.as_ref().map(|s| (s.0.clone(), p.name.clone())));
+        let sas = pairing.and_then(|p| p.pend.as_ref()).and_then(|p| p.sas.as_ref().map(|s| (s.0.clone(), p.name.clone(), p.kind.clone())));
         let page = match (&inner.saved.relay, &inner.saved.room) {
             (Some(r), Some(room)) => Some(format!("{}/r/{room}/", r.trim_end_matches('/'))),
             _ => None,
@@ -352,12 +386,19 @@ impl Remote {
             pairing: pairing.is_some(),
             pairing_left: pairing.map_or(0, |p| p.until.saturating_duration_since(Instant::now()).as_secs()),
             sas: sas.as_ref().map(|s| s.0.clone()),
-            sas_name: sas.map(|s| s.1),
+            sas_name: sas.as_ref().map(|s| s.1.clone()),
+            sas_kind: sas.and_then(|s| s.2),
             devices: inner
                 .saved
                 .devices
                 .iter()
-                .map(|d| DeviceView { id: d.id.clone(), name: d.name.clone(), added: d.added })
+                .map(|d| DeviceView { id: d.id.clone(), name: d.name.clone(), added: d.added, kind: d.kind.clone() })
+                .collect(),
+            peers: inner
+                .saved
+                .peers
+                .iter()
+                .map(|p| PeerView { id: p.id.clone(), name: p.name.clone(), page: p.page.clone(), added: p.added })
                 .collect(),
         }
     }
@@ -676,8 +717,11 @@ fn on_phone(app: &AppHandle, phone: &str, m: &Value) {
                 return plain(&inner, phone, json!({ "k": "no", "why": "다른 폰이 짝짓는 중이다" }));
             }
             let name: String = s("name").chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string();
+            // 스스로 PC 라고 밝힌 것이다. 받는 PC 의 숫자 확인 화면이 PC 라고 보여 주고, 사람이 그것을 보고 허락한다.
+            let kind = (s("kind") == "pc").then(|| "pc".to_string());
+            let name = if !name.is_empty() { name } else if kind.is_some() { "PC".into() } else { "폰".into() };
             if let Some(p) = inner.pairing.as_mut() {
-                p.pend = Some(Pend { phone: phone.into(), name: if name.is_empty() { "폰".into() } else { name }, commit, nb, sas: None });
+                p.pend = Some(Pend { phone: phone.into(), name, kind, commit, nb, sas: None });
             }
             plain(&inner, phone, json!({ "k": "pair2", "pc": rc::b64u(&rc::public_of(&pc)), "nb": rc::b64u(&nb) }));
         }
@@ -732,10 +776,23 @@ fn on_message(app: &AppHandle, phone: &str, text: &str) {
     let args = v.get("args").cloned().unwrap_or(Value::Null);
     let (app, phone) = (app.clone(), phone.to_string());
     tauri::async_runtime::spawn_blocking(move || {
-        if !app.state::<Remote>().0.lock().unwrap().sessions.contains_key(&phone) {
-            return;
-        }
-        let out = dispatch(&app, &cmd, &args);
+        let from = {
+            let remote = app.state::<Remote>();
+            let inner = remote.0.lock().unwrap();
+            let Some(s) = inner.sessions.get(&phone) else { return };
+            inner.saved.devices.iter().find(|d| d.id == s.dev).map(|d| (d.kind.clone(), d.name.clone()))
+        };
+        let Some((kind, name)) = from else { return };
+        // PC 로 짝지은 기기는 이사 보내기만 부른다. 폰은 이사 명령을 못 부른다 — 받는 PC 에 칸을 새로 여는 길이라
+        // 폰에 열지 않은 권한이다. 그 길도 받는 PC 에서 사람이 [받기]를 눌러야 파일을 쓴다.
+        let out = if kind.as_deref() == Some("pc") {
+            match cmd.as_str() {
+                "session_move_offer" => crate::session_move::offer(&app, &name, &args),
+                _ => Err(format!("PC 짝은 이사 보내기만 부른다: {cmd}")),
+            }
+        } else {
+            dispatch(&app, &cmd, &args)
+        };
         let reply = match out {
             Ok(v) => json!({ "t": "ret", "i": id, "ok": true, "v": v }),
             Err(e) => json!({ "t": "ret", "i": id, "ok": false, "e": e }),
@@ -801,13 +858,14 @@ pub fn remote_confirm(app: AppHandle, ok: bool) -> Status {
         let remote = app.state::<Remote>();
         let mut inner = remote.0.lock().unwrap();
         let pend = inner.pairing.as_mut().and_then(|p| p.pend.take());
-        if let Some(Pend { phone, name, sas: Some((_, key)), .. }) = pend {
+        if let Some(Pend { phone, name, kind, sas: Some((_, key)), .. }) = pend {
             if ok {
                 let id = rc::random::<8>().map(|b| hex(&b)).unwrap_or_default();
-                inner.saved.devices.push(Device { id: id.clone(), name, key: rc::b64u(&key), added: now_secs() });
+                inner.saved.devices.push(Device { id: id.clone(), name, key: rc::b64u(&key), added: now_secs(), kind });
                 Remote::save(&inner);
                 inner.pairing = None;
-                plain(&inner, &phone, json!({ "k": "paired", "dev": id }));
+                // 이 PC 의 이름도 준다. 이사 보낼 PC 목록에 그 이름으로 남는다(폰은 쓰지 않는다).
+                plain(&inner, &phone, json!({ "k": "paired", "dev": id, "name": crate::session_move::this_pc_name() }));
             } else {
                 plain(&inner, &phone, json!({ "k": "no", "why": "PC 에서 숫자가 다르다고 했다" }));
             }
@@ -830,6 +888,68 @@ pub fn remote_forget(app: AppHandle, device: String) -> Status {
         }
     }
     app.state::<Remote>().status()
+}
+
+/// 이사 보낼 PC 의 폰 주소(`https://중계/r/<방>/`). 중계 주소 규칙(`relay_ws`)과 같고 뒤에 방 이름이 붙는다.
+fn peer_page(page: &str) -> Option<String> {
+    let (base, room) = page.trim().trim_end_matches('/').rsplit_once("/r/")?;
+    let ok = relay_ws(base).is_some() && room.len() == 32 && room.chars().all(|c| c.is_ascii_hexdigit());
+    ok.then(|| format!("{}/r/{room}/", base.trim_end_matches('/')))
+}
+
+/// 다른 PC 의 방에 짝지은 것을 적어 둔다(ui/session-move.ts 가 짝지은 뒤 부른다). 같은 PC 를 다시 이으면 앞 짝은 버린다.
+#[tauri::command]
+pub fn remote_peer_add(app: AppHandle, name: String, page: String, paired: Value) -> Result<Status, String> {
+    let page = peer_page(&page).ok_or("그 PC 의 [폰 연결]에 보이는 폰 주소(https://…/r/…/)여야 한다")?;
+    let shaped = paired["dev"].as_str().is_some_and(|d| d.len() == 16 && d.chars().all(|c| c.is_ascii_hexdigit()))
+        && paired["jwk"].is_object()
+        && paired["pc"].as_str().and_then(rc::unb64u).and_then(|k| rc::parse_public(&k)).is_some();
+    if !shaped {
+        return Err("짝지은 값이 잘못됐다".into());
+    }
+    let name: String = name.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string();
+    {
+        let remote = app.state::<Remote>();
+        let mut inner = remote.0.lock().unwrap();
+        inner.saved.peers.retain(|p| p.page != page);
+        let id = rc::random::<8>().map(|b| hex(&b)).map_err(|_| "난수를 못 만들었다".to_string())?;
+        inner.saved.peers.push(Peer { id, name: if name.is_empty() { "PC".into() } else { name }, page, paired, added: now_secs() });
+        Remote::save(&inner);
+    }
+    Ok(app.state::<Remote>().status())
+}
+
+#[tauri::command]
+pub fn remote_peer_forget(app: AppHandle, peer: String) -> Status {
+    {
+        let remote = app.state::<Remote>();
+        let mut inner = remote.0.lock().unwrap();
+        inner.saved.peers.retain(|p| p.id != peer);
+        Remote::save(&inner);
+    }
+    app.state::<Remote>().status()
+}
+
+/// 이사 보낼 때 그 PC 에 붙을 값. 이 PC 의 웹뷰만 부른다(폰 명령 목록에 없다).
+#[tauri::command]
+pub fn remote_peer_key(app: AppHandle, peer: String) -> Result<Value, String> {
+    let remote = app.state::<Remote>();
+    let inner = remote.0.lock().unwrap();
+    let p = inner.saved.peers.iter().find(|p| p.id == peer).ok_or("짝지은 PC 가 아니다")?;
+    Ok(json!({ "name": p.name, "page": p.page, "paired": p.paired }))
+}
+
+pub(crate) fn remembered_folder(app: &AppHandle, origin: &str) -> Option<String> {
+    app.state::<Remote>().0.lock().unwrap().saved.move_folders.get(origin).cloned()
+}
+
+pub(crate) fn remember_folder(app: &AppHandle, origin: &str, cwd: &str) {
+    let remote = app.state::<Remote>();
+    let mut inner = remote.0.lock().unwrap();
+    if inner.saved.move_folders.get(origin).map(String::as_str) != Some(cwd) {
+        inner.saved.move_folders.insert(origin.to_string(), cwd.to_string());
+        Remote::save(&inner);
+    }
 }
 
 /// PC 웹뷰가 지금 떠 있는 Claude 대화창 칸을 알려 준다. 바뀌면 폰 목록도 바뀐다.
@@ -1042,6 +1162,16 @@ mod tests {
         assert!(parse(json!({ "kind":"thread/start" })).is_err());
         let external = parse(json!({ "kind":"send", "run":"current", "turn":null, "text":"", "images":["https://example.com/test.png"] })).unwrap();
         assert!(external.check("current").is_err());
+    }
+
+    #[test]
+    fn a_peer_is_known_by_its_phone_page() {
+        let room = "1b0016dbe43537733003e79293f26bd9";
+        assert_eq!(peer_page(&format!(" https://relay.me.workers.dev/r/{room}")).as_deref(), Some(format!("https://relay.me.workers.dev/r/{room}/").as_str()));
+        assert!(peer_page(&format!("http://127.0.0.1:8787/r/{room}/")).is_some());
+        for bad in [format!("http://relay.example/r/{room}/"), "https://relay.me.workers.dev/r/short/".into(), format!("https://relay.me.workers.dev/x/{room}/"), format!("https://a b/r/{room}/")] {
+            assert!(peer_page(&bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

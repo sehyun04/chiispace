@@ -64,7 +64,7 @@ fn alive(_pid: u32, _start: Option<u64>) -> bool {
 /// 칸의 셸이 `cd` 로 옮겨 간 뒤에 claude 를 띄우면 대화는 그 폴더 밑에 쌓여
 /// 폴더 이름으로는 빗나간다. id 는 부른 쪽이 준 것이고 uuid 라 겹치지 않으므로,
 /// 폴더를 넓혀 찾는 것은 추측이 아니다 — 고르는 것은 여전히 id 다.
-fn session_file(app: &AppHandle, root: &str, id: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn session_file(app: &AppHandle, root: &str, id: &str) -> Option<std::path::PathBuf> {
     // 경로 조각이 섞인 id 로 다른 파일을 열지 않게 uuid 모양만 받는다.
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return None;
@@ -438,7 +438,7 @@ fn roster_pids(table: &[(u32, u32, String)], pid: u32) -> Vec<u32> {
 /// claude 의 상태 폴더. `CLAUDE_CONFIG_DIR` 이 있으면 그쪽이다 — 그 변수를 준 채 띄운 claude 는
 /// 명부도 거기에 쓰므로, 홈만 보면 그 칸이 어느 대화인지 영영 못 읽는다. 앱이 띄운 claude 는
 /// 앱의 환경을 물려받으니 앱에서 읽은 값이 곧 그 칸이 쓰는 자리다.
-fn claude_home(app: &AppHandle) -> Option<std::path::PathBuf> {
+pub(crate) fn claude_home(app: &AppHandle) -> Option<std::path::PathBuf> {
     use tauri::Manager;
     if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
         if !dir.trim().is_empty() {

@@ -241,3 +241,75 @@
   flex: 1;
   width: auto;
 }
+
+/* 대화 이사 받기(MoveOffer.tsx). 폴더 후보는 한 줄씩 고르고, 고른 줄만 바탕을 띄운다. */
+.move-folders {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+.move-folder {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.move-folder.on {
+  background: var(--paper);
+}
+.move-folder input {
+  margin-top: 3px;
+}
+.move-folder code {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.move-offer-note {
+  margin: 4px 0;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.move-offer-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 이사 보낼 PC 잇기(RemotePanel.tsx). */
+.remote-peer-form {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+.remote-peer-form input {
+  min-width: 0;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line) inset;
+  font-family: var(--mono-font);
+  font-size: 12px;
+}
+.remote-peer-form input:focus {
+  box-shadow: 0 0 0 2px var(--sky) inset;
+}
+.remote-tag {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.remote-peer-form > button {
+  justify-self: start;
+}

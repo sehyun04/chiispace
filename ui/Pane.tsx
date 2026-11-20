@@ -184,6 +184,9 @@ export function Pane(p: PaneProps) {
           onFolder={p.onFolder}
           onResume={p.onResume}
           onTerminal={p.onTerminal}
+          title={p.name || p.autoName}
+          // 다른 PC 로 이사하면 이 칸은 닫는다. 같은 대화를 두 PC 에서 이어 쓰면 둘로 갈라진다.
+          onMoved={p.onClose}
         />
       ) : (
         <Term

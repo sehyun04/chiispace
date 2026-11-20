@@ -21,6 +21,7 @@ import { shortToolName, toolSummary } from "./tools";
 import { agentCommands, ago, barCommands, mergeCommands, type PaletteCommand } from "./palette";
 import { buildToolMap, parseJsonl, toItems, type Bubble } from "./transcript";
 import { exportMarkdown, exportName, lastAnswer, memoryChoices } from "./claude-menus";
+import { MoveCard, type Peer } from "./MoveCard";
 import {
   answerLine,
   answeredStream,
@@ -64,6 +65,8 @@ export function ClaudeStreamPane({
   onFolder,
   onResume,
   onTerminal,
+  title,
+  onMoved,
 }: {
   id: string;
   cwd: string;
@@ -83,6 +86,10 @@ export function ClaudeStreamPane({
   onResume: (id: string, session: string) => void;
   /** 로그인처럼 터미널이 꼭 필요한 일을 새 탭의 터미널에서 돌린다. */
   onTerminal: (cmd: string, title: string) => void;
+  /** 칸 이름. 다른 PC 로 이사할 때 그 PC 의 칸 이름이 된다. */
+  title?: string;
+  /** 다른 PC 가 이 대화를 받았다. 부른 쪽이 이 칸을 닫는다. */
+  onMoved?: () => void;
 }) {
   const [st, setSt] = useState<StreamState>(initialStream);
   const [alive, setAlive] = useState(false);
@@ -99,6 +106,8 @@ export function ClaudeStreamPane({
   const [notice, setNotice] = useState<string | null>(null);
   // 답을 기다리는 요청(설정·문맥 조회, 모델 바꾸기 …). 답이 오면 request_id 로 짝짓는다.
   const pending = useRef(new Map<string, (r: Reply) => void>());
+  // `/move` 로 고른 이사 갈 PC. 카드가 떠 있는 동안 입력바를 잠근다 — 보내는 사이에 쓴 말은 그 PC 로 안 간다.
+  const [moveTo, setMoveTo] = useState<Peer | null>(null);
 
   const send = (msg: unknown) => invoke("claude_chat_send", { id, line: JSON.stringify(msg) });
   const control = (request: Record<string, unknown>) =>
@@ -333,6 +342,7 @@ export function ClaudeStreamPane({
   const toolbar = <StreamBar {...bar} />;
   // TUI 에만 있던 명령 중 대화창에서 할 수 있게 만든 것. `claude -p` 는 이것들을 받지 않는다(초기화 답의 목록에 없다).
   const titles = useRef(new Map<string, string>());
+  const peers = useRef<Peer[]>([]);
   const paneCommands = (busy: boolean): PaletteCommand[] => [
     // 일하는 중에 다른 대화로 바꾸면 하던 턴이 끊긴다. 새 대화(/clear)와 같이 막는다.
     ...(busy ? [] : [{
@@ -351,6 +361,21 @@ export function ClaudeStreamPane({
         if (!v || v === (st.session ?? session)) return;
         onTitle(id, titles.current.get(v) || "지난 대화");
         onResume(id, v);
+      },
+    }]),
+    // 일하는 중·서브에이전트가 도는 중에 옮기면 그 일이 끊긴다. 주고받은 말이 없으면 옮길 대화 파일이 없다.
+    ...(busy || st.tasks.length || !talked || !onMoved ? [] : [{
+      name: "move",
+      hint: "다른 PC 로 이사 — 이 대화를 그 PC 의 대화창으로 옮기고 여기서는 닫는다",
+      empty: "이사 보낼 PC 가 없다 — 옆칸 폰 단추 → [폰 연결]에서 [PC 잇기]",
+      load: () =>
+        invoke<{ peers: Peer[] }>("remote_status").then((s) => {
+          peers.current = s.peers;
+          return s.peers.map((p) => ({ value: p.id, label: p.name, hint: "짝지은 PC" }));
+        }),
+      run: (v?: string) => {
+        const p = peers.current.find((x) => x.id === v);
+        if (p) setMoveTo(p);
       },
     }]),
     { name: "login", hint: "로그인 — 새 탭의 터미널에서 claude auth login", run: () => onTerminal("claude auth login", "로그인") },
@@ -434,6 +459,18 @@ export function ClaudeStreamPane({
       )}
       {st.error && <div className="note bad">{st.error}</div>}
       {notice && <div className="note stream-notice" role="status">{notice}</div>}
+      {moveTo && onMoved ? (
+        <MoveCard
+          peer={moveTo}
+          cwd={cwd}
+          session={st.session ?? session}
+          title={title}
+          slug={slug}
+          name={name}
+          onMoved={onMoved}
+          onClose={() => setMoveTo(null)}
+        />
+      ) : null}
       {st.exited && (
         <div className="ask stream-exit">
           <div className="ask-title">claude 가 멈췄다</div>
@@ -457,7 +494,8 @@ export function ClaudeStreamPane({
         paneId={id}
         slug={slug}
         name={name}
-        live={alive}
+        live={alive && !moveTo}
+        unavailable={moveTo ? "다른 PC 로 이사하는 중" : undefined}
         working={st.busy}
         fresh={fresh}
         transport={transport}

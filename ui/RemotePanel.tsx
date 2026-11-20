@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import qrcode from "qrcode-generator";
 import { bySlug } from "./roster";
+import { pair, socketUrl } from "./phone-link";
+import { roomOf } from "./session-move";
 import type { StreamChat } from "./stream-session";
 import "./remote.css";
 
@@ -21,7 +23,11 @@ type Status = {
   pairingLeft: number;
   sas: string | null;
   sasName: string | null;
-  devices: { id: string; name: string; added: number }[];
+  /** 짝지으려는 쪽이 PC 면 "pc" — 허락하면 그 PC 가 이 PC 로 대화를 이사 보낼 수 있다. */
+  sasKind: string | null;
+  devices: { id: string; name: string; added: number; kind: string | null }[];
+  /** 이 PC 가 대화를 이사 보낼 다른 PC. */
+  peers: { id: string; name: string; page: string; added: number }[];
 };
 
 /** 터미널이나 읽기 전용 자식 칸에는 폰이 열 수 있는 입력 경로가 없다. */
@@ -77,6 +83,11 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [peerPage, setPeerPage] = useState("");
+  const [peerSas, setPeerSas] = useState<string | null>(null);
+  const [peerBusy, setPeerBusy] = useState(false);
+  // 상태는 1초마다 새로 받으며 `err` 를 걷으므로, 잇기의 까닭은 따로 들고 있는다.
+  const [peerErr, setPeerErr] = useState<string | null>(null);
   const run = (p: Promise<Status>) =>
     p.then(
       (v) => {
@@ -104,6 +115,26 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const relay = draft ?? s?.relay ?? "";
+  /** 다른 PC 를 잇는다. 그 PC 의 방에 폰처럼 짝짓되 PC 라고 밝힌다 — 그 PC 의 숫자 확인 화면이 PC 라고 보여 준다. */
+  const linkPeer = async () => {
+    const raw = peerPage.trim();
+    const page = raw.endsWith("/") ? raw : `${raw}/`;
+    if (!roomOf(page)) return setPeerErr("그 PC 의 [폰 연결]에 보이는 폰 주소(https://…/r/…/)를 넣어 줘");
+    if (roomOf(page) === roomOf(s?.page ?? "")) return setPeerErr("이 PC 의 주소다 — 이사 보낼 다른 PC 의 주소를 넣어 줘");
+    setPeerBusy(true);
+    setPeerErr(null);
+    try {
+      const me = await invoke<string>("this_pc_name").catch(() => "PC");
+      const paired = await pair(socketUrl(page), me, setPeerSas, "pc");
+      setS(await invoke<Status>("remote_peer_add", { name: paired.name ?? "PC", page, paired }));
+      setPeerPage("");
+    } catch (e) {
+      setPeerErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPeerBusy(false);
+      setPeerSas(null);
+    }
+  };
   const copy = (text: string) =>
     void writeText(text).then(() => {
       setCopied(true);
@@ -189,7 +220,11 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                       <span className="remote-digits" data-sas={s.sas}>
                         {s.sas.slice(0, 3)} {s.sas.slice(3)}
                       </span>
-                      <small>{s.sasName ?? "폰"} 화면에도 이 숫자가 보이면 [맞다]. 다르면 누가 끼어든 것이다.</small>
+                      <small>
+                        {s.sasKind === "pc"
+                          ? `다른 PC(${s.sasName ?? "이름 없음"})가 짝지으려 한다. 허락하면 그 PC 가 이 PC 로 대화를 이사 보낼 수 있다. 그 PC 화면에도 이 숫자가 보이면 [맞다].`
+                          : `${s.sasName ?? "폰"} 화면에도 이 숫자가 보이면 [맞다]. 다르면 누가 끼어든 것이다.`}
+                      </small>
                       <button className="remote-btn on" onClick={() => void run(invoke<Status>("remote_confirm", { ok: true }))}>
                         맞다
                       </button>
@@ -211,12 +246,13 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 <div className="remote-devs">
-                  <div className="remote-sub">짝지은 폰{s.phones ? ` · 지금 붙은 화면 ${s.phones}` : ""}</div>
+                  <div className="remote-sub">짝지은 폰·PC{s.phones ? ` · 지금 붙은 화면 ${s.phones}` : ""}</div>
                   {s.devices.length ? (
                     s.devices.map((d) => (
                       <div className="remote-dev" key={d.id}>
                         <span>
                           {d.name}
+                          {d.kind === "pc" ? <span className="remote-tag">PC · 이사 받기</span> : null}
                           <small> · {day(d.added)}</small>
                         </span>
                         <button className="remote-btn" onClick={() => void run(invoke<Status>("remote_forget", { device: d.id }))}>
@@ -230,6 +266,43 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                 </div>
               </>
             ) : null}
+            <div className="remote-devs remote-peers">
+              <div className="remote-sub">이사 보낼 PC</div>
+              {s.peers.map((p) => (
+                <div className="remote-dev" key={p.id}>
+                  <span>
+                    {p.name}
+                    <small> · {day(p.added)}</small>
+                  </span>
+                  <button className="remote-btn" onClick={() => void run(invoke<Status>("remote_peer_forget", { peer: p.id }))}>
+                    잊기
+                  </button>
+                </div>
+              ))}
+              {peerSas ? (
+                <div className="remote-pair">
+                  <span className="remote-digits" data-peer-sas={peerSas}>
+                    {peerSas.slice(0, 3)} {peerSas.slice(3)}
+                  </span>
+                  <small>그 PC 화면에도 이 숫자가 보이면 그 PC 에서 [맞다]를 눌러 줘.</small>
+                </div>
+              ) : (
+                <form
+                  className="remote-peer-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void linkPeer();
+                  }}
+                >
+                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 대화창에서 /move 로 그 PC 에 이사 보낸다.</small>
+                  <input value={peerPage} placeholder="https://chiispace-relay.이름.workers.dev/r/…/" spellCheck={false} onChange={(e) => setPeerPage(e.target.value)} aria-label="이사 보낼 PC 의 폰 주소" />
+                  <button className="remote-btn" type="submit" disabled={peerBusy || !peerPage.trim()}>
+                    {peerBusy ? "잇는 중" : "PC 잇기"}
+                  </button>
+                  {peerErr ? <p className="remote-bad">{peerErr}</p> : null}
+                </form>
+              )}
+            </div>
           </>
         ) : null}
         {err ? <p className="remote-bad">{err}</p> : null}

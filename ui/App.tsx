@@ -25,6 +25,7 @@ import { bootStreams, followRoots, leavesOf, readSaved, savedJson, savedSubPanes
 import { usePaneAgents } from "./usePaneAgents";
 import { useStreams } from "./useStreams";
 import { RemotePanel, useRemotePanes } from "./RemotePanel";
+import { MoveOffer, type MovedIn } from "./MoveOffer";
 import { useSubPanes } from "./useSubPanes";
 import { useFocus } from "./focus";
 import { useShortcuts } from "./useShortcuts";
@@ -357,6 +358,35 @@ export default function App() {
     });
   }, [cur, seed]);
 
+  /** 다른 PC 에서 이사 온 대화(MoveOffer). 새 탭의 대화창으로 연다. 이 PC 에 같은 대화가 떠 있으면 그 칸을 다시 열어
+   *  받은 파일을 읽게 한다 — 그대로 두면 그 칸의 claude 가 옛 대화에 이어 써서 둘이 갈라진다. */
+  const { resume: resumeStream } = streams;
+  const moveIn = useCallback((m: MovedIn) => {
+    const open = Object.entries(streamMap).find(([, c]) => c.agent === "claude" && c.session === m.session)?.[0];
+    if (open) {
+      resumeStream(open, m.session);
+      const ti = tabsNow.current.findIndex((t) => t.layout && L.leaves(t.layout).includes(open));
+      if (ti >= 0) selectPane(ti, open);
+      return;
+    }
+    const id = `%${nextPane.current++}`;
+    adopt({ [id]: { agent: "claude", session: m.session, cwd: m.cwd } });
+    setPaneTitles((t) => ({ ...t, [id]: m.title || "이사 온 대화" }));
+    // 보낸 PC 의 얼굴을 그대로 쓴다. 이 PC 에서 이미 다른 칸이 맡고 있으면 새로 고르게 둔다(useCasting).
+    if (m.slug && bySlug.has(m.slug)) {
+      const others = leavesOf(tabsNow.current);
+      setCasting((c) => (others.some((k) => c[k] === m.slug) ? c : { ...c, [id]: m.slug }));
+    }
+    setTabs((ts) => {
+      setActive(ts.length);
+      return [...ts, { key: `t${nextTab.current++}`, layout: L.leaf(id), root: m.cwd, focus: id }];
+    });
+  }, [streamMap, resumeStream, selectPane, adopt, setCasting]);
+  const knownFolders = useMemo(
+    () => [...new Set([...tabs.map((t) => t.root), ...Object.values(streamMap).map((c) => c.cwd)].filter((p): p is string => !!p))],
+    [tabs, streamMap],
+  );
+
   const paneView = useMemo(() => ({ ...streams.paneView, ...subs.view }), [streams.paneView, subs.view]);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const closeRemote = useCallback(() => setRemoteOpen(false), []);
@@ -397,6 +427,7 @@ export default function App() {
         onRemote={() => setRemoteOpen(true)}
       />
       {remoteOpen && <RemotePanel onClose={closeRemote} />}
+      <MoveOffer known={knownFolders} onOpen={moveIn} />
 
       <div className="main">
         {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.

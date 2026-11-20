@@ -621,6 +621,30 @@
   font-size: 11px;
 }
 
+/* ── 다른 PC 로 이사(MoveCard.tsx) ── 권한 카드와 같은 틀에 글 줄만 더한다. */
+.ask.move p {
+  margin: 3px 0;
+  line-height: 1.5;
+}
+.move-lead,
+.move-facts {
+  color: var(--ink-2);
+}
+.move-note {
+  color: var(--ink);
+}
+.move-note.bad {
+  color: var(--bad);
+}
+.move-step {
+  color: var(--link);
+  font-weight: 700;
+}
+.ask-no:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ── 아직 고르지 않은 질문 ── */
 
 .ask {
