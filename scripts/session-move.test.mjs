@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 import { b64u, commitOf, newKey, open, random, sasOf, seal, sessionKeys, unb64u } from "../ui/phone-crypto.ts";
-import { moveFailure, moveOffer, receiverNotes, roomOf, senderNotes, sizeLabel } from "../ui/session-move.ts";
+import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
 
 test("이사 꾸러미와 두 PC 화면의 안내", () => {
   const git = { origin: "github.com/a/b", branch: "main", head: "abcdef1234", dirty: 2 };
@@ -39,6 +39,47 @@ test("이사 꾸러미와 두 PC 화면의 안내", () => {
   assert.equal(roomOf(`https://r.dev/r/${room}/`), room);
   assert.equal(roomOf(`https://r.dev/r/${room.toUpperCase()}`), room);
   assert.equal(roomOf("https://r.dev/x"), null);
+});
+
+test("끌어 놓는 이사 — 막는 까닭, 묻지 않고 보내기·받기", () => {
+  const ok = { alive: true, busy: false, tasks: 0, talked: true, moving: false };
+  assert.equal(moveLock(ok), null);
+  assert.match(moveLock({ ...ok, busy: true }), /일하는 중/);
+  assert.match(moveLock({ ...ok, tasks: 2 }), /서브에이전트/);
+  assert.match(moveLock({ ...ok, talked: false }), /주고받은 말이 없다/);
+  assert.match(moveLock({ ...ok, alive: false }), /안 떠 있다/);
+  assert.match(moveLock({ ...ok, busy: true, moving: true }), /이사하는 중/);
+  // 커밋 안 한 코드는 안 따라가니 그때만 카드로 묻는다.
+  assert.equal(askBeforeSend({ dirty: 0 }), false);
+  assert.equal(askBeforeSend({ dirty: 3 }), true);
+
+  const origin = "github.com/a/b";
+  const g = (path, o, remembered = false) => ({ path, git: { origin: o, dirty: 0 }, remembered });
+  const offer = (relation, o = origin) => ({ git: { origin: o, dirty: 0 }, relation });
+  // 같은 레포가 하나뿐이면 그 폴더로, 여럿이면 전에 고른 것으로, 그것도 없으면 사람이 고른다.
+  assert.equal(autoFolder(offer("new"), [g("C:/b", origin)]), "C:/b");
+  assert.equal(autoFolder(offer("behind"), [g("C:/x", "github.com/x/y"), g("C:/b", origin)]), "C:/b");
+  assert.equal(autoFolder(offer("new"), [g("C:/b", origin), g("D:/b", origin)]), null);
+  assert.equal(autoFolder(offer("new"), [g("C:/b", origin), g("D:/b", origin, true)]), "D:/b");
+  // 전에 고른 폴더가 지금은 다른 레포면 쓰지 않는다.
+  assert.equal(autoFolder(offer("new"), [g("D:/old", "github.com/x/y", true)]), null);
+  assert.equal(autoFolder(offer("same"), [g("C:/b", origin)]), "C:/b");
+  // 이 PC 의 같은 대화가 더 길거나 갈라졌으면, 원격이 없는 폴더면, 후보가 없으면 묻는다.
+  assert.equal(autoFolder(offer("ahead"), [g("C:/b", origin)]), null);
+  assert.equal(autoFolder(offer("split"), [g("C:/b", origin)]), null);
+  assert.equal(autoFolder(offer("new", null), [g("C:/b", null)]), null);
+  assert.equal(autoFolder(offer("new"), []), null);
+
+  // 놓인 칸이 잠겨 있으면 보내지 않는다. 적어 두지 않은 칸(터미널·Codex)은 아무 일도 없다.
+  const got = [];
+  setMovable("%1", { lock: null, drop: (p) => got.push(["%1", p]) });
+  setMovable("%2", { lock: "일하는 중", drop: (p) => got.push(["%2", p]) });
+  dropMove("%1", "pc1");
+  dropMove("%2", "pc1");
+  dropMove("%3", "pc1");
+  setMovable("%1", null);
+  dropMove("%1", "pc2");
+  assert.deepEqual(got, [["%1", "pc1"]]);
 });
 
 const exe = process.env.CHIISPACE_TEST_EXE;
@@ -141,7 +182,7 @@ async function fakePc(base, room, secret) {
   };
 }
 
-test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더로 받기·거절, 보내는 PC 의 /move 와 칸 닫기, 막기", { skip: !exe || !claude || !existsSync(wrangler), timeout: 480000 }, async () => {
+test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 않고 받기·거절, 보내는 PC 의 /move·칸 끌어 놓기와 칸 닫기, 막기", { skip: !exe || !claude || !existsSync(wrangler), timeout: 480000 }, async () => {
   // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·폰 연결 설정, 가짜 키와 가짜 Anthropic 서버, 이 PC 안의 중계(wrangler).
   const root = mkdtempSync(path.join(os.tmpdir(), "chiispace-move-"));
   const project = path.join(root, "project");
@@ -250,6 +291,12 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
         palette: texts(over, '.palette-row'),
         moveCard: over?.querySelector('.ask.move')?.textContent ?? null,
         moveStep: over?.querySelector('.ask.move .move-step')?.textContent ?? null,
+        moveCards: texts(document, '.ask.move'),
+        dock: document.querySelector('.move-dock') ? {
+          text: document.querySelector('.move-dock').textContent,
+          on: !!document.querySelector('.move-dock-pc.on'),
+        } : null,
+        toast: document.querySelector('.move-toast')?.textContent ?? null,
         remote: panel ? {
           state: panel.querySelector('.remote-switch span')?.textContent ?? null,
           sas: panel.querySelector('.remote-digits[data-sas]')?.dataset.sas ?? null,
@@ -283,6 +330,25 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
           const el = scope?.querySelector(c.fill);
           if (el) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, c.value); el.dispatchEvent(new Event('input', { bubbles: true })); }
         }
+        // 칸 머리줄을 잡아 놓을 곳(다른 PC) 위까지 끌고 멈춘다. 놓기는 다음 명령(drop)이다 — 그 사이에 놓을 곳을 본다.
+        if (c.drag) {
+          const head = document.querySelector('[data-pane="' + c.drag + '"] .pane-head');
+          const ev = (el, type, x, y, buttons) => el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons }));
+          if (head) {
+            const h = head.getBoundingClientRect();
+            ev(head, 'mousedown', h.x + 40, h.y + 8, 1);
+            ev(head, 'mousemove', h.x + 40, h.y + 8, 1);
+            ev(head, 'mousemove', h.x + 90, h.y + 60, 1);
+            let t = null;
+            for (let i = 0; i < 40 && !(t = document.querySelector('[data-drop-out]')); i++) await new Promise(r => setTimeout(r, 100));
+            if (t) {
+              const b = t.getBoundingClientRect();
+              ev(t, 'mousemove', b.x + b.width / 2, b.y + b.height / 2, 1);
+              window.__drop = () => ev(t, 'mouseup', b.x + b.width / 2, b.y + b.height / 2, 0);
+            }
+          }
+        }
+        if (c.drop) { window.__drop?.(); window.__drop = null; }
         if (c.key && input) { input.dispatchEvent(new KeyboardEvent('keydown', { key: c.key, bubbles: true, cancelable: true })); await new Promise(r => setTimeout(r, 80)); }
         if (c.send && input) {
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
@@ -355,10 +421,15 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
     await assert.rejects(pc.link.invoke("session_move_offer", { ...good, v: 2 }), /모르는 이사 꾸러미/);
     assert.equal(dom().offer, null, "막힌 이사에 창이 뜸");
 
-    // 3. 받기. 같은 원격 주소의 폴더(이 PC 의 탭)를 먼저 권하고, 커밋 안 한 변경·다른 커밋을 알린다.
+    // 3. 이 PC 의 같은 대화와 갈라졌으면 묻는다. 같은 원격 주소의 폴더(이 PC 의 탭)를 권하고, 커밋 안 한 변경·다른 커밋을 알린다.
+    // 받으면 이 PC 의 것을 옆에 남겨 두고 받은 것으로 바꾼다.
+    const written = path.join(home, "projects", slug(cwd), S2 + ".jsonl");
+    const diverged = conversation(S2, project, "HERE_MARK");
+    writeFileSync(written, diverged);
     const got = pc.link.invoke("session_move_offer", good);
     assert.ok(await until(() => /노트북 에서 대화가 이사 온다/.test(dom().offer?.title ?? ""), 100), "받는 창이 안 뜸: " + seen());
     assert.ok(await until(() => dom().offer.folders.some((f) => f.on && same(f.text.split(" ·")[0], cwd)), 100), "같은 레포 폴더를 권하지 않음: " + seen());
+    assert.ok(dom().offer.notes.some((n) => n.includes("갈라졌다")), "갈라진 것을 안 알림: " + seen());
     assert.ok(dom().offer.notes.some((n) => n.includes("커밋 안 한 변경 2개")), "보낸 PC 의 커밋 안 한 변경을 안 알림: " + seen());
     assert.ok(dom().offer.notes.some((n) => n.includes("다른 커밋이다")), "커밋이 다른 것을 안 알림: " + seen());
     shot("move-offer");
@@ -366,31 +437,50 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
     const r = await got;
     assert.equal(r.session, S2);
     assert.ok(same(r.cwd, cwd), "고른 폴더가 아님: " + JSON.stringify(r));
-    const written = path.join(home, "projects", slug(cwd), S2 + ".jsonl");
     assert.equal(readFileSync(written, "utf8"), incoming, "받은 대화가 claude 자리에 안 써짐");
+    const kept = readdirSync(path.dirname(written)).filter((f) => f.startsWith(S2 + ".jsonl.before-move-"));
+    assert.equal(kept.length, 1, "갈라진 이 PC 의 대화를 안 남김");
+    assert.equal(readFileSync(path.join(path.dirname(written), kept[0]), "utf8"), diverged);
     assert.ok(existsSync(path.join(home, "projects", slug(cwd), S2, "subagents", "agent-a7c9ae52f4cfba48c.jsonl")), "서브에이전트 대화가 안 옴");
     assert.ok(await until(() => dom().panes?.some((p) => p.id !== "%0" && p.bubbles.some((b) => b.includes("MOVED_IN_MARK")) && p.title === "이사 시험"), 200), "받은 대화가 새 칸에 안 열림: " + seen());
     assert.equal(JSON.parse(readFileSync(remoteFile, "utf8")).move_folders?.["github.com/example/move-fixture"], cwd, "고른 폴더를 기억하지 않음");
-    // 같은 대화를 다시 받아도 칸을 또 열지 않는다(이미 연 칸을 다시 연다).
-    const again = pc.link.invoke("session_move_offer", good);
-    // 받은 칸의 claude 가 이어 열며 줄을 더 적었으면 이 PC 쪽이 더 길다 — 그때도 덮지 않는다.
-    assert.ok(await until(() => dom().offer?.notes?.some((n) => /같은 대화가 그대로 있다|더 길다/.test(n)), 100), "이미 있는 대화인 것을 안 알림: " + seen());
-    // 폴더 후보를 받기 전에는 [받기]가 잠겨 있다. 이번에는 전에 고른 폴더가 먼저 온다.
-    assert.ok(await until(() => dom().offer?.folders?.some((f) => f.on && f.text.includes("전에 고른 폴더")), 100), "전에 고른 폴더를 권하지 않음: " + seen());
-    commands.push({ in: "offer", button: "받기" });
+
+    // 4. 같은 레포 폴더가 정해지면 묻지 않고 받아 새 탭에 열고, 한 줄로 알린다.
+    const S4 = randomUUID();
+    const autoIn = conversation(S4, "C:\\sender\\project", "AUTO_MARK");
+    const autoOffer = { ...offerOf(S4, [{ rel: `${S4}.jsonl`, gz: gz(autoIn) }]), title: "자동 시험" };
+    let asked = false;
+    const watch = setInterval(() => (asked ||= !!dom().offer), 50);
+    const r4 = await pc.link.invoke("session_move_offer", autoOffer);
+    assert.ok(same(r4.cwd, cwd), "같은 레포 폴더로 안 받음: " + JSON.stringify(r4));
+    assert.equal(readFileSync(path.join(home, "projects", slug(cwd), S4 + ".jsonl"), "utf8"), autoIn);
+    assert.ok(await until(() => /노트북 에서 "자동 시험" 대화가 이사 왔다/.test(dom().toast ?? ""), 50), "묻지 않고 받은 것을 안 알림: " + seen());
+    shot("move-toast");
+    assert.ok(await until(() => dom().panes?.some((p) => p.bubbles.some((b) => b.includes("AUTO_MARK")) && p.title === "자동 시험"), 200), "묻지 않고 받은 대화가 안 열림: " + seen());
+    assert.equal(asked, false, "같은 레포 폴더가 정해졌는데 물음: " + seen());
+    // 같은 대화를 다시 받아도 칸을 또 열지 않는다(이미 연 칸을 다시 연다). 받은 칸의 claude 가 이어 열며 줄을 더 적었으면
+    // 이 PC 쪽이 더 길다 — 그때는 덮지 않고 묻는다.
+    let settled = false;
+    const again = pc.link.invoke("session_move_offer", autoOffer).finally(() => (settled = true));
+    assert.ok(await until(() => settled || dom().offer, 100), "다시 보낸 같은 대화에 답이 없음: " + seen());
+    clearInterval(watch);
+    if (!settled) {
+      assert.ok(dom().offer.notes.some((n) => /더 길다/.test(n)), "이 PC 쪽이 더 긴 것을 안 알림: " + seen());
+      commands.push({ in: "offer", button: "받기" });
+    }
     await again;
     await delay(1000);
-    assert.equal(dom().panes.filter((p) => p.bubbles.some((b) => b.includes("MOVED_IN_MARK"))).length, 1, "같은 대화로 칸을 또 엶: " + seen());
+    assert.equal(dom().panes.filter((p) => p.bubbles.some((b) => b.includes("AUTO_MARK"))).length, 1, "같은 대화로 칸을 또 엶: " + seen());
 
-    // 4. 거절.
+    // 5. 거절. 원격이 없는 폴더의 대화는 묻는다.
     const S3 = randomUUID();
-    const refused = pc.link.invoke("session_move_offer", offerOf(S3, [{ rel: `${S3}.jsonl`, gz: gz(conversation(S3, "C:\\x", "REFUSED_MARK")) }]));
+    const refused = pc.link.invoke("session_move_offer", { ...offerOf(S3, [{ rel: `${S3}.jsonl`, gz: gz(conversation(S3, "C:\\x", "REFUSED_MARK")) }]), git: { dirty: 0 } });
     assert.ok(await until(() => dom().offer !== null, 100), "두 번째 받는 창이 안 뜸");
     commands.push({ in: "offer", button: "거절" });
     await assert.rejects(refused, /거절했다/);
     assert.ok(!readdirSync(path.join(home, "projects")).some((d) => existsSync(path.join(home, "projects", d, S3 + ".jsonl"))), "거절했는데 대화를 씀");
 
-    // 5. 보내는 PC: 받는 PC(흉내)의 방에 [PC 잇기]. 이 PC 자신의 주소는 막는다.
+    // 6. 보내는 PC: 받는 PC(흉내)의 방에 [PC 잇기]. 이 PC 자신의 주소는 막는다.
     const room2 = randomBytes(16).toString("hex");
     host = await fakePc(relayBase, room2, randomBytes(32).toString("hex"));
     commands.push({ in: "remote", fill: ".remote-peer-form input", value: page });
@@ -406,20 +496,28 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
     host.confirm();
     assert.ok(await until(() => dom().remote?.peers?.some((t) => t.includes("데스크톱")), 100), "이은 PC 가 목록에 없음: " + seen());
     shot("move-peers");
+    // 짝지을 때 받은 컴퓨터 이름은 알아보기 어려워 바꿀 수 있다.
+    commands.push({ in: "remote", button: "이름" });
+    await delay(300);
+    commands.push({ in: "remote", fill: ".remote-peer-name input", value: "집 데스크톱" });
+    await delay(300);
+    commands.push({ in: "remote", click: ".remote-peer-name button" });
+    assert.ok(await until(() => dom().remote?.peers?.some((t) => t.startsWith("집 데스크톱")), 50), "PC 이름이 안 바뀜: " + seen());
+    assert.equal(JSON.parse(readFileSync(remoteFile, "utf8")).peers?.[0]?.name, "집 데스크톱", "바꾼 이름을 저장하지 않음");
     commands.push({ in: "remote", click: ".remote-x" });
 
-    // 6. /move — 카드가 뜨는 동안 입력바가 잠기고, 받는 PC 의 답을 기다린 뒤 이 칸을 닫는다. 받은 대화가 새 탭으로 열려
+    // 7. /move — 카드가 뜨는 동안 입력바가 잠기고, 받는 PC 의 답을 기다린 뒤 이 칸을 닫는다. 받은 대화가 새 탭으로 열려
     // 있으니 보낼 칸의 탭(첫 탭)으로 돌아간다.
     commands.push({ in: "side", down: ".tg-head" });
     assert.ok(await until(() => dom().panes?.some((p) => p.id === "%0") && dom().input && !dom().inputDisabled, 100));
     commands.push({ send: "/move" });
     assert.ok(await until(() => dom().value === "/move " && dom().palette.some((t) => t.includes("데스크톱")), 100), "/move 목록에 이은 PC 가 없음: " + seen());
     commands.push({ key: "Enter" });
-    assert.ok(await until(() => /이 대화를 데스크톱 PC 로 이사할까/.test(dom().moveCard ?? "") && dom().inputDisabled, 100), "이사 카드가 안 뜨거나 입력바가 안 잠김: " + seen());
+    assert.ok(await until(() => /이 대화를 집 데스크톱 PC 로 이사할까/.test(dom().moveCard ?? "") && dom().inputDisabled, 100), "이사 카드가 안 뜨거나 입력바가 안 잠김: " + seen());
     assert.ok(await until(() => /KB/.test(dom().moveCard ?? ""), 100), "꾸러미를 못 만듦: " + seen());
     commands.push({ click: ".ask.move .ask-go" });
     assert.ok(await until(() => host.st.offers.length === 1, 150), "받는 PC 에 꾸러미가 안 옴: " + JSON.stringify({ error: host.st.error, dom: dom().moveCard }));
-    assert.ok(await until(() => /\[받기\]를 눌러 줘/.test(dom().moveStep ?? ""), 50), "받는 PC 를 기다린다고 안 보임: " + seen());
+    assert.ok(await until(() => /받기를 기다린다/.test(dom().moveStep ?? ""), 50), "받는 PC 를 기다린다고 안 보임: " + seen());
     shot("move-card");
     const sent = host.st.offers[0];
     assert.equal(sent.session, sid);
@@ -431,6 +529,21 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 같은 레포 폴더�
     host.release();
     assert.ok(await until(() => !dom().panes?.some((p) => p.id === "%0"), 100), "받은 뒤에 보낸 칸이 안 닫힘: " + seen());
     assert.ok(existsSync(path.join(home, "projects", slug(project), sid + ".jsonl")), "보낸 대화 파일을 지움");
+
+    // 8. 칸을 머리줄째 끌어 옆칸 아래의 PC 에 놓는다. 커밋 안 한 변경이 없으면 카드로 묻지 않고 보내고, 받으면 닫는다.
+    const autoPane = dom().panes.find((p) => p.title === "자동 시험")?.id;
+    assert.ok(autoPane, "끌 칸이 없음: " + seen());
+    commands.push({ in: "side", down: '.prow[title="자동 시험"]' });
+    await delay(500);
+    commands.push({ drag: autoPane });
+    assert.ok(await until(() => /집 데스크톱/.test(dom().dock?.text ?? "") && dom().dock.on, 100), "놓을 곳에 이은 PC 가 안 뜸: " + seen());
+    assert.match(dom().dock.text, /놓으면 그 PC 로 옮기고 이 칸은 닫는다/);
+    shot("move-dock");
+    commands.push({ drop: true });
+    assert.ok(await until(() => host.st.offers.length === 2, 150), "끌어 놓았는데 안 보냄: " + JSON.stringify({ error: host.st.error, cards: dom().moveCards }));
+    assert.equal(host.st.offers[1].session, S4);
+    assert.equal(host.st.offers[1].title, "자동 시험");
+    assert.ok(await until(() => !dom().dock && !dom().panes?.some((p) => p.id === autoPane), 100), "받은 뒤에 끌어 보낸 칸이 안 닫힘: " + seen());
     console.log("세션이사 확인", root);
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, host: host?.st ?? null }));

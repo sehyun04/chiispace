@@ -930,6 +930,23 @@ pub fn remote_peer_forget(app: AppHandle, peer: String) -> Status {
     app.state::<Remote>().status()
 }
 
+/// 이사 보낼 PC 의 이름을 바꾼다. 짝지을 때 받은 컴퓨터 이름(`DESKTOP-…`)으로는 어느 PC 인지 알아보기 어렵다.
+#[tauri::command]
+pub fn remote_peer_rename(app: AppHandle, peer: String, name: String) -> Result<Status, String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string();
+    if name.is_empty() {
+        return Err("이름을 넣어 줘".into());
+    }
+    {
+        let remote = app.state::<Remote>();
+        let mut inner = remote.0.lock().unwrap();
+        let p = inner.saved.peers.iter_mut().find(|p| p.id == peer).ok_or("짝지은 PC 가 아니다")?;
+        p.name = name;
+        Remote::save(&inner);
+    }
+    Ok(app.state::<Remote>().status())
+}
+
 /// 이사 보낼 때 그 PC 에 붙을 값. 이 PC 의 웹뷰만 부른다(폰 명령 목록에 없다).
 #[tauri::command]
 pub fn remote_peer_key(app: AppHandle, peer: String) -> Result<Value, String> {

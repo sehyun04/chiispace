@@ -313,3 +313,88 @@
 .remote-peer-form > button {
   justify-self: start;
 }
+.remote-dev-acts {
+  display: flex;
+  gap: 6px;
+}
+.remote-peer-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px var(--sky) inset;
+  font: inherit;
+}
+
+/* 대화창 칸을 끄는 동안 옆칸 아래에 뜨는 놓을 곳(MoveDock.tsx). 옆칸이 접혀 있으면 칸 위 같은 자리에 뜬다. */
+.move-dock {
+  position: fixed;
+  left: 12px;
+  bottom: 52px;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  width: 212px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--drop);
+  color: var(--ink);
+  font-size: 13px;
+}
+.move-dock-title {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.move-dock-pc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  box-shadow: 0 0 0 2px var(--line) inset;
+  font-weight: 700;
+}
+.move-dock-pc span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-dock-pc.on {
+  background: color-mix(in srgb, var(--sky) 28%, var(--paper));
+  box-shadow: 0 0 0 2px var(--sky) inset;
+}
+.move-dock-pc.off {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.move-dock-note {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.move-dock-note.bad {
+  color: var(--bad);
+}
+
+/* 묻지 않고 받은 이사 한 줄(MoveOffer.tsx). 새 탭이 왜 생겼는지 알린다. */
+.move-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 45;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: var(--drop);
+  color: var(--ink);
+  font-size: 13px;
+  transform: translateX(-50%);
+}

@@ -37,9 +37,10 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   중계는 사용자 계정에 11월 18일 올렸다(`https://chiispace-relay.ds187.workers.dev`, 로그인은 사용자가 브라우저에서 허락). 사용자 앱 설정(`remote.json`)에
   주소를 넣고 켜 두었다. 실제 중계로 격리 앱 검증은 통과했고, 아이폰으로 짝짓는 것은 사용자 확인이 남았다.
   11월 19일 작업본에 Codex 대화창의 폰 연결을 더했다. 같은 PC 칸의 대화·이미지·승인·질문·중단을 지원한다(작업 정리 44절).
-- **세션이사(11월 20일 배포).** Claude 대화창 칸을 다른 PC 의 chiispace 로 옮겨 이어 쓴다(`session_move.rs`, `ui/MoveCard.tsx`·`MoveOffer.tsx`,
+- **세션이사(11월 20일 배포, 끌어 놓기·묻지 않고 받기는 작업본).** Claude 대화창 칸을 다른 PC 의 chiispace 로 옮겨 이어 쓴다(`session_move.rs`, `ui/MoveCard.tsx`·`MoveOffer.tsx`,
   [작업 정리 45절](docs/WORKLOG.md#45-11월-19일20일-추가-세션이사--다른-pc-로-대화창-칸-옮기기)). [폰 연결]의 [PC 잇기]로 받는 PC 의 방에 한 번
-  짝짓고, 대화창 `/move` → 받는 PC 에서 폴더 고르고 [받기] → 보낸 칸은 닫힌다. 두 PC 가 다 켜져 있고 받는 PC 의 [폰 연결]이 켜져 있어야 한다.
+  짝짓고, 그다음은 대화창 칸 머리줄을 끌어 옆칸 아래의 PC 에 놓는다(`/move` 도 같다). 받는 PC 는 같은 레포 폴더가 하나로 정해지면
+  묻지 않고 새 탭에 열고, 못 정하면 폴더를 묻는다. 보낸 칸은 받았다는 답 뒤에 닫힌다. 두 PC 가 다 켜져 있고 받는 PC 의 [폰 연결]이 켜져 있어야 한다.
   실제 두 PC(노트북·데스크톱)로는 아직 확인 전이다.
 
 - **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 20일 15:33(`7f6714d`, 세션이사까지 든 판, GitHub 릴리스 `build-20261120-153310-7f6714d`). 교체 때 앱은 꺼져 있었다 — 새로 켜면 적용된다.
@@ -188,8 +189,11 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   시작점은 `ui/phone-main.tsx` 다 — `mobile.tsx` 로 두면 Windows 에서 `Mobile.tsx` 와 같은 파일이다.
 - **세션이사(`session_move.rs`)는 대화 파일과 그 옆 폴더(`<id>/`)만 옮기고 안의 경로를 고쳐 쓰지 않는다.** claude 는 `--resume <id>` 에 모든
   프로젝트 폴더에서 그 id 를 찾아 이어 연다(2.1.328 로 확인). PC 로 짝지은 기기(`kind: "pc"`)는 `session_move_offer` 만 부르고 폰은 못 부른다 —
-  받는 PC 에 칸을 새로 여는 길이다. 받는 PC 에서 사람이 폴더를 고르고 [받기]를 눌러야 파일을 쓴다. 폴더 후보(git 원격 주소·전에 고른 폴더)는
-  권하기만 한다 — `/resume` 목록처럼 앱이 고르지 않는다. 받는 쪽은 이 PC 의 더 긴 같은 대화를 덮지 않고, 같은 id 는 이미 있는 자리에 쓴다
+  받는 PC 에 칸을 새로 여는 길이다. 받는 PC 가 묻지 않고 받는 것은 git 원격이 같은 폴더가 하나로 정해질 때뿐이다(`autoFolder` — 전에 고른 폴더가
+  지금도 그 레포이거나, 앱이 아는 폴더에 그 레포가 하나뿐). 원격이 없거나 후보가 여럿이거나 이 PC 의 같은 대화가 더 길거나 갈라졌으면 사람이
+  폴더를 고르고 [받기]를 누른다(11월 20일 사용자 동의 — 둘 다 본인 PC 이고 짝은 숫자를 견주어 한 번 맺는다). 이름이 같은 폴더만으로는
+  묻지 않고 받지 마라. 이것은 받은 대화를 둘 폴더를 정하는 일이지 `/resume` 목록처럼 이 PC 의 대화를 고르는 일이 아니다.
+  칸을 끌어 PC 에 놓는 것(`MoveDock`)은 칸이 적어 둔 상태(`setMovable`·`moveLock`)로만 보낸다 — 끄는 쪽에서 칸 상태를 따로 판단하지 마라. 받는 쪽은 이 PC 의 더 긴 같은 대화를 덮지 않고, 같은 id 는 이미 있는 자리에 쓴다
   (두 곳에 있으면 claude 가 어느 것을 열지 모른다). 이미 그 대화를 연 칸은 다시 열어 받은 파일을 읽힌다. 보낸 칸은 받았다는 답을 받은 뒤에만
   닫고, 붙은 뒤에 끊기면 저절로 살리지 않고 사람이 정한다 — 같은 대화를 두 PC 에서 이어 쓰면 둘로 갈라져 합칠 수 없다.
 
@@ -492,7 +496,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
 | `ui/RemotePanel.tsx` · `ui/remote.css` | PC 쪽 [폰 연결] 창 — 켜기·중계 주소·폰 주소 QR·짝짓기 숫자·짝지은 폰 · 폰이 볼 칸 알리기(`useRemotePanes`) |
 | `mobile.html` · `vite.mobile.config.ts` · `ui/phone-main.tsx` · `ui/Mobile.tsx` · `ui/mobile.css` · `ui/phone-public/` | 폰 화면 — 따로 굽는 묶음(`dist/m`) · 시작점 · 짝짓기·칸 목록·칸 하나(PC 대화창 부품 그대로) · 폰 얼개 · 홈 화면 아이콘 |
-| `ui/MoveCard.tsx` · `ui/MoveOffer.tsx` · `ui/session-move.ts` | 세션이사 — 보내는 칸의 `/move` 카드(폰과 같은 길로 받는 PC 에 붙음) · 받는 PC 의 [받기] 창 · 꾸러미와 안내 글(단위 검증) |
+| `ui/MoveCard.tsx` · `ui/MoveOffer.tsx` · `ui/MoveDock.tsx` · `ui/session-move.ts` | 세션이사 — 보내는 칸의 카드(폰과 같은 길로 받는 PC 에 붙음) · 받는 PC 의 받기(묻지 않음·[받기] 창) · 칸을 끌 때 옆칸 아래에 뜨는 PC · 꾸러미·안내 글·묻지 않을 조건·끌 수 있는 칸(단위 검증) |
 | `ui/phone-link.ts` · `ui/phone-crypto.ts` · `ui/remote-shim.ts` · `ui/phone.ts` | 폰 쪽 짝짓기와 암호 통로 · WebCrypto · `invoke`·`listen` 바꿔 끼우기 · 폰 값 다루기(단위 검증) |
 | `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |

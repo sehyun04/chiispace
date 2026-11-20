@@ -53,23 +53,35 @@ export function useSeamDrag(active: number, setTabs: Dispatch<SetStateAction<Tab
 
 /** pane 을 헤더째 끌어 옮기기. 가운데에 놓으면 자리 맞바꾸기, 가장자리에
  *  놓으면 그쪽으로 갈라 붙인다 — 배치를 한 번에 원하는 모양으로 만들려면
- *  맞바꾸기만으로는 모자란다. */
-export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) => void) {
+ *  맞바꾸기만으로는 모자란다.
+ *  배치 밖의 놓을 곳(`data-drop-out`, 다른 PC 로 이사하는 MoveDock)에 놓으면 `onDropOut` 으로 넘긴다. */
+export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) => void, onDropOut?: (from: string, target: string) => void) {
   // 어디에 놓일지는 렌더에도 필요해 state 로 두고, mouseup 핸들러가 닫힌 값을
   // 보지 않도록 ref 에도 같이 들고 있는다.
-  const paneDrag = useRef<{ from: string; box: HTMLElement } | null>(null);
+  const paneDrag = useRef<{ from: string; box: HTMLElement; x?: number; y?: number } | null>(null);
   const [dropAt, setDropAt] = useState<{ id: string; side: L.Side } | null>(null);
   const dropRef = useRef<{ id: string; side: L.Side } | null>(null);
+  // 정말 끄는 중인 칸. 머리줄을 누르기만 해도(칸 고르기·이름 고치기) 놓을 곳이 번쩍이지 않게 몇 px 움직인 뒤에 정한다.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [out, setOut] = useState<string | null>(null);
+  const outRef = useRef<string | null>(null);
+  const dropOut = useRef(onDropOut);
+  dropOut.current = onDropOut;
 
   useEffect(() => {
     const finish = () => {
       if (!paneDrag.current) return;
       const from = paneDrag.current.from;
       const at = dropRef.current;
+      const target = outRef.current;
       paneDrag.current = null;
       dropRef.current = null;
+      outRef.current = null;
       setDropAt(null);
+      setOut(null);
+      setDragging(null);
       document.body.classList.remove("pane-dragging");
+      if (target) return dropOut.current?.(from, target);
       if (!at || at.id === from) return;
       patch((t) => {
         if (!t.layout) return t;
@@ -83,6 +95,23 @@ export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) =
       if (!d) return;
       if (e.buttons === 0) {
         finish();
+        return;
+      }
+      if (d.x === undefined || d.y === undefined) {
+        d.x = e.clientX;
+        d.y = e.clientY;
+      } else if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
+        setDragging(d.from);
+      }
+      // 배치 밖의 놓을 곳 위에서는 배치 안 자리를 비운다 — 옆칸이 접혀 놓을 곳이 칸 위에 떠 있을 때도 둘이 겹치지 않게.
+      const zone = e.target instanceof Element ? e.target.closest("[data-drop-dock]") : null;
+      const hit = zone && e.target instanceof Element ? e.target.closest("[data-drop-out]:not([data-locked])") : null;
+      const target = hit?.getAttribute("data-drop-out") ?? null;
+      outRef.current = target;
+      setOut(target);
+      if (zone) {
+        dropRef.current = null;
+        setDropAt(null);
         return;
       }
       const layout = cur?.layout;
@@ -112,8 +141,9 @@ export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) =
   const start = useCallback((from: string, box: HTMLElement) => {
     paneDrag.current = { from, box };
     dropRef.current = null;
+    outRef.current = null;
     document.body.classList.add("pane-dragging");
   }, []);
 
-  return { dropAt, start };
+  return { dropAt, start, dragging, out };
 }

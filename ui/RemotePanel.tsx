@@ -88,6 +88,8 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const [peerBusy, setPeerBusy] = useState(false);
   // 상태는 1초마다 새로 받으며 `err` 를 걷으므로, 잇기의 까닭은 따로 들고 있는다.
   const [peerErr, setPeerErr] = useState<string | null>(null);
+  // 이름을 고치는 중인 PC. 짝지을 때 받은 컴퓨터 이름(`DESKTOP-…`)으로는 어느 PC 인지 알아보기 어렵다.
+  const [naming, setNaming] = useState<{ id: string; name: string } | null>(null);
   const run = (p: Promise<Status>) =>
     p.then(
       (v) => {
@@ -268,17 +270,38 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
             ) : null}
             <div className="remote-devs remote-peers">
               <div className="remote-sub">이사 보낼 PC</div>
-              {s.peers.map((p) => (
-                <div className="remote-dev" key={p.id}>
-                  <span>
-                    {p.name}
-                    <small> · {day(p.added)}</small>
-                  </span>
-                  <button className="remote-btn" onClick={() => void run(invoke<Status>("remote_peer_forget", { peer: p.id }))}>
-                    잊기
-                  </button>
-                </div>
-              ))}
+              {s.peers.map((p) =>
+                naming?.id === p.id ? (
+                  <form
+                    className="remote-dev remote-peer-name"
+                    key={p.id}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void run(invoke<Status>("remote_peer_rename", { peer: p.id, name: naming.name })).then(() => setNaming(null));
+                    }}
+                  >
+                    <input autoFocus value={naming.name} maxLength={40} spellCheck={false} onChange={(e) => setNaming({ id: p.id, name: e.target.value })} aria-label="PC 이름" />
+                    <button className="remote-btn" type="submit" disabled={!naming.name.trim()}>
+                      저장
+                    </button>
+                  </form>
+                ) : (
+                  <div className="remote-dev" key={p.id}>
+                    <span>
+                      {p.name}
+                      <small> · {day(p.added)}</small>
+                    </span>
+                    <div className="remote-dev-acts">
+                      <button className="remote-btn" onClick={() => setNaming({ id: p.id, name: p.name })}>
+                        이름
+                      </button>
+                      <button className="remote-btn" onClick={() => void run(invoke<Status>("remote_peer_forget", { peer: p.id }))}>
+                        잊기
+                      </button>
+                    </div>
+                  </div>
+                ),
+              )}
               {peerSas ? (
                 <div className="remote-pair">
                   <span className="remote-digits" data-peer-sas={peerSas}>
@@ -294,7 +317,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                     void linkPeer();
                   }}
                 >
-                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 대화창에서 /move 로 그 PC 에 이사 보낸다.</small>
+                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 대화창 칸 머리줄을 끌어 옆칸 아래의 그 PC 에 놓거나 /move 로 이사 보낸다.</small>
                   <input value={peerPage} placeholder="https://chiispace-relay.이름.workers.dev/r/…/" spellCheck={false} onChange={(e) => setPeerPage(e.target.value)} aria-label="이사 보낼 PC 의 폰 주소" />
                   <button className="remote-btn" type="submit" disabled={peerBusy || !peerPage.trim()}>
                     {peerBusy ? "잇는 중" : "PC 잇기"}

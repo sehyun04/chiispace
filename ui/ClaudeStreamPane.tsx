@@ -22,6 +22,7 @@ import { agentCommands, ago, barCommands, mergeCommands, type PaletteCommand } f
 import { buildToolMap, parseJsonl, toItems, type Bubble } from "./transcript";
 import { exportMarkdown, exportName, lastAnswer, memoryChoices } from "./claude-menus";
 import { MoveCard, type Peer } from "./MoveCard";
+import { moveLock, setMovable } from "./session-move";
 import {
   answerLine,
   answeredStream,
@@ -106,8 +107,8 @@ export function ClaudeStreamPane({
   const [notice, setNotice] = useState<string | null>(null);
   // 답을 기다리는 요청(설정·문맥 조회, 모델 바꾸기 …). 답이 오면 request_id 로 짝짓는다.
   const pending = useRef(new Map<string, (r: Reply) => void>());
-  // `/move` 로 고른 이사 갈 PC. 카드가 떠 있는 동안 입력바를 잠근다 — 보내는 사이에 쓴 말은 그 PC 로 안 간다.
-  const [moveTo, setMoveTo] = useState<Peer | null>(null);
+  // `/move` 로 고르거나 칸을 끌어 놓은 이사 갈 PC. 카드가 떠 있는 동안 입력바를 잠근다 — 보내는 사이에 쓴 말은 그 PC 로 안 간다.
+  const [moveTo, setMoveTo] = useState<{ peer: Peer; auto: boolean } | null>(null);
 
   const send = (msg: unknown) => invoke("claude_chat_send", { id, line: JSON.stringify(msg) });
   const control = (request: Record<string, unknown>) =>
@@ -340,6 +341,20 @@ export function ClaudeStreamPane({
     foot: [st.version && `claude ${st.version}`, planLabel(plan?.plan)].filter(Boolean).join(" · ") || undefined,
   };
   const toolbar = <StreamBar {...bar} />;
+  // 이사(`/move`·칸 끌어 PC 에 놓기)를 막는 까닭.
+  const lock = moveLock({ alive, busy: st.busy, tasks: st.tasks.length, talked, moving: !!moveTo });
+  const dropTo = useRef((_peer: string) => {});
+  dropTo.current = (peer) =>
+    void invoke<{ peers: Peer[] }>("remote_status").then((s) => {
+      const p = s.peers.find((x) => x.id === peer);
+      if (p) setMoveTo({ peer: p, auto: true });
+    }, failed);
+  const movable = !!onMoved;
+  useEffect(() => {
+    if (!movable) return;
+    setMovable(id, { lock, drop: (peer) => dropTo.current(peer) });
+    return () => setMovable(id, null);
+  }, [id, lock, movable]);
   // TUI 에만 있던 명령 중 대화창에서 할 수 있게 만든 것. `claude -p` 는 이것들을 받지 않는다(초기화 답의 목록에 없다).
   const titles = useRef(new Map<string, string>());
   const peers = useRef<Peer[]>([]);
@@ -363,8 +378,7 @@ export function ClaudeStreamPane({
         onResume(id, v);
       },
     }]),
-    // 일하는 중·서브에이전트가 도는 중에 옮기면 그 일이 끊긴다. 주고받은 말이 없으면 옮길 대화 파일이 없다.
-    ...(busy || st.tasks.length || !talked || !onMoved ? [] : [{
+    ...(busy || lock || !onMoved ? [] : [{
       name: "move",
       hint: "다른 PC 로 이사 — 이 대화를 그 PC 의 대화창으로 옮기고 여기서는 닫는다",
       empty: "이사 보낼 PC 가 없다 — 옆칸 폰 단추 → [폰 연결]에서 [PC 잇기]",
@@ -375,7 +389,7 @@ export function ClaudeStreamPane({
         }),
       run: (v?: string) => {
         const p = peers.current.find((x) => x.id === v);
-        if (p) setMoveTo(p);
+        if (p) setMoveTo({ peer: p, auto: false });
       },
     }]),
     { name: "login", hint: "로그인 — 새 탭의 터미널에서 claude auth login", run: () => onTerminal("claude auth login", "로그인") },
@@ -461,7 +475,8 @@ export function ClaudeStreamPane({
       {notice && <div className="note stream-notice" role="status">{notice}</div>}
       {moveTo && onMoved ? (
         <MoveCard
-          peer={moveTo}
+          peer={moveTo.peer}
+          auto={moveTo.auto}
           cwd={cwd}
           session={st.session ?? session}
           title={title}
