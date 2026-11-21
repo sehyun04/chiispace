@@ -1716,4 +1716,5 @@ exe 로 돌리면 데스크톱과 같이 "대화를 여는 중"에서 실패하�
 - [AGENTS.md](../AGENTS.md): Codex 가 저절로 읽는 입구. 규칙은 CLAUDE.md 로 보낸다.
 - [Codex 대화창 따라잡기 인계](HANDOFF-CODEX-PARITY.md): 지금 Codex 에 맡긴 작업 지시(옮기기·서브에이전트·`/` 명령).
 - [Codex 대화창 핸드오프](HANDOFF-CODEX-CHAT.md): 9월 새 Codex 칸 구현·검증·배포 범위와 이전 훅 인계. 이력이다.
+- [세션이사 다음 조각](SESSION-MOVE-NEXT.md): Codex 칸 이사·모델 같이 옮기기·터미널 칸의 설계 메모와 대장에게 물을 것. 아직 코드 없음.
 - [핸드오프 이력](HANDOFF-ARCHIVE.md): 당시 진단·시행착오·원복 기록의 원문 보관. 현재 작업 지시는 아님.
