@@ -317,7 +317,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                     void linkPeer();
                   }}
                 >
-                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 대화창 칸 머리줄을 끌어 옆칸 아래의 그 PC 에 놓거나 /move 로 이사 보낸다.</small>
+                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 이으면 옆칸 맨 아래 "다른 PC" 에 그 PC 가 뜬다. 대화창 칸을 거기로 끌어 놓거나 /move 로 이사 보낸다.</small>
                   <input value={peerPage} placeholder="https://chiispace-relay.이름.workers.dev/r/…/" spellCheck={false} onChange={(e) => setPeerPage(e.target.value)} aria-label="이사 보낼 PC 의 폰 주소" />
                   <button className="remote-btn" type="submit" disabled={peerBusy || !peerPage.trim()}>
                     {peerBusy ? "잇는 중" : "PC 잇기"}

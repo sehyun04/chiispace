@@ -39,7 +39,7 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   11월 19일 작업본에 Codex 대화창의 폰 연결을 더했다. 같은 PC 칸의 대화·이미지·승인·질문·중단을 지원한다(작업 정리 44절).
 - **세션이사(11월 20일 배포, 끌어 놓기·묻지 않고 받기는 11월 21일 배포).** Claude 대화창 칸을 다른 PC 의 chiispace 로 옮겨 이어 쓴다(`session_move.rs`, `ui/MoveCard.tsx`·`MoveOffer.tsx`,
   [작업 정리 45절](docs/WORKLOG.md#45-11월-19일20일-추가-세션이사--다른-pc-로-대화창-칸-옮기기)). [폰 연결]의 [PC 잇기]로 받는 PC 의 방에 한 번
-  짝짓고, 그다음은 대화창 칸 머리줄을 끌어 옆칸 아래의 PC 에 놓는다(`/move` 도 같다). 받는 PC 는 같은 레포 폴더가 하나로 정해지면
+  짝짓고, 그다음은 옆칸 맨 아래 "다른 PC" 에 그 PC 가 늘 보이고, 대화창 칸(머리줄·옆칸 칸 줄)을 끌어 거기에 놓는다(`/move` 도 같다). 받는 PC 는 같은 레포 폴더가 하나로 정해지면
   묻지 않고 새 탭에 열고, 못 정하면 폴더를 묻는다. 보낸 칸은 받았다는 답 뒤에 닫힌다. 두 PC 가 다 켜져 있고 받는 PC 의 [폰 연결]이 켜져 있어야 한다.
   실제 두 PC(노트북·데스크톱)로는 아직 확인 전이다.
 
@@ -496,7 +496,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
 | `ui/RemotePanel.tsx` · `ui/remote.css` | PC 쪽 [폰 연결] 창 — 켜기·중계 주소·폰 주소 QR·짝짓기 숫자·짝지은 폰 · 폰이 볼 칸 알리기(`useRemotePanes`) |
 | `mobile.html` · `vite.mobile.config.ts` · `ui/phone-main.tsx` · `ui/Mobile.tsx` · `ui/mobile.css` · `ui/phone-public/` | 폰 화면 — 따로 굽는 묶음(`dist/m`) · 시작점 · 짝짓기·칸 목록·칸 하나(PC 대화창 부품 그대로) · 폰 얼개 · 홈 화면 아이콘 |
-| `ui/MoveCard.tsx` · `ui/MoveOffer.tsx` · `ui/MoveDock.tsx` · `ui/session-move.ts` | 세션이사 — 보내는 칸의 카드(폰과 같은 길로 받는 PC 에 붙음) · 받는 PC 의 받기(묻지 않음·[받기] 창) · 칸을 끌 때 옆칸 아래에 뜨는 PC · 꾸러미·안내 글·묻지 않을 조건·끌 수 있는 칸(단위 검증) |
+| `ui/MoveCard.tsx` · `ui/MoveOffer.tsx` · `ui/MoveDock.tsx` · `ui/session-move.ts` | 세션이사 — 보내는 칸의 카드(폰과 같은 길로 받는 PC 에 붙음) · 받는 PC 의 받기(묻지 않음·[받기] 창) · 옆칸 맨 아래의 다른 PC(늘 보임) · 꾸러미·안내 글·묻지 않을 조건·끌 수 있는 칸(단위 검증) |
 | `ui/phone-link.ts` · `ui/phone-crypto.ts` · `ui/remote-shim.ts` · `ui/phone.ts` | 폰 쪽 짝짓기와 암호 통로 · WebCrypto · `invoke`·`listen` 바꿔 끼우기 · 폰 값 다루기(단위 검증) |
 | `ui/usage.ts` · `ui/usePlanUsage.ts` | 구독 사용 한도(`get_usage`)·문맥 게이지 값 해석(단위 검증) · 모든 Claude 칸이 같이 보는 한도 조회 |
 | `ui/palette.ts` | 입력바 `/` 명령 목록 — 줄 항목·claude 가 준 명령·터미널 칸 고정 목록(단위 검증) |

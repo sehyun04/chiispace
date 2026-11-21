@@ -330,57 +330,82 @@
   font: inherit;
 }
 
-/* 대화창 칸을 끄는 동안 옆칸 아래에 뜨는 놓을 곳(MoveDock.tsx). 옆칸이 접혀 있으면 칸 위 같은 자리에 뜬다. */
-.move-dock {
-  position: fixed;
-  left: 12px;
-  bottom: 52px;
-  z-index: 40;
-  display: grid;
-  gap: 6px;
-  width: 212px;
-  padding: 10px;
-  border-radius: var(--radius);
-  background: var(--card);
-  box-shadow: var(--drop);
-  color: var(--ink);
-  font-size: 13px;
-}
-.move-dock-title {
-  color: var(--ink-2);
-  font-size: 12px;
+/* 옆칸 맨 아래의 다른 PC(MoveDock.tsx). 위의 탭·칸 목록이 이 PC 라서, 머리글(.side-dev)로 기기를 나눠 보인다.
+   PC 줄은 칸 줄(.prow)과 같은 결로 두고, 끄는 동안만 놓을 곳 테두리를 그린다. */
+.side-dev {
+  padding: 4px 8px 2px;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
 }
-.move-dock-pc {
+.side-pcs {
+  flex: none;
+  display: grid;
+  gap: 3px;
+  padding: 6px 8px 10px;
+  border-top: 1px solid var(--line);
+}
+.pc-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-radius: var(--radius-sm);
+  gap: 9px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+.pc-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   background: var(--paper);
+  color: var(--ink-2);
+}
+.side-pcs.dragging .pc-row {
   box-shadow: 0 0 0 2px var(--line) inset;
-  font-weight: 700;
+  background: var(--paper);
 }
-.move-dock-pc span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.move-dock-pc.on {
+.side-pcs.dragging .pc-row.on {
   background: color-mix(in srgb, var(--sky) 28%, var(--paper));
   box-shadow: 0 0 0 2px var(--sky) inset;
 }
-.move-dock-pc.off {
+.side-pcs.dragging .pc-row.off {
   color: var(--ink-3);
   cursor: not-allowed;
 }
-.move-dock-note {
-  color: var(--ink-3);
-  font-size: 12px;
-  line-height: 1.4;
+/* 못 옮기는 까닭은 길어도 끝까지 읽혀야 한다. */
+.pc-row .sub {
+  white-space: normal;
 }
-.move-dock-note.bad {
+.pc-row.off .sub {
   color: var(--bad);
+}
+.pc-link {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.pc-link:hover {
+  background: var(--paper);
+}
+/* 옆칸을 접어 둔 채 끌면 옆칸 자리에 띄운다. 접힌 옆칸은 폭이 0 이라 그대로는 놓을 곳이 안 보인다. */
+.app.closed .side-pcs.dragging {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 40;
+  width: 220px;
+  border-top: none;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--drop);
 }
 
 /* 묻지 않고 받은 이사 한 줄(MoveOffer.tsx). 새 탭이 왜 생겼는지 알린다. */

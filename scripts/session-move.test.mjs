@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 import { b64u, commitOf, newKey, open, random, sasOf, seal, sessionKeys, unb64u } from "../ui/phone-crypto.ts";
-import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
+import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, pcNote, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
 
 test("이사 꾸러미와 두 PC 화면의 안내", () => {
   const git = { origin: "github.com/a/b", branch: "main", head: "abcdef1234", dirty: 2 };
@@ -80,6 +80,14 @@ test("끌어 놓는 이사 — 막는 까닭, 묻지 않고 보내기·받기", 
   setMovable("%1", null);
   dropMove("%1", "pc2");
   assert.deepEqual(got, [["%1", "pc1"]]);
+
+  // 옆칸의 PC 줄은 늘 보인다. 끌지 않을 때는 쓰는 법, 끄는 동안은 놓을 수 있는지와 까닭.
+  const note = (o) => pcNote({ dragging: true, movable: true, lock: null, over: false, ...o });
+  assert.deepEqual(pcNote({ dragging: false, movable: false, lock: null, over: false }), { text: "칸을 끌어 여기에 놓으면 이사", lock: false });
+  assert.deepEqual(note({ movable: false }), { text: "Claude 대화창 칸만 옮긴다", lock: true });
+  assert.deepEqual(note({ lock: "일하는 중 — 답이 끝난 뒤에 옮긴다" }), { text: "일하는 중 — 답이 끝난 뒤에 옮긴다", lock: true });
+  assert.deepEqual(note({}), { text: "여기에 놓는다", lock: false });
+  assert.deepEqual(note({ over: true }), { text: "놓으면 옮기고 이 칸은 닫는다", lock: false });
 });
 
 const exe = process.env.CHIISPACE_TEST_EXE;
@@ -292,9 +300,12 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
         moveCard: over?.querySelector('.ask.move')?.textContent ?? null,
         moveStep: over?.querySelector('.ask.move .move-step')?.textContent ?? null,
         moveCards: texts(document, '.ask.move'),
-        dock: document.querySelector('.move-dock') ? {
-          text: document.querySelector('.move-dock').textContent,
-          on: !!document.querySelector('.move-dock-pc.on'),
+        pcs: side?.querySelector('.side-pcs') ? {
+          text: side.querySelector('.side-pcs').textContent,
+          on: !!side.querySelector('.pc-row.on'),
+          link: !!side.querySelector('.pc-link'),
+          dragging: !!side.querySelector('.side-pcs.dragging'),
+          here: texts(side, '.side-dev'),
         } : null,
         toast: document.querySelector('.move-toast')?.textContent ?? null,
         remote: panel ? {
@@ -330,24 +341,26 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
           const el = scope?.querySelector(c.fill);
           if (el) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, c.value); el.dispatchEvent(new Event('input', { bubbles: true })); }
         }
-        // 칸 머리줄을 잡아 놓을 곳(다른 PC) 위까지 끌고 멈춘다. 놓기는 다음 명령(drop)이다 — 그 사이에 놓을 곳을 본다.
+        // 칸(머리줄 또는 옆칸의 칸 줄)을 잡아 옆칸의 다른 PC 위까지 끌고 멈춘다. 놓기(drop)·되돌리기(cancel)는 다음 명령이다 —
+        // 그 사이에 놓을 곳을 본다.
         if (c.drag) {
-          const head = document.querySelector('[data-pane="' + c.drag + '"] .pane-head');
+          const grab = document.querySelector(c.drag);
           const ev = (el, type, x, y, buttons) => el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons }));
-          if (head) {
-            const h = head.getBoundingClientRect();
-            ev(head, 'mousedown', h.x + 40, h.y + 8, 1);
-            ev(head, 'mousemove', h.x + 40, h.y + 8, 1);
-            ev(head, 'mousemove', h.x + 90, h.y + 60, 1);
-            let t = null;
-            for (let i = 0; i < 40 && !(t = document.querySelector('[data-drop-out]')); i++) await new Promise(r => setTimeout(r, 100));
-            if (t) {
-              const b = t.getBoundingClientRect();
-              ev(t, 'mousemove', b.x + b.width / 2, b.y + b.height / 2, 1);
-              window.__drop = () => ev(t, 'mouseup', b.x + b.width / 2, b.y + b.height / 2, 0);
-            }
+          const t = document.querySelector('[data-drop-out]');
+          if (grab && t) {
+            const h = grab.getBoundingClientRect();
+            const x0 = h.x + Math.min(40, h.width / 2), y0 = h.y + h.height / 2;
+            ev(grab, 'mousedown', x0, y0, 1);
+            ev(grab, 'mousemove', x0, y0, 1);
+            ev(grab, 'mousemove', x0 + 50, y0 + 50, 1);
+            await new Promise(r => setTimeout(r, 200));
+            const b = t.getBoundingClientRect();
+            ev(t, 'mousemove', b.x + b.width / 2, b.y + b.height / 2, 1);
+            window.__drop = () => ev(t, 'mouseup', b.x + b.width / 2, b.y + b.height / 2, 0);
+            window.__cancel = () => { ev(grab, 'mousemove', x0, y0, 1); ev(grab, 'mouseup', x0, y0, 0); };
           }
         }
+        if (c.cancel) { window.__cancel?.(); window.__cancel = null; }
         if (c.drop) { window.__drop?.(); window.__drop = null; }
         if (c.key && input) { input.dispatchEvent(new KeyboardEvent('keydown', { key: c.key, bubbles: true, cancelable: true })); await new Promise(r => setTimeout(r, 80)); }
         if (c.send && input) {
@@ -391,8 +404,10 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.ok(await until(async () => (await fetch(relayBase + "/").then((r) => r.status, () => 0)) === 404, 300), "중계가 안 뜸");
     app = spawn(exe, [], { env, windowsHide: true, stdio: "ignore" });
     assert.ok(await until(() => dom().input && !dom().inputDisabled, 600), "칸의 claude 가 안 켜짐: " + seen());
-    commands.push({ in: "side", click: ".side-remote" });
-    assert.ok(await until(() => /중계에 붙음/.test(dom().remote?.state ?? ""), 200), "중계에 안 붙음: " + seen());
+    // 옆칸은 기기별로 나뉜다. 위 목록은 이 PC, 맨 아래는 다른 PC — 아직 이은 PC 가 없으면 잇는 길이 늘 보인다.
+    assert.ok(await until(() => dom().pcs?.link && dom().pcs.here.join() === "이 PC,다른 PC", 100), "옆칸에 기기 구역이 안 보임: " + seen());
+    commands.push({ in: "side", click: ".pc-link" });
+    assert.ok(await until(() => /중계에 붙음/.test(dom().remote?.state ?? ""), 200), "[다른 PC 잇기]가 [폰 연결]을 안 엶: " + seen());
 
     // 1. PC 로 짝짓기. 받는 PC 의 숫자 확인에 PC 라고 보이고, 짝지은 쪽은 받는 PC 의 이름을 받는다.
     const laptop = await pairAs("노트북", "pc");
@@ -505,6 +520,9 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.ok(await until(() => dom().remote?.peers?.some((t) => t.startsWith("집 데스크톱")), 50), "PC 이름이 안 바뀜: " + seen());
     assert.equal(JSON.parse(readFileSync(remoteFile, "utf8")).peers?.[0]?.name, "집 데스크톱", "바꾼 이름을 저장하지 않음");
     commands.push({ in: "remote", click: ".remote-x" });
+    // 끌기 전에도 옆칸 맨 아래에 이은 PC 가 늘 보인다.
+    assert.ok(await until(() => !dom().remote && /집 데스크톱칸을 끌어 여기에 놓으면 이사/.test(dom().pcs?.text ?? "") && !dom().pcs.link, 100), "옆칸에 이은 PC 가 안 보임: " + seen());
+    shot("move-side");
 
     // 7. /move — 카드가 뜨는 동안 입력바가 잠기고, 받는 PC 의 답을 기다린 뒤 이 칸을 닫는다. 받은 대화가 새 탭으로 열려
     // 있으니 보낼 칸의 탭(첫 탭)으로 돌아간다.
@@ -530,20 +548,28 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.ok(await until(() => !dom().panes?.some((p) => p.id === "%0"), 100), "받은 뒤에 보낸 칸이 안 닫힘: " + seen());
     assert.ok(existsSync(path.join(home, "projects", slug(project), sid + ".jsonl")), "보낸 대화 파일을 지움");
 
-    // 8. 칸을 머리줄째 끌어 옆칸 아래의 PC 에 놓는다. 커밋 안 한 변경이 없으면 카드로 묻지 않고 보내고, 받으면 닫는다.
+    // 8. 칸을 끌어 옆칸 맨 아래의 PC 에 놓는다. 머리줄로 끌어 PC 위에 가면 놓을 곳이 켜지고, 되돌려 놓으면 아무 일이 없다.
+    // 옆칸의 칸 줄을 끌어 놓으면 커밋 안 한 변경이 없으니 카드로 묻지 않고 보내고, 받으면 닫는다.
     const autoPane = dom().panes.find((p) => p.title === "자동 시험")?.id;
     assert.ok(autoPane, "끌 칸이 없음: " + seen());
     commands.push({ in: "side", down: '.prow[title="자동 시험"]' });
     await delay(500);
-    commands.push({ drag: autoPane });
-    assert.ok(await until(() => /집 데스크톱/.test(dom().dock?.text ?? "") && dom().dock.on, 100), "놓을 곳에 이은 PC 가 안 뜸: " + seen());
-    assert.match(dom().dock.text, /놓으면 그 PC 로 옮기고 이 칸은 닫는다/);
+    commands.push({ drag: `[data-pane="${autoPane}"] .pane-head` });
+    assert.ok(await until(() => dom().pcs?.dragging && dom().pcs.on, 100), "머리줄로 끌 때 PC 가 놓을 곳으로 안 켜짐: " + seen());
+    assert.match(dom().pcs.text, /놓으면 옮기고 이 칸은 닫는다/);
     shot("move-dock");
+    commands.push({ cancel: true });
+    assert.ok(await until(() => !dom().pcs?.dragging, 50), "되돌려 놓았는데 끌기가 안 끝남: " + seen());
+    await delay(1000);
+    assert.equal(host.st.offers.length, 1, "PC 에 안 놓았는데 보냄");
+    assert.ok(dom().panes.some((p) => p.id === autoPane), "PC 에 안 놓았는데 칸이 닫힘");
+    commands.push({ drag: '.prow[title="자동 시험"]' });
+    assert.ok(await until(() => dom().pcs?.dragging && dom().pcs.on, 100), "옆칸 칸 줄로 끌 때 PC 가 놓을 곳으로 안 켜짐: " + seen());
     commands.push({ drop: true });
     assert.ok(await until(() => host.st.offers.length === 2, 150), "끌어 놓았는데 안 보냄: " + JSON.stringify({ error: host.st.error, cards: dom().moveCards }));
     assert.equal(host.st.offers[1].session, S4);
     assert.equal(host.st.offers[1].title, "자동 시험");
-    assert.ok(await until(() => !dom().dock && !dom().panes?.some((p) => p.id === autoPane), 100), "받은 뒤에 끌어 보낸 칸이 안 닫힘: " + seen());
+    assert.ok(await until(() => !dom().pcs?.dragging && !dom().panes?.some((p) => p.id === autoPane), 100), "받은 뒤에 끌어 보낸 칸이 안 닫힘: " + seen());
     console.log("세션이사 확인", root);
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, host: host?.st ?? null }));

@@ -54,11 +54,12 @@ export function useSeamDrag(active: number, setTabs: Dispatch<SetStateAction<Tab
 /** pane 을 헤더째 끌어 옮기기. 가운데에 놓으면 자리 맞바꾸기, 가장자리에
  *  놓으면 그쪽으로 갈라 붙인다 — 배치를 한 번에 원하는 모양으로 만들려면
  *  맞바꾸기만으로는 모자란다.
- *  배치 밖의 놓을 곳(`data-drop-out`, 다른 PC 로 이사하는 MoveDock)에 놓으면 `onDropOut` 으로 넘긴다. */
+ *  배치 밖의 놓을 곳(`data-drop-out`, 옆칸의 다른 PC — MoveDock)에 놓으면 `onDropOut` 으로 넘긴다.
+ *  옆칸의 칸 줄에서 끌 때는 무대(`box`)가 없다 — 배치 안에는 놓지 않고 다른 PC 에만 놓는다. */
 export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) => void, onDropOut?: (from: string, target: string) => void) {
   // 어디에 놓일지는 렌더에도 필요해 state 로 두고, mouseup 핸들러가 닫힌 값을
   // 보지 않도록 ref 에도 같이 들고 있는다.
-  const paneDrag = useRef<{ from: string; box: HTMLElement; x?: number; y?: number } | null>(null);
+  const paneDrag = useRef<{ from: string; box: HTMLElement | null; x?: number; y?: number } | null>(null);
   const [dropAt, setDropAt] = useState<{ id: string; side: L.Side } | null>(null);
   const dropRef = useRef<{ id: string; side: L.Side } | null>(null);
   // 정말 끄는 중인 칸. 머리줄을 누르기만 해도(칸 고르기·이름 고치기) 놓을 곳이 번쩍이지 않게 몇 px 움직인 뒤에 정한다.
@@ -109,7 +110,7 @@ export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) =
       const target = hit?.getAttribute("data-drop-out") ?? null;
       outRef.current = target;
       setOut(target);
-      if (zone) {
+      if (zone || !d.box) {
         dropRef.current = null;
         setDropAt(null);
         return;
@@ -138,7 +139,7 @@ export function usePaneDrag(cur: Tab | undefined, patch: (fn: (t: Tab) => Tab) =
     };
   }, [cur, patch]);
 
-  const start = useCallback((from: string, box: HTMLElement) => {
+  const start = useCallback((from: string, box: HTMLElement | null) => {
     paneDrag.current = { from, box };
     dropRef.current = null;
     outRef.current = null;

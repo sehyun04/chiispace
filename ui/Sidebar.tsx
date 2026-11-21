@@ -5,7 +5,7 @@
  *
  *  이 파일은 그리기만 한다. 무엇을 그릴지와 눌렀을 때 무엇을 할지는 App 이 준다 —
  *  그래야 옆칸 모양을 손보는 일과 얼개를 손보는 일이 서로를 건드리지 않는다. */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import * as L from "./layout";
 import { cast, Face } from "./roster";
 import {
@@ -51,6 +51,8 @@ export function Sidebar({
   onSetCasting,
   onCommitName,
   onRemote,
+  onDragPane,
+  pcs,
 }: {
   tabs: Tab[];
   active: number;
@@ -79,6 +81,10 @@ export function Sidebar({
   onCommitName: (id: string, raw: string) => void;
   /** 폰 연결 창을 연다. */
   onRemote?: () => void;
+  /** 칸 줄을 누른 채 끌기 시작한다 — 아래 다른 PC 에 놓으면 그리로 이사한다. */
+  onDragPane?: (id: string) => void;
+  /** 옆칸 맨 아래의 다른 PC(MoveDock). 이 목록은 이 PC 의 칸이라 기기별로 나눠 보인다. */
+  pcs?: ReactNode;
 }) {
   // 이름을 고치다 키로 끝냈으면 뒤따르는 blur 는 흘려보낸다. 그러지 않으면 확정이
   // 두 번 일어나 claude 에 /rename 이 두 번 날아간다.
@@ -120,6 +126,7 @@ export function Sidebar({
             고르게 되고, 정작 "어느 칸에서 무엇이 돌고 있나"는 어디에도 안 보인다.
             탭은 묶음의 제목이고 그 아래가 그 탭의 pane 이다. */}
         <div className="sessions">
+          {pcs ? <div className="side-dev">이 PC</div> : null}
           {tabs.map((t, ti) => {
             const slots = t.layout ? L.rects(t.layout) : [];
             return (
@@ -156,7 +163,10 @@ export function Sidebar({
                       key={sl.id}
                       className={here && t.focus === sl.id ? "prow on" : "prow"}
                       title={nm}
-                      onMouseDown={() => onSelectPane(ti, sl.id)}
+                      onMouseDown={(e) => {
+                        onSelectPane(ti, sl.id);
+                        if (e.button === 0) onDragPane?.(sl.id);
+                      }}
                     >
                       <button
                         className="ico"
@@ -284,6 +294,7 @@ export function Sidebar({
             ) : null}
           </div>
         </div>
+        {pcs}
     </aside>
   );
 }

@@ -336,7 +336,7 @@ export default function App() {
     focusPane(cur?.focus);
   }, [cur?.layout, cur?.focus, active, booted, focusChat, focusPane]);
 
-  // 대화창 칸을 옆칸 아래의 다른 PC 에 놓으면 그 칸이 이사를 보낸다(MoveDock).
+  // 대화창 칸을 옆칸 맨 아래의 다른 PC 에 놓으면 그 칸이 이사를 보낸다(MoveDock).
   const paneDrag = usePaneDrag(cur, patch, dropMove);
 
   /** 대화창 칸의 폴더를 바꾼다. claude 는 대화를 폴더별로 적어 같은 대화를 다른 폴더로 옮길 수 없으므로
@@ -428,10 +428,11 @@ export default function App() {
         onSetCasting={setCasting}
         onCommitName={commitName}
         onRemote={() => setRemoteOpen(true)}
+        onDragPane={(id) => paneDrag.start(id, null)}
+        pcs={<MoveDock from={paneDrag.dragging} over={paneDrag.out} reload={remoteOpen} onLink={() => setRemoteOpen(true)} />}
       />
       {remoteOpen && <RemotePanel onClose={closeRemote} />}
       <MoveOffer known={knownFolders} onOpen={moveIn} />
-      <MoveDock from={paneDrag.dragging} over={paneDrag.out} />
 
       <div className="main">
         {/* 안 보이는 탭도 계속 그려 둔다. 떼어 내면 그 탭의 PTY 가 다 죽는다.
