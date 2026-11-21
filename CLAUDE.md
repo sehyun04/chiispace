@@ -42,6 +42,10 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   짝짓고, 그다음은 옆칸 맨 아래 "다른 PC" 에 그 PC 가 늘 보이고, 대화창 칸(머리줄·옆칸 칸 줄)을 끌어 거기에 놓는다(`/move` 도 같다). 받는 PC 는 같은 레포 폴더가 하나로 정해지면
   묻지 않고 새 탭에 열고, 못 정하면 폴더를 묻는다. 보낸 칸은 받았다는 답 뒤에 닫힌다. 두 PC 가 다 켜져 있고 받는 PC 의 [폰 연결]이 켜져 있어야 한다.
   실제 두 PC(노트북·데스크톱)로는 아직 확인 전이다.
+- **기기 묶음(11월 22일 작업본).** [PC 잇기] 한 번으로 두 PC 가 서로 잇고, 폰은 한 PC 와만 짝지으면 묶인 PC 의 소개장을 받아 다른 PC 에도
+  들어간다(`remote.rs` `group_link`·`group_invite`·`admit`, `ui/group.ts`, `ui/phone-main.tsx`). 옆칸 "다른 PC" 에 켜짐/꺼짐과 그 PC 의 칸이
+  보인다(`ui/usePeers.ts`). [작업 정리 46절](docs/WORKLOG.md#46-11월-22일-추가-기기-묶음--노트북데스크톱폰을-한-번에-잇기). 사용자 노트북은
+  아직 PC 를 잇지 않았다.
 
 - **배포:** 고정 경로 `src-tauri/target/release/chiispace.exe`·`chiispace-cli.exe`. 마지막은 11월 21일 16:12(`bfc8294`, 세션이사 칸 끌어 놓기·묻지 않고 받기까지 든 판, GitHub 릴리스 `build-20261121-161208-bfc8294`). 교체 때 앱은 꺼져 있었다 — 새로 켜면 적용된다.
   이력·백업·해시는 [배포 기록](docs/DEPLOYS.md) 한 곳에만 적는다. **다음 exe 빌드·교체는 사용자가 말할 때만 한다.**
@@ -187,6 +191,10 @@ Codex 대화창의 서브에이전트도 진행 줄과 전체 보기를 쓴다(3
   폰은 뒤늦게 붙으므로 서브에이전트 줄도 통로의 `background_tasks_changed`(지금 상태에 실린다)로 채운다. 실시간 조각(`chat:sub`)만 믿으면
   다시 연 홈 화면 앱에 일하는 서브에이전트가 안 보인다(11월 19일 사용자, 작업 정리 42절).
   시작점은 `ui/phone-main.tsx` 다 — `mobile.tsx` 로 두면 Windows 에서 `Mobile.tsx` 와 같은 파일이다.
+  **기기 묶음(11월 22일 사용자 동의 — 묶음 안 한 대가 털리면 나머지도 열린다고 알린 뒤).** 묶인 PC(`kind: "pc"` 이고 `invite` 열쇠가 있는 기기)는
+  이 방에 새 폰을 소개장으로 들일 수 있다(`admit`). 소개로 들이는 것은 폰뿐이다 — PC 는 사람이 숫자를 견주어 잇는다. 소개장은 이 PC 가 그 PC 에
+  준 열쇠의 HMAC 이고 방·기기 id·공개키·이름을 다 묶는다. 하나라도 빼지 마라. PC 짝이 부를 수 있는 것은 `session_move_offer`·`group_link`·
+  `remote_panes` 뿐이다 — 묶였다고 대화 읽기·말 보내기를 열지 마라. 대화 줄 이벤트는 폰 화면에만 보낸다(`seal_phones`).
 - **세션이사(`session_move.rs`)는 대화 파일과 그 옆 폴더(`<id>/`)만 옮기고 안의 경로를 고쳐 쓰지 않는다.** claude 는 `--resume <id>` 에 모든
   프로젝트 폴더에서 그 id 를 찾아 이어 연다(2.1.328 로 확인). PC 로 짝지은 기기(`kind: "pc"`)는 `session_move_offer` 만 부르고 폰은 못 부른다 —
   받는 PC 에 칸을 새로 여는 길이다. 받는 PC 가 묻지 않고 받는 것은 git 원격이 같은 폴더가 하나로 정해질 때뿐이다(`autoFolder` — 전에 고른 폴더가
@@ -463,7 +471,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기(있는 `.md` 만) · `/export` 저장(칸 폴더의 새 `.md` 만, 덮지 않음) |
 | `src-tauri/src/claude_chat.rs` | `claude -p` stream-json 통로 — 띄우기·줄 주고받기·거두기 |
 | `src-tauri/src/codex_stream.rs` | 새 Codex 칸의 로컬 app-server |
-| `src-tauri/src/remote.rs` · `src-tauri/src/remote_crypto.rs` | 폰 연결 — 중계에 붙기·숫자 비교 짝짓기·암호 통로, 폰이 부를 수 있는 명령 목록, 알려 준 칸의 이벤트만 넘기기, 폰 묶음 파일 · P-256/HKDF/AES-GCM |
+| `src-tauri/src/remote.rs` · `src-tauri/src/remote_crypto.rs` | 폰 연결 — 중계에 붙기·숫자 비교 짝짓기·암호 통로, 폰이 부를 수 있는 명령 목록, 알려 준 칸의 이벤트만 넘기기, 폰 묶음 파일, 기기 묶음(서로 잇기·소개장) · P-256/HKDF/AES-GCM/HMAC |
 | `src-tauri/src/session_move.rs` | 세션이사 — 보낼 꾸러미(대화 파일·옆 폴더·git 상태), 받는 PC 의 [받기] 기다리기·파일 자리 검사·덮지 않기·폴더 후보 |
 | `relay/` | 사용자 Cloudflare 에 올리는 중계(Worker + Durable Object) — PC·폰을 잇고 암호문만 나른다. 검증은 `wrangler dev` 로 이 PC 안에서 |
 | `src-tauri/src/codex_switch.rs` | 터미널 Codex의 새 종료 요약으로 현재 ID 확인·대화창 복귀 |
@@ -494,6 +502,7 @@ claude 가 값이 아니라 **존재 여부**만 보기 때문이다.
 | `ui/StreamBar.tsx` · `ui/FolderChip.tsx` | 터미널 없는 두 칸의 입력바 위 줄 — 모델·추론·권한·게이지·폴더·상태 카드 · 폴더 칩(`fs_dirs`) |
 | `ui/claude-menus.ts` | Claude 대화창의 `/memory` 목록·`/copy` 마지막 답·`/export` 마크다운과 파일 이름(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도(한 변 2000·3.75MB)로 줄여 base64 로 읽기(단위 검증) |
+| `ui/group.ts` · `ui/usePeers.ts` | 기기 묶음 — [PC 잇기] 뒤 서로 잇기 · 옆칸이 묶인 PC 에 늘 붙어 켜짐/꺼짐과 칸 목록 따라가기 |
 | `ui/RemotePanel.tsx` · `ui/remote.css` | PC 쪽 [폰 연결] 창 — 켜기·중계 주소·폰 주소 QR·짝짓기 숫자·짝지은 폰 · 폰이 볼 칸 알리기(`useRemotePanes`) |
 | `mobile.html` · `vite.mobile.config.ts` · `ui/phone-main.tsx` · `ui/Mobile.tsx` · `ui/mobile.css` · `ui/phone-public/` | 폰 화면 — 따로 굽는 묶음(`dist/m`) · 시작점 · 짝짓기·칸 목록·칸 하나(PC 대화창 부품 그대로) · 폰 얼개 · 홈 화면 아이콘 |
 | `ui/MoveCard.tsx` · `ui/MoveOffer.tsx` · `ui/MoveDock.tsx` · `ui/session-move.ts` | 세션이사 — 보내는 칸의 카드(폰과 같은 길로 받는 PC 에 붙음) · 받는 PC 의 받기(묻지 않음·[받기] 창) · 옆칸 맨 아래의 다른 PC(늘 보임) · 꾸러미·안내 글·묻지 않을 조건·끌 수 있는 칸(단위 검증) |

@@ -6,6 +6,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64U;
 use base64::Engine as _;
 use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{PublicKey, SecretKey};
 use sha2::{Digest, Sha256};
@@ -52,6 +53,27 @@ fn sha256(parts: &[&[u8]]) -> [u8; 32] {
         h.update(p);
     }
     h.finalize().into()
+}
+
+/// 기기 묶음의 소개장. 묶인 다른 PC 가 이 PC 의 방에 새 기기(폰)를 들일 때 붙인다. 열쇠는 두 PC 가 이을 때 이 PC 가 그 PC 에
+/// 준 것이라, 그 PC 만 만들 수 있고 이 PC 는 열쇠로 확인만 한다. 방·기기 id·공개키·이름을 다 묶어 하나라도 바꾸면 안 맞는다.
+fn invite_hmac(key: &[u8], room: &str, dev: &str, public: &str, name: &str) -> Hmac<Sha256> {
+    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC 은 어느 길이의 키든 받는다");
+    m.update(format!("chiispace-invite
+{room}
+{dev}
+{public}
+{name}").as_bytes());
+    m
+}
+
+pub fn invite_mac(key: &[u8], room: &str, dev: &str, public: &str, name: &str) -> Vec<u8> {
+    invite_hmac(key, room, dev, public, name).finalize().into_bytes().to_vec()
+}
+
+/// 소개장이 맞는가. 견주기는 걸린 시간으로 새지 않게 한다.
+pub fn invite_ok(key: &[u8], room: &str, dev: &str, public: &str, name: &str, mac: &[u8]) -> bool {
+    invite_hmac(key, room, dev, public, name).verify_slice(mac).is_ok()
 }
 
 pub fn commit_of(phone_pub: &[u8], na: &[u8]) -> [u8; 32] {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync, gzipSync } from "node:zlib";
 import http from "node:http";
@@ -10,9 +10,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
+import { edge, phoneBrowser } from "./phone-browser.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 import { b64u, commitOf, newKey, open, random, sasOf, seal, sessionKeys, unb64u } from "../ui/phone-crypto.ts";
-import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, pcNote, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
+import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, pcNote, pcState, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
 
 test("이사 꾸러미와 두 PC 화면의 안내", () => {
   const git = { origin: "github.com/a/b", branch: "main", head: "abcdef1234", dirty: 2 };
@@ -82,8 +83,14 @@ test("끌어 놓는 이사 — 막는 까닭, 묻지 않고 보내기·받기", 
   assert.deepEqual(got, [["%1", "pc1"]]);
 
   // 옆칸의 PC 줄은 늘 보인다. 끌지 않을 때는 쓰는 법, 끄는 동안은 놓을 수 있는지와 까닭.
-  const note = (o) => pcNote({ dragging: true, movable: true, lock: null, over: false, ...o });
-  assert.deepEqual(pcNote({ dragging: false, movable: false, lock: null, over: false }), { text: "칸을 끌어 여기에 놓으면 이사", lock: false });
+  const note = (o) => pcNote({ dragging: true, movable: true, lock: null, over: false, state: "on", ...o });
+  assert.deepEqual(pcNote({ dragging: false, movable: false, lock: null, over: false, state: "on" }), { text: "켜짐 · 칸을 끌어 놓으면 이사", lock: false });
+  assert.deepEqual(pcNote({ dragging: false, movable: false, lock: null, over: false, state: "off" }), { text: "꺼져 있다", lock: false });
+  // 꺼진 PC 에는 놓지 못한다. 이 PC 를 잊은 PC 는 끌지 않아도 까닭을 보인다.
+  assert.deepEqual(note({ state: "off" }), { text: "꺼져 있다 — 켜져 있어야 옮긴다", lock: true });
+  assert.equal(pcNote({ dragging: false, movable: false, lock: null, over: false, state: "forgot" }).lock, true);
+  assert.deepEqual(note({ state: "wait" }), { text: "여기에 놓는다", lock: false });
+  assert.deepEqual(["open", "pc-offline", "forgot", "connecting", "retrying", undefined].map(pcState), ["on", "off", "forgot", "wait", "wait", "wait"]);
   assert.deepEqual(note({ movable: false }), { text: "Claude 대화창 칸만 옮긴다", lock: true });
   assert.deepEqual(note({ lock: "일하는 중 — 답이 끝난 뒤에 옮긴다" }), { text: "일하는 중 — 답이 끝난 뒤에 옮긴다", lock: true });
   assert.deepEqual(note({}), { text: "여기에 놓는다", lock: false });
@@ -132,7 +139,12 @@ async function fakePc(base, room, secret) {
   });
   let release;
   const held = new Promise((r) => (release = r));
-  const st = { pend: null, sas: null, devices: new Map(), sessions: new Map(), offers: [], error: null };
+  const st = {
+    pend: null, sas: null, devices: new Map(), sessions: new Map(), offers: [], error: null,
+    // 묶기로 받은 것(이 PC 로 들어올 길·소개장 열쇠)과 이 PC 가 준 소개장 열쇠.
+    links: [], invite: null, calls: [],
+    panes: [{ id: "%7", title: "데스크톱 칸", cwd: "D:/desk/project", session: randomUUID(), slug: "usagi", name: "우사기", agent: "claude", alive: true, busy: true, tasks: 0, waiting: 0 }],
+  };
   const send = (p, v) => ws.send(JSON.stringify({ t: "msg", p, d: JSON.stringify(v) }));
   const reply = async (p, s, v) => send(p, { k: "x", n: s.tx, c: await seal(s.k.down, s.tx++, JSON.stringify(v)) });
   async function handle(text) {
@@ -152,6 +164,12 @@ async function fakePc(base, room, secret) {
       st.sas = await sasOf(pub, key.pub, na, st.pend.nb);
       send(p, { k: "sas" });
     } else if (d.k === "hello") {
+      // 묶인 PC(앱)가 써 준 소개장을 든 폰은 들인다 — 앱에 준 열쇠로 다시 계산해 맞을 때만(remote.rs `admit` 과 같은 규칙).
+      const inv = d.invite;
+      if (!st.devices.has(d.dev) && inv && st.invite && inv.by === "0123456789abcdef") {
+        const mac = createHmac("sha256", Buffer.from(st.invite, "hex")).update(`chiispace-invite\n${room}\n${d.dev}\n${inv.pub}\n${inv.name}`).digest();
+        if (b64u(mac) === inv.mac) st.devices.set(d.dev, unb64u(inv.pub));
+      }
       const pub = st.devices.get(d.dev);
       if (!pub) return send(p, { k: "no", why: "unknown" });
       const nb = random(16);
@@ -169,6 +187,13 @@ async function fakePc(base, room, secret) {
       }
       const msg = JSON.parse(await open(s.k.up, s.rx++, c));
       if (msg.t !== "invoke") return;
+      st.calls.push(msg.cmd);
+      if (msg.cmd === "group_link") {
+        st.links.push(msg.args);
+        st.invite = randomBytes(32).toString("hex");
+        return reply(p, s, { t: "ret", i: msg.i, ok: true, v: { invite: st.invite, name: "데스크톱" } });
+      }
+      if (msg.cmd === "remote_panes") return reply(p, s, { t: "ret", i: msg.i, ok: true, v: st.panes });
       if (msg.cmd !== "session_move_offer") return reply(p, s, { t: "ret", i: msg.i, ok: false, e: "모르는 명령" });
       st.offers.push(msg.args);
       await held;
@@ -305,6 +330,8 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
           on: !!side.querySelector('.pc-row.on'),
           link: !!side.querySelector('.pc-link'),
           dragging: !!side.querySelector('.side-pcs.dragging'),
+          state: side.querySelector('.pc-row[data-state]')?.dataset.state ?? null,
+          panes: texts(side, '.pc-pane-nm'),
           here: texts(side, '.side-dev'),
         } : null,
         toast: document.querySelector('.move-toast')?.textContent ?? null,
@@ -411,7 +438,7 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
 
     // 1. PC 로 짝짓기. 받는 PC 의 숫자 확인에 PC 라고 보이고, 짝지은 쪽은 받는 PC 의 이름을 받는다.
     const laptop = await pairAs("노트북", "pc");
-    assert.match(laptop.text, /다른 PC\(노트북\)가 짝지으려 한다/, "PC 짝짓기인 것이 안 보임");
+    assert.match(laptop.text, /다른 PC\(노트북\)가 묶으려 한다/, "PC 짝짓기인 것이 안 보임");
     assert.equal(laptop.paired.name, process.env.COMPUTERNAME || "PC", "받는 PC 가 제 이름을 안 알려 줌");
     assert.ok(await until(() => dom().remote?.devices?.some((t) => t.includes("노트북") && t.includes("PC · 이사 받기")), 50), "짝지은 PC 가 PC 로 안 보임: " + seen());
     const phone = await pairAs("iPhone");
@@ -431,7 +458,10 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     });
     const good = offerOf(S2, [{ rel: `${S2}.jsonl`, gz: gz(incoming) }, { rel: `${S2}/subagents/agent-a7c9ae52f4cfba48c.jsonl`, gz: gz("{}\n") }]);
     await assert.rejects(ph.link.invoke("session_move_offer", good), /폰에서는 부를 수 없는/);
-    await assert.rejects(pc.link.invoke("remote_panes", {}), /이사 보내기만/);
+    // PC 짝은 칸 목록만 본다(옆칸에 보이려고). 대화를 읽거나 칸에 말을 보내지 못한다.
+    assert.ok(Array.isArray(await pc.link.invoke("remote_panes", {})), "PC 짝이 칸 목록을 못 봄");
+    await assert.rejects(pc.link.invoke("claude_transcript_raw", { root: "C:/x", id: S2 }), /PC 짝은/);
+    await assert.rejects(pc.link.invoke("claude_chat_send", { id: "%0", line: "{}" }), /PC 짝은/);
     await assert.rejects(pc.link.invoke("session_move_offer", offerOf(S2, [{ rel: `${S2}/../evil.jsonl`, gz: gz("x") }])), /받을 수 없는 파일 자리/);
     await assert.rejects(pc.link.invoke("session_move_offer", { ...good, v: 2 }), /모르는 이사 꾸러미/);
     assert.equal(dom().offer, null, "막힌 이사에 창이 뜸");
@@ -509,10 +539,22 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.equal(host.st.pend.kind, "pc", "PC 라고 밝히지 않음");
     assert.equal(host.st.pend.name, process.env.COMPUTERNAME || "PC");
     host.confirm();
-    assert.ok(await until(() => dom().remote?.peers?.some((t) => t.includes("데스크톱")), 100), "이은 PC 가 목록에 없음: " + seen());
+    assert.ok(await until(() => dom().remote?.peers?.some((t) => t.includes("데스크톱") && t.includes("서로 이음")), 100), "이은 PC 가 목록에 없거나 한쪽만 이음: " + seen());
+    // 한 번 이으면 서로 묶인다. 그 PC 가 이 PC 로 들어올 길(이 PC 가 만든 기기)과 이 PC 방의 소개장 열쇠를 넘기고, 그 PC 방의 열쇠를 받는다.
+    {
+      const saved = JSON.parse(readFileSync(remoteFile, "utf8"));
+      const back = saved.devices.find((d) => d.id === saved.peers?.[0]?.device);
+      assert.equal(saved.peers[0].invite, host.st.invite, "그 PC 방의 소개장 열쇠를 안 적음");
+      assert.ok(back && back.kind === "pc" && back.invite === host.st.links[0]?.invite, "그 PC 가 들어올 길을 안 만듦: " + JSON.stringify(saved.devices));
+      assert.equal(host.st.links[0].page, page);
+      assert.equal(host.st.links[0].paired.dev, back.id);
+      assert.equal(host.st.links[0].paired.pc, laptop.paired.pc, "이 PC 의 공개키가 아님");
+      assert.ok(host.st.links[0].paired.jwk?.d, "그 PC 가 들어올 키를 안 넘김");
+      assert.ok(!dom().remote.devices.some((t) => t.includes("데스크톱")), "묶인 PC 가 폰 목록에도 보임: " + seen());
+    }
     shot("move-peers");
     // 짝지을 때 받은 컴퓨터 이름은 알아보기 어려워 바꿀 수 있다.
-    commands.push({ in: "remote", button: "이름" });
+    commands.push({ in: "remote", click: ".remote-peers .remote-dev-acts button" });
     await delay(300);
     commands.push({ in: "remote", fill: ".remote-peer-name input", value: "집 데스크톱" });
     await delay(300);
@@ -521,7 +563,9 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.equal(JSON.parse(readFileSync(remoteFile, "utf8")).peers?.[0]?.name, "집 데스크톱", "바꾼 이름을 저장하지 않음");
     commands.push({ in: "remote", click: ".remote-x" });
     // 끌기 전에도 옆칸 맨 아래에 이은 PC 가 늘 보인다.
-    assert.ok(await until(() => !dom().remote && /집 데스크톱칸을 끌어 여기에 놓으면 이사/.test(dom().pcs?.text ?? "") && !dom().pcs.link, 100), "옆칸에 이은 PC 가 안 보임: " + seen());
+    assert.ok(await until(() => !dom().remote && /집 데스크톱켜짐 · 칸을 끌어 놓으면 이사/.test(dom().pcs?.text ?? "") && !dom().pcs.link, 150), "옆칸에 이은 PC 가 켜짐으로 안 보임: " + seen());
+    // 묶인 PC 에 열린 칸도 옆칸에 보인다.
+    assert.ok(await until(() => dom().pcs?.panes?.includes("데스크톱 칸"), 100), "옆칸에 그 PC 의 칸이 안 보임: " + seen());
     shot("move-side");
 
     // 7. /move — 카드가 뜨는 동안 입력바가 잠기고, 받는 PC 의 답을 기다린 뒤 이 칸을 닫는다. 받은 대화가 새 탭으로 열려
@@ -570,6 +614,71 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     assert.equal(host.st.offers[1].session, S4);
     assert.equal(host.st.offers[1].title, "자동 시험");
     assert.ok(await until(() => !dom().pcs?.dragging && !dom().panes?.some((p) => p.id === autoPane), 100), "받은 뒤에 끌어 보낸 칸이 안 닫힘: " + seen());
+
+    // 9. 기기 묶음. 폰은 붙은 PC 에서 묶인 PC 와, 그 PC 가 이 PC 에 준 열쇠로 만든 소개장을 받는다(비밀키는 폰이 만든다).
+    const hmac = (key, roomId, dev, pub, name) => createHmac("sha256", Buffer.from(key, "hex")).update(`chiispace-invite\n${roomId}\n${dev}\n${pub}\n${name}`).digest();
+    const g = await ph.link.invoke("group_pcs", {});
+    const desk = g.pcs.find((x) => x.name === "집 데스크톱");
+    assert.ok(desk && desk.page === `${relayBase}/r/${room2}/` && g.me, "묶인 PC 가 폰에 안 보임: " + JSON.stringify(g));
+    const phoneKey = await newKey();
+    const inv = await ph.link.invoke("group_invite", { peer: desk.id, pub: b64u(phoneKey.pub) });
+    assert.deepEqual([inv.invite.name, inv.invite.by, inv.page, inv.pcName], ["iPhone", "0123456789abcdef", desk.page, "집 데스크톱"]);
+    assert.equal(inv.invite.mac, b64u(hmac(host.st.invite, room2, inv.dev, b64u(phoneKey.pub), "iPhone")), "소개장이 그 PC 의 열쇠로 만든 것이 아님");
+    await assert.rejects(ph.link.invoke("group_link", {}), /폰에서는 부를 수 없는/);
+    // 다른 PC(노트북 흉내)가 이 PC 와 묶으면, 그 PC 의 소개장을 든 새 폰을 숫자 확인 없이 들인다. 소개장이 조금이라도 다르면 안 들인다.
+    const room3 = randomBytes(16).toString("hex");
+    const lapKey = await newKey();
+    const lap = await pc.link.invoke("group_link", { name: "노트북", page: `${relayBase}/r/${room3}/`, paired: { dev: "fedcba9876543210", jwk: lapKey.jwk, pc: b64u(lapKey.pub) }, invite: randomBytes(32).toString("hex") });
+    assert.equal(lap.name, process.env.COMPUTERNAME || "PC");
+    assert.ok(/^[0-9a-f]{64}$/.test(lap.invite), "소개장 열쇠를 안 줌");
+    const tabKey = await newKey();
+    const tabDev = randomBytes(8).toString("hex");
+    const invite = { by: laptop.paired.dev, pub: b64u(tabKey.pub), name: "iPad", mac: b64u(hmac(lap.invite, room, tabDev, b64u(tabKey.pub), "iPad")) };
+    let turnedAway = false;
+    const forged = new Link({ url: wsUrl, paired: { dev: tabDev, jwk: tabKey.jwk, pc: laptop.paired.pc, invite: { ...invite, name: "iPod" } }, onStatus: () => {}, onEvent: () => {}, onUnpaired: () => (turnedAway = true) });
+    links.push(forged);
+    forged.start();
+    assert.ok(await until(() => turnedAway, 100), "이름을 바꾼 소개장으로 들어옴");
+    const tab = open({ dev: tabDev, jwk: tabKey.jwk, pc: laptop.paired.pc, invite });
+    assert.ok(await tab.open(), "소개받은 폰이 안 붙음");
+    assert.ok(Array.isArray(await tab.link.invoke("remote_panes", {})), "소개받은 폰이 칸 목록을 못 봄");
+    const admitted = JSON.parse(readFileSync(remoteFile, "utf8")).devices.find((d) => d.id === tabDev);
+    assert.deepEqual([admitted?.name, admitted?.kind, admitted?.via], ["iPad", undefined, "노트북"], "소개받은 폰을 잘못 적음");
+    assert.ok((await ph.link.invoke("group_pcs", {})).pcs.some((x) => x.name === "노트북" && x.page === `${relayBase}/r/${room3}/`), "새로 묶인 PC 가 폰 목록에 없음");
+
+    // 10. 폰 화면(헤드리스 Edge, 아이폰 크기) 하나에 묶인 PC 가 다 뜬다. 이 PC 와 짝지은 폰으로 열면 묶인 데스크톱에 소개장으로 들어가
+    // 그 PC 의 칸이 보이고, 꺼진 PC(노트북 흉내)는 꺼져 있다고 보인다. 다른 PC 의 칸을 누르면 그 PC 로 묻는다.
+    if (edge) {
+      const browser = await phoneBrowser(path.join(root, "edge-profile"));
+      try {
+        await browser.send("Page.navigate", { url: page });
+        assert.ok(await until(async () => (await browser.evaluate("document.readyState").catch(() => "")) === "complete", 100), "폰 화면이 안 뜸");
+        await browser.evaluate(`localStorage.setItem("chiispace.paired:" + location.pathname, ${JSON.stringify(JSON.stringify(phone.paired))}); location.reload(); true`);
+        const sections = () =>
+          browser
+            .evaluate(`[...document.querySelectorAll('.m-pc')].map(s => ({ name: s.querySelector('.m-pc-name')?.textContent ?? null, state: s.querySelector('.m-pc-state')?.textContent ?? null, rows: [...s.querySelectorAll('.m-row-title')].map(e => e.textContent), hrefs: [...s.querySelectorAll('.m-row')].map(e => e.getAttribute('href')) }))`)
+            .catch(() => []);
+        let list = [];
+        const deskOf = () => list.find((x) => x.name === "집 데스크톱");
+        assert.ok(
+          await until(async () => {
+            list = await sections();
+            return list.length === 3 && deskOf()?.state === "켜짐" && deskOf().rows.includes("데스크톱 칸") && list[0].rows.includes("이사 시험") && list[0].state === "켜짐";
+          }, 300),
+          "폰 한 화면에 묶인 PC 가 안 뜸: " + JSON.stringify(list),
+        );
+        assert.equal(list.find((x) => x.name === "노트북")?.state, "꺼져 있다", "꺼진 PC 를 꺼졌다고 안 보임: " + JSON.stringify(list));
+        assert.equal(deskOf().hrefs[0], `#/pc/${room2}/p/%257`, "다른 PC 의 칸 주소에 그 PC 가 안 붙음");
+        assert.ok([...host.st.devices.keys()].some((k) => k !== "0123456789abcdef"), "소개장을 든 폰을 데스크톱이 안 들임");
+        if (process.env.CHIISPACE_TEST_SCREENSHOT === "1") await browser.shot(path.join(root, "phone-group.png"));
+        const before = host.st.calls.length;
+        await browser.evaluate(`location.hash = ${JSON.stringify(deskOf().hrefs[0])}; true`);
+        assert.ok(await until(async () => (await browser.evaluate("document.querySelector('.m-head .m-title')?.textContent ?? ''").catch(() => "")) === "데스크톱 칸", 100), "다른 PC 의 칸이 안 열림");
+        assert.ok(await until(() => host.st.calls.slice(before).some((c) => c !== "remote_panes" && c !== "group_pcs"), 100), "다른 PC 의 칸 화면이 그 PC 로 묻지 않음: " + JSON.stringify(host.st.calls.slice(before)));
+      } finally {
+        browser.close();
+      }
+    } else console.log("Edge 가 없어 폰 화면 묶음 검증은 건너뜀");
     console.log("세션이사 확인", root);
   } catch (e) {
     writeFileSync(path.join(root, "failure.json"), JSON.stringify({ latest, host: host?.st ?? null }));

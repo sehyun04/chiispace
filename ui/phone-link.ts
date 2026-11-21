@@ -5,8 +5,10 @@
  *  React·DOM 에 기대지 않는다(브라우저와 Node 의 WebSocket·WebCrypto 만 쓴다) — 검증이 Node 에서도 폰 노릇을 한다. */
 import { b64u, commitOf, loadKey, newKey, open, openRaw, random, sasOf, seal, sessionKeys, unb64u } from "./phone-crypto.ts";
 
-/** 짝지은 결과. 폰에만 둔다. `name` 은 짝지은 PC 가 알려 준 제 이름이다(이사 보낼 PC 목록에 쓴다). */
-export type Paired = { dev: string; jwk: JsonWebKey; pc: string; name?: string };
+/** 짝지은 결과. 폰에만 둔다. `name` 은 짝지은 PC 가 알려 준 제 이름이다(이사 보낼 PC 목록에 쓴다).
+ *  `invite` 는 묶인 다른 PC 가 써 준 소개장이다 — 숫자 확인 없이 들어온 PC 에 처음 인사할 때 보인다(remote.rs `admit`). */
+export type Paired = { dev: string; jwk: JsonWebKey; pc: string; name?: string; invite?: Invite };
+export type Invite = { by: string; mac: string; pub: string; name: string };
 export type LinkStatus = "connecting" | "open" | "retrying" | "pc-offline";
 
 /** 웹소켓 한 통에 싣는 암호문 조각. PC 쪽(remote.rs `CHUNK`)과 같다. Cloudflare 웹소켓 한 통의 한도(1MiB) 안이다. */
@@ -247,7 +249,7 @@ export class Link {
   private async hello(ws: WebSocket) {
     const nA = random(16);
     this.hellos.set(ws, nA);
-    ws.send(JSON.stringify({ k: "hello", dev: this.o.paired.dev, na: b64u(nA) }));
+    ws.send(JSON.stringify({ k: "hello", dev: this.o.paired.dev, na: b64u(nA), ...(this.o.paired.invite ? { invite: this.o.paired.invite } : {}) }));
   }
 
   private async receive(ws: WebSocket, m: Msg) {
@@ -301,4 +303,27 @@ export class Link {
       else call?.reject(inner.e);
     } else if (inner.t === "ev") this.o.onEvent(String(inner.e), inner.p);
   }
+}
+
+/** 다른 PC 에 한 번 붙어 명령 하나를 부르고 끊는다(이사 보내기·묶기). 그 PC 가 중계에 없거나 이 PC 를 잊었으면 바로 실패한다. */
+export function callOnce(url: string, paired: Paired, name: string, cmd: string, args: unknown, onStatus?: (s: LinkStatus) => void): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const link = new Link({
+      url,
+      paired,
+      onStatus: (s) => {
+        onStatus?.(s);
+        if (s !== "pc-offline") return;
+        link.stop();
+        reject(new Error(`${name} PC 가 중계에 안 붙어 있다 — 그 PC 의 chiispace 와 [폰 연결]이 켜져 있어야 한다`));
+      },
+      onEvent: () => {},
+      onUnpaired: () => reject(new Error(`${name} PC 가 이 PC 를 잊었다 — [폰 연결]에서 다시 이어 줘`)),
+    });
+    link.start();
+    link
+      .invoke(cmd, args)
+      .then(resolve, reject)
+      .finally(() => link.stop());
+  });
 }

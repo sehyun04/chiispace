@@ -9,6 +9,11 @@
 //! - 폰 화면 파일도 이 앱이 구워 넣은 것(dist/m)을 중계로 내준다. 그래서 앱을 새로 구워도 중계는 다시 올리지 않는다.
 //! - 대화 내용이 지나가므로 어디에도 기록하지 않는다.
 //!
+//! 기기 묶음(11월 22일 사용자 — "폰·데스크톱·노트북 셋을 하나로 묶어"): PC 둘이 [PC 잇기]로 한 번 이으면 서로의 방에 들어갈
+//! 열쇠와 소개장 열쇠를 주고받는다(`group_link`). 폰은 붙은 PC 에서 묶음의 다른 PC 와 소개장을 받아(`group_pcs`·`group_invite`)
+//! 그 PC 에 숫자 확인 없이 들어간다(`admit`). 묶인 PC 하나가 새 폰을 다른 PC 에 들일 수 있다는 뜻이라, 묶음 안 한 대가 털리면
+//! 나머지도 열린다 — 사용자에게 알리고 묶었다. 소개로 들어온 폰은 누가 소개했는지(`via`)를 남겨 [폰 연결]에 보인다.
+//!
 //! 폰 화면은 PC 대화창 부품을 그대로 쓰고 `invoke`·`listen` 만 이 통로로 바꿔 끼운다(ui/remote-shim.ts). 부품을 폰용으로
 //! 따로 짜면 같은 대화를 PC 와 폰이 다르게 그린다.
 
@@ -53,6 +58,9 @@ const PHONE_CONTROLS: &[&str] = &["interrupt"];
 struct Saved {
     #[serde(default)]
     on: bool,
+    /// 이 PC 의 이름. 묶인 PC·폰에 이 이름으로 보인다. 없으면 컴퓨터 이름.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     /// 사용자의 중계 주소(`https://chiispace-relay.<이름>.workers.dev`).
     #[serde(default)]
     relay: Option<String>,
@@ -85,6 +93,12 @@ struct Device {
     /// "pc" 면 대화를 이사 보내 올 수 있는 다른 PC 다. 없으면 폰. 짝지을 때 받는 PC 에서 사람이 PC 인 것을 보고 허락한다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
+    /// 묶인 PC 면, 그 PC 가 이 방에 새 기기를 들일 때 쓰는 소개장 열쇠(hex). 이 PC 가 만들어 그 PC 에 주었다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invite: Option<String>,
+    /// 묶인 PC 의 소개로 들어온 기기면 그 PC 의 이름.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    via: Option<String>,
 }
 
 /// 이사 보낼 다른 PC. 그 PC 의 방에 짝지은 키를 든다(폰이 브라우저에 드는 것과 같다).
@@ -97,6 +111,13 @@ struct Peer {
     /// 짝지은 결과(ui/phone-link.ts `Paired`) — 기기 id, 이 PC 쪽 비밀키(JWK), 그 PC 의 공개키.
     paired: Value,
     added: u64,
+    /// 묶인 PC 면, 이 PC 가 그 PC 의 방에 새 기기를 들일 때 쓰는 소개장 열쇠(hex). 그 PC 가 만들어 주었다. 없으면 예전 판의
+    /// 한쪽 잇기다(이사 보내기만 된다).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invite: Option<String>,
+    /// 그 PC 가 이 PC 의 방에 들어올 때 쓰는 기기 id(`devices` 의 것). 잊을 때 같이 지운다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    device: Option<String>,
 }
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Debug)]
@@ -141,6 +162,8 @@ struct Pairing {
 /// 붙어 있는 폰 화면 하나의 이번 연결.
 struct Session {
     dev: String,
+    /// 묶인 PC 의 연결이다. 칸 목록이 바뀐 것만 알리고 대화 줄은 넘기지 않는다 — 옆칸에 칸 목록만 보인다.
+    pc: bool,
     keys: rc::Keys,
     /// 다음에 받을·보낼 순번. 순번이 IV 라 하나라도 어긋나면 풀리지 않는다.
     rx: u64,
@@ -169,6 +192,8 @@ pub struct Remote(Mutex<Inner>);
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     on: bool,
+    /// 이 PC 의 이름.
+    name: String,
     relay: Option<String>,
     /// 폰에서 열 주소. 중계가 정해져 있을 때만.
     page: Option<String>,
@@ -192,6 +217,9 @@ struct DeviceView {
     name: String,
     added: u64,
     kind: Option<String>,
+    via: Option<String>,
+    /// 묶인 PC 라 이은 PC 목록에 같이 보인다.
+    linked: bool,
 }
 
 #[derive(Serialize)]
@@ -200,6 +228,8 @@ struct PeerView {
     name: String,
     page: String,
     added: u64,
+    /// 서로 이어 묶였다. 아니면 예전 판의 한쪽 잇기다.
+    linked: bool,
 }
 
 fn now_secs() -> u64 {
@@ -208,6 +238,65 @@ fn now_secs() -> u64 {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 이 PC 의 이름. 사용자가 붙인 것이 없으면 컴퓨터 이름.
+fn my_name(saved: &Saved) -> String {
+    saved.name.clone().unwrap_or_else(crate::session_move::computer_name)
+}
+
+pub(crate) fn name_of(app: &AppHandle) -> String {
+    my_name(&app.state::<Remote>().0.lock().unwrap().saved)
+}
+
+/// 사람이 붙인 이름 한 줄. 제어 문자를 빼고 40자까지.
+fn clean_name(name: &str) -> String {
+    name.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string()
+}
+
+/// 방 이름(32자리 hex). 폰 주소(`…/r/<방>/`)의 끝이다.
+fn room_of(page: &str) -> Option<&str> {
+    let room = page.trim_end_matches('/').rsplit_once("/r/")?.1;
+    (room.len() == 32 && room.chars().all(|c| c.is_ascii_hexdigit())).then_some(room)
+}
+
+fn is_dev_id(id: &str) -> bool {
+    id.len() == 16 && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len()).step_by(2).map(|i| s.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok())).collect()
+}
+
+/// 소개장을 든 처음 보는 기기를 들일지. 소개한 쪽이 이 PC 와 묶인 PC 이고, 그 PC 에 준 열쇠로 만든 소개장이 이 방·이 기기·이
+/// 공개키·이 이름에 맞아야 한다. 들이는 기기는 폰이다 — 소개로 PC 를 들이지 않는다(PC 는 사람이 숫자를 견주어 잇는다).
+fn admit(saved: &Saved, dev: &str, invite: &Value) -> Option<Device> {
+    let s = |k: &str| invite.get(k).and_then(Value::as_str);
+    let (by, mac, public, name) = (s("by")?, rc::unb64u(s("mac")?)?, s("pub")?, s("name")?);
+    let room = saved.room.as_deref()?;
+    if !is_dev_id(dev) || saved.devices.iter().any(|d| d.id == dev) || name.is_empty() || name != clean_name(name) {
+        return None;
+    }
+    rc::unb64u(public).and_then(|k| rc::parse_public(&k))?;
+    let member = saved.devices.iter().find(|d| d.id == by && d.kind.as_deref() == Some("pc"))?;
+    let key = unhex(member.invite.as_deref()?)?;
+    rc::invite_ok(&key, room, dev, public, name, &mac).then(|| Device {
+        id: dev.to_string(),
+        name: name.to_string(),
+        key: public.to_string(),
+        added: now_secs(),
+        kind: None,
+        invite: None,
+        via: Some(saved.peers.iter().find(|p| p.device.as_deref() == Some(by)).map_or_else(|| member.name.clone(), |p| p.name.clone())),
+    })
+}
+
+/// 묶음이 바뀌었다. 옆칸의 다른 PC 목록이 다시 읽는다.
+fn group_changed(app: &AppHandle) {
+    let _ = app.emit("remote:peers", ());
 }
 
 /// 사용자가 넣은 중계 주소를 PC 가 붙을 웹소켓 주소로. https 만 받는다 — 이 PC 안의 검증용 중계(http://127.0.0.1)는 예외다.
@@ -378,11 +467,12 @@ impl Remote {
         };
         Status {
             on: inner.saved.on,
+            name: my_name(&inner.saved),
             relay: inner.saved.relay.clone(),
             page,
             connected: inner.connected,
             error: inner.error.clone(),
-            phones: inner.sessions.len(),
+            phones: inner.sessions.values().filter(|s| !s.pc).count(),
             pairing: pairing.is_some(),
             pairing_left: pairing.map_or(0, |p| p.until.saturating_duration_since(Instant::now()).as_secs()),
             sas: sas.as_ref().map(|s| s.0.clone()),
@@ -392,13 +482,20 @@ impl Remote {
                 .saved
                 .devices
                 .iter()
-                .map(|d| DeviceView { id: d.id.clone(), name: d.name.clone(), added: d.added, kind: d.kind.clone() })
+                .map(|d| DeviceView {
+                    id: d.id.clone(),
+                    name: d.name.clone(),
+                    added: d.added,
+                    kind: d.kind.clone(),
+                    via: d.via.clone(),
+                    linked: inner.saved.peers.iter().any(|p| p.device.as_deref() == Some(&d.id)),
+                })
                 .collect(),
             peers: inner
                 .saved
                 .peers
                 .iter()
-                .map(|p| PeerView { id: p.id.clone(), name: p.name.clone(), page: p.page.clone(), added: p.added })
+                .map(|p| PeerView { id: p.id.clone(), name: p.name.clone(), page: p.page.clone(), added: p.added, linked: p.invite.is_some() })
                 .collect(),
         }
     }
@@ -429,9 +526,17 @@ fn seal_to(inner: &mut Inner, phone: &str, text: &str) {
     }
 }
 
-/// 붙어 있는 모든 폰 화면에.
+/// 붙어 있는 모든 화면에(묶인 PC 포함). 칸 목록이 바뀐 것처럼 가벼운 알림만.
 fn seal_all(inner: &mut Inner, text: &str) {
     let phones: Vec<String> = inner.sessions.keys().cloned().collect();
+    for p in phones {
+        seal_to(inner, &p, text);
+    }
+}
+
+/// 붙어 있는 폰 화면에만. 대화 줄은 묶인 PC 에 넘기지 않는다 — 그 PC 는 칸 목록만 보인다.
+fn seal_phones(inner: &mut Inner, text: &str) {
+    let phones: Vec<String> = inner.sessions.iter().filter(|(_, s)| !s.pc).map(|(p, _)| p.clone()).collect();
     for p in phones {
         seal_to(inner, &p, text);
     }
@@ -450,11 +555,11 @@ pub fn boot(app: &AppHandle) {
             let remote = handle.state::<Remote>();
             let mut inner = remote.0.lock().unwrap();
             // 붙은 폰이 없으면 뜯어 보지도 않는다. 이 귀는 PC 대화창의 모든 줄마다 불린다.
-            if inner.sessions.is_empty() {
+            if !inner.sessions.values().any(|s| !s.pc) {
                 return;
             }
             if let Some(text) = event_for(name, e.payload(), &inner.panes) {
-                seal_all(&mut inner, &text);
+                seal_phones(&mut inner, &text);
             }
         });
     }
@@ -741,13 +846,19 @@ fn on_phone(app: &AppHandle, phone: &str, m: &Value) {
         Some("hello") => {
             let Some(pc) = Remote::pc_key(&inner) else { return };
             let dev = s("dev");
+            // 처음 보는 기기가 묶인 PC 의 소개장을 들고 왔으면 들인다.
+            if let Some(device) = m.get("invite").and_then(|inv| admit(&inner.saved, &dev, inv)) {
+                inner.saved.devices.push(device);
+                Remote::save(&inner);
+            }
             let found = inner.saved.devices.iter().find(|d| d.id == dev).and_then(|d| rc::unb64u(&d.key)).and_then(|k| rc::parse_public(&k));
             let (Some(phone_pub), Some(na)) = (found, bytes("na").filter(|n| n.len() == 16)) else {
                 return plain(&inner, phone, json!({ "k": "no", "why": "unknown" }));
             };
             let Ok(nb) = rc::random::<16>() else { return };
             let keys = rc::session_keys(&pc, &phone_pub, &na, &nb, &dev);
-            inner.sessions.insert(phone.to_string(), Session { dev, keys, rx: 0, tx: 0, parts: Vec::new() });
+            let is_pc = inner.saved.devices.iter().any(|d| d.id == dev && d.kind.as_deref() == Some("pc"));
+            inner.sessions.insert(phone.to_string(), Session { dev, pc: is_pc, keys, rx: 0, tx: 0, parts: Vec::new() });
             plain(&inner, phone, json!({ "k": "hi", "nb": rc::b64u(&nb), "v": phone_build(app) }));
         }
         Some("x") => {
@@ -780,18 +891,20 @@ fn on_message(app: &AppHandle, phone: &str, text: &str) {
             let remote = app.state::<Remote>();
             let inner = remote.0.lock().unwrap();
             let Some(s) = inner.sessions.get(&phone) else { return };
-            inner.saved.devices.iter().find(|d| d.id == s.dev).map(|d| (d.kind.clone(), d.name.clone()))
+            inner.saved.devices.iter().find(|d| d.id == s.dev).map(|d| (d.id.clone(), d.kind.clone(), d.name.clone()))
         };
-        let Some((kind, name)) = from else { return };
-        // PC 로 짝지은 기기는 이사 보내기만 부른다. 폰은 이사 명령을 못 부른다 — 받는 PC 에 칸을 새로 여는 길이라
-        // 폰에 열지 않은 권한이다. 그 길도 받는 PC 에서 사람이 [받기]를 눌러야 파일을 쓴다.
+        let Some((dev, kind, name)) = from else { return };
+        // PC 로 짝지은 기기는 이사 보내기·묶기·칸 목록 보기만 부른다. 폰은 이사 명령을 못 부른다 — 받는 PC 에 칸을 새로 여는
+        // 길이라 폰에 열지 않은 권한이다. 묶인 PC 라도 이 PC 의 대화를 읽거나 칸에 말을 보내지 못한다(옆칸에 칸 목록만 보인다).
         let out = if kind.as_deref() == Some("pc") {
             match cmd.as_str() {
                 "session_move_offer" => crate::session_move::offer(&app, &name, &args),
-                _ => Err(format!("PC 짝은 이사 보내기만 부른다: {cmd}")),
+                "group_link" => group_link(&app, &dev, &args),
+                "remote_panes" => dispatch(&app, &cmd, &args, &name),
+                _ => Err(format!("PC 짝은 이사 보내기·묶기·칸 목록만 부른다: {cmd}")),
             }
         } else {
-            dispatch(&app, &cmd, &args)
+            dispatch(&app, &cmd, &args, &name)
         };
         let reply = match out {
             Ok(v) => json!({ "t": "ret", "i": id, "ok": true, "v": v }),
@@ -861,11 +974,11 @@ pub fn remote_confirm(app: AppHandle, ok: bool) -> Status {
         if let Some(Pend { phone, name, kind, sas: Some((_, key)), .. }) = pend {
             if ok {
                 let id = rc::random::<8>().map(|b| hex(&b)).unwrap_or_default();
-                inner.saved.devices.push(Device { id: id.clone(), name, key: rc::b64u(&key), added: now_secs(), kind });
+                inner.saved.devices.push(Device { id: id.clone(), name, key: rc::b64u(&key), added: now_secs(), kind, invite: None, via: None });
                 Remote::save(&inner);
                 inner.pairing = None;
                 // 이 PC 의 이름도 준다. 이사 보낼 PC 목록에 그 이름으로 남는다(폰은 쓰지 않는다).
-                plain(&inner, &phone, json!({ "k": "paired", "dev": id, "name": crate::session_move::this_pc_name() }));
+                plain(&inner, &phone, json!({ "k": "paired", "dev": id, "name": my_name(&inner.saved) }));
             } else {
                 plain(&inner, &phone, json!({ "k": "no", "why": "PC 에서 숫자가 다르다고 했다" }));
             }
@@ -880,14 +993,22 @@ pub fn remote_forget(app: AppHandle, device: String) -> Status {
     {
         let remote = app.state::<Remote>();
         let mut inner = remote.0.lock().unwrap();
-        inner.saved.devices.retain(|d| d.id != device);
+        forget_device(&mut inner, &device);
+        // 묶인 PC 를 잊으면 그 PC 로 보내는 길도 같이 잊는다. 한쪽만 남으면 목록에 반쪽짜리 PC 가 남는다.
+        inner.saved.peers.retain(|p| p.device.as_deref() != Some(&device));
         Remote::save(&inner);
-        let gone: Vec<String> = inner.sessions.iter().filter(|(_, s)| s.dev == device).map(|(p, _)| p.clone()).collect();
-        for p in gone {
-            kick(&mut inner, &p);
-        }
     }
+    group_changed(&app);
     app.state::<Remote>().status()
+}
+
+/// 기기를 지우고 붙어 있던 화면도 끊는다.
+fn forget_device(inner: &mut Inner, device: &str) {
+    inner.saved.devices.retain(|d| d.id != device);
+    let gone: Vec<String> = inner.sessions.iter().filter(|(_, s)| s.dev == device).map(|(p, _)| p.clone()).collect();
+    for p in gone {
+        kick(inner, &p);
+    }
 }
 
 /// 이사 보낼 PC 의 폰 주소(`https://중계/r/<방>/`). 중계 주소 규칙(`relay_ws`)과 같고 뒤에 방 이름이 붙는다.
@@ -899,21 +1020,115 @@ fn peer_page(page: &str) -> Option<String> {
 
 /// 다른 PC 의 방에 짝지은 것을 적어 둔다(ui/session-move.ts 가 짝지은 뒤 부른다). 같은 PC 를 다시 이으면 앞 짝은 버린다.
 #[tauri::command]
-pub fn remote_peer_add(app: AppHandle, name: String, page: String, paired: Value) -> Result<Status, String> {
+pub fn remote_peer_add(app: AppHandle, name: String, page: String, paired: Value, invite: Option<String>, device: Option<String>) -> Result<Status, String> {
     let page = peer_page(&page).ok_or("그 PC 의 [폰 연결]에 보이는 폰 주소(https://…/r/…/)여야 한다")?;
     let shaped = paired["dev"].as_str().is_some_and(|d| d.len() == 16 && d.chars().all(|c| c.is_ascii_hexdigit()))
         && paired["jwk"].is_object()
         && paired["pc"].as_str().and_then(rc::unb64u).and_then(|k| rc::parse_public(&k)).is_some();
-    if !shaped {
+    if !shaped || invite.as_deref().is_some_and(|k| k.len() != 64 || unhex(k).is_none()) {
         return Err("짝지은 값이 잘못됐다".into());
     }
-    let name: String = name.chars().filter(|c| !c.is_control()).take(40).collect::<String>().trim().to_string();
+    let name = clean_name(&name);
     {
         let remote = app.state::<Remote>();
         let mut inner = remote.0.lock().unwrap();
+        // 묶을 때 이 PC 의 방에 그 PC 몫으로 만든 기기다. 없는 기기면 묶지 않은 것으로 둔다.
+        let device = device.filter(|d| inner.saved.devices.iter().any(|x| &x.id == d && x.kind.as_deref() == Some("pc")));
+        // 같은 PC 를 다시 이으면 앞 짝이 그 PC 몫으로 만든 기기도 버린다.
+        let old: Vec<String> = inner.saved.peers.iter().filter(|p| p.page == page).filter_map(|p| p.device.clone()).filter(|d| device.as_ref() != Some(d)).collect();
+        for d in old {
+            forget_device(&mut inner, &d);
+        }
         inner.saved.peers.retain(|p| p.page != page);
         let id = rc::random::<8>().map(|b| hex(&b)).map_err(|_| "난수를 못 만들었다".to_string())?;
-        inner.saved.peers.push(Peer { id, name: if name.is_empty() { "PC".into() } else { name }, page, paired, added: now_secs() });
+        let invite = invite.filter(|_| device.is_some());
+        inner.saved.peers.push(Peer { id, name: if name.is_empty() { "PC".into() } else { name }, page, paired, added: now_secs(), invite, device });
+        Remote::save(&inner);
+    }
+    group_changed(&app);
+    Ok(app.state::<Remote>().status())
+}
+
+/// 다른 PC 와 묶기 — 이 PC 쪽 준비. 그 PC 가 이 PC 의 방에 들어올 기기와 소개장 열쇠를 만든다. 열쇠쌍은 웹뷰가 만들어
+/// 공개키만 준다(비밀키는 웹뷰가 그 PC 에 암호 통로로 넘긴다 — 이 방에만 쓰는 키라 이 PC 가 알아도 잃는 것이 없다).
+/// 이 PC 의 웹뷰만 부른다(폰·PC 짝 명령 목록에 없다).
+#[tauri::command]
+pub fn remote_link_prepare(app: AppHandle, name: String, public: String) -> Result<Value, String> {
+    rc::unb64u(&public).and_then(|k| rc::parse_public(&k)).ok_or("공개키가 잘못됐다")?;
+    let remote = app.state::<Remote>();
+    let mut inner = remote.0.lock().unwrap();
+    let (Some(relay), Some(room), Some(pc)) = (inner.saved.relay.clone(), inner.saved.room.clone(), Remote::pc_key(&inner)) else {
+        return Err("이 PC 의 중계 주소가 없다 — [폰 연결]에 중계 주소를 넣어 줘".into());
+    };
+    let dev = rc::random::<8>().map(|b| hex(&b))?;
+    let invite = rc::random::<32>().map(|b| hex(&b))?;
+    let name = clean_name(&name);
+    inner.saved.devices.push(Device {
+        id: dev.clone(),
+        name: if name.is_empty() { "PC".into() } else { name },
+        key: public,
+        added: now_secs(),
+        kind: Some("pc".into()),
+        invite: Some(invite.clone()),
+        via: None,
+    });
+    Remote::save(&inner);
+    Ok(json!({
+        "dev": dev,
+        "page": format!("{}/r/{room}/", relay.trim_end_matches('/')),
+        "pc": rc::b64u(&rc::public_of(&pc)),
+        "invite": invite,
+        "name": my_name(&inner.saved),
+    }))
+}
+
+/// 다른 PC 와 묶기 — 그 PC 가 짝지은 통로로 부른다(PC 짝만). 그 PC 로 가는 길(그 PC 가 만든 기기 키)과 그 PC 방의 소개장
+/// 열쇠를 받아 적고, 이 PC 방의 소개장 열쇠를 만들어 돌려준다.
+fn group_link(app: &AppHandle, dev: &str, args: &Value) -> Result<Value, String> {
+    let page = args["page"].as_str().and_then(peer_page).ok_or("그 PC 의 폰 주소가 잘못됐다")?;
+    let paired = args["paired"].clone();
+    let shaped = paired["dev"].as_str().is_some_and(is_dev_id)
+        && paired["jwk"].is_object()
+        && paired["pc"].as_str().and_then(rc::unb64u).and_then(|k| rc::parse_public(&k)).is_some();
+    let theirs = args["invite"].as_str().filter(|k| k.len() == 64 && unhex(k).is_some()).ok_or("소개장 열쇠가 잘못됐다")?;
+    if !shaped {
+        return Err("짝지은 값이 잘못됐다".into());
+    }
+    let mine = rc::random::<32>().map(|b| hex(&b))?;
+    let me = {
+        let remote = app.state::<Remote>();
+        let mut inner = remote.0.lock().unwrap();
+        if room_of(&page) == inner.saved.room.as_deref() {
+            return Err("이 PC 자신과는 묶지 않는다".into());
+        }
+        let device = inner.saved.devices.iter_mut().find(|d| d.id == dev).ok_or("짝지은 PC 가 아니다")?;
+        device.invite = Some(mine.clone());
+        let name = device.name.clone();
+        let old: Vec<String> = inner.saved.peers.iter().filter(|p| p.page == page).filter_map(|p| p.device.clone()).filter(|d| d != dev).collect();
+        for d in old {
+            forget_device(&mut inner, &d);
+        }
+        inner.saved.peers.retain(|p| p.page != page && p.device.as_deref() != Some(dev));
+        let id = rc::random::<8>().map(|b| hex(&b))?;
+        inner.saved.peers.push(Peer { id, name, page, paired, added: now_secs(), invite: Some(theirs.to_string()), device: Some(dev.to_string()) });
+        Remote::save(&inner);
+        my_name(&inner.saved)
+    };
+    group_changed(app);
+    Ok(json!({ "invite": mine, "name": me }))
+}
+
+/// 이 PC 의 이름을 바꾼다. 묶인 PC·폰에 보이는 이름이다(다음에 이을 때·폰이 다시 붙을 때부터).
+#[tauri::command]
+pub fn remote_set_name(app: AppHandle, name: String) -> Result<Status, String> {
+    let name = clean_name(&name);
+    if name.is_empty() {
+        return Err("이름을 넣어 줘".into());
+    }
+    {
+        let remote = app.state::<Remote>();
+        let mut inner = remote.0.lock().unwrap();
+        inner.saved.name = Some(name);
         Remote::save(&inner);
     }
     Ok(app.state::<Remote>().status())
@@ -924,9 +1139,15 @@ pub fn remote_peer_forget(app: AppHandle, peer: String) -> Status {
     {
         let remote = app.state::<Remote>();
         let mut inner = remote.0.lock().unwrap();
+        let device = inner.saved.peers.iter().find(|p| p.id == peer).and_then(|p| p.device.clone());
         inner.saved.peers.retain(|p| p.id != peer);
+        // 묶인 PC 면 그 PC 가 이 PC 로 들어오는 길도 같이 잊는다.
+        if let Some(d) = device {
+            forget_device(&mut inner, &d);
+        }
         Remote::save(&inner);
     }
+    group_changed(&app);
     app.state::<Remote>().status()
 }
 
@@ -944,6 +1165,7 @@ pub fn remote_peer_rename(app: AppHandle, peer: String, name: String) -> Result<
         p.name = name;
         Remote::save(&inner);
     }
+    group_changed(&app);
     Ok(app.state::<Remote>().status())
 }
 
@@ -984,14 +1206,14 @@ pub fn remote_publish(app: AppHandle, panes: Vec<PaneInfo>) {
 pub(crate) fn codex_event(app: &AppHandle, id: &str, session: &str, run: &str, seq: u64, message: &Value) {
     let remote = app.state::<Remote>();
     let mut inner = remote.0.lock().unwrap();
-    if inner.sessions.is_empty() || !inner.panes.iter().any(|p| p.agent == Agent::Codex && p.id == id && p.session == session) {
+    if !inner.sessions.values().any(|s| !s.pc) || !inner.panes.iter().any(|p| p.agent == Agent::Codex && p.id == id && p.session == session) {
         return;
     }
     let exit = json!({ "method": "chiispace/exit" });
     let message = if message["method"] == "chiispace/exit" { &exit } else { message };
     let text = json!({ "t": "ev", "e": "remote:codex", "p": { "id": id, "session": session, "run": run, "seq": seq, "message": message } }).to_string();
     if text.len() <= MAX_MESSAGE / 2 {
-        seal_all(&mut inner, &text);
+        seal_phones(&mut inner, &text);
     }
 }
 
@@ -1091,7 +1313,8 @@ pub fn remote_codex_reply(app: AppHandle, call: u64, value: Option<Value>, error
     }
 }
 
-fn dispatch(app: &AppHandle, cmd: &str, args: &Value) -> Result<Value, String> {
+/// `from` 은 부른 기기의 이름이다(소개장에 그 이름을 적는다).
+fn dispatch(app: &AppHandle, cmd: &str, args: &Value, from: &str) -> Result<Value, String> {
     let panes = app.state::<Remote>().0.lock().unwrap().panes.clone();
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let pane = |id: &str, agent| panes.iter().find(|p| p.id == id && p.agent == agent).ok_or_else(|| "PC 에 없는 칸이다".to_string());
@@ -1116,6 +1339,35 @@ fn dispatch(app: &AppHandle, cmd: &str, args: &Value) -> Result<Value, String> {
                 PhonePane { info: p.clone(), alive: snap.alive, busy: snap.busy, tasks: snap.agents, waiting: snap.prompts.len() }
             })
             .collect::<Vec<_>>())),
+        // 묶음의 다른 PC. 폰이 이 목록으로 그 PC 들에 들어갈 소개장을 받는다.
+        "group_pcs" => {
+            let remote = app.state::<Remote>();
+            let inner = remote.0.lock().unwrap();
+            let pcs: Vec<Value> = inner
+                .saved
+                .peers
+                .iter()
+                .filter(|p| p.invite.is_some())
+                .map(|p| json!({ "id": p.id, "name": p.name, "page": p.page, "pc": p.paired["pc"] }))
+                .collect();
+            // `named` 면 이 PC 에서 사람이 붙인 이름이다 — 폰은 다른 PC 가 부르는 이름보다 이것을 먼저 쓴다.
+            Ok(json!({ "me": my_name(&inner.saved), "named": inner.saved.name.is_some(), "pcs": pcs }))
+        }
+        // 묶인 PC 에 들어갈 소개장. 폰이 그 PC 몫으로 만든 공개키에 붙인다 — 비밀키는 폰에만 있다.
+        "group_invite" => {
+            let public = s("pub");
+            rc::unb64u(&public).and_then(|k| rc::parse_public(&k)).ok_or("공개키가 잘못됐다")?;
+            let remote = app.state::<Remote>();
+            let inner = remote.0.lock().unwrap();
+            let p = inner.saved.peers.iter().find(|p| p.id == s("peer")).ok_or("묶인 PC 가 아니다")?;
+            let key = p.invite.as_deref().and_then(unhex).ok_or("묶인 PC 가 아니다")?;
+            let room = room_of(&p.page).ok_or("그 PC 의 주소가 잘못됐다")?;
+            let by = p.paired["dev"].as_str().unwrap_or_default();
+            let dev = rc::random::<8>().map(|b| hex(&b))?;
+            let name = clean_name(from);
+            let mac = rc::invite_mac(&key, room, &dev, &public, &name);
+            Ok(json!({ "dev": dev, "pc": p.paired["pc"], "page": p.page, "pcName": p.name, "invite": { "by": by, "mac": rc::b64u(&mac), "pub": public, "name": name } }))
+        }
         "claude_chat_snapshot" => {
             let p = pane(&s("id"), Agent::Claude)?;
             Ok(json!(crate::claude_chat::snapshot(app, &p.id)))
@@ -1251,10 +1503,48 @@ mod tests {
         assert!(event_for("claude:chat", "not json", &p).is_none());
     }
 
+    #[test]
+    fn a_phone_gets_in_only_with_an_invite_from_a_linked_pc() {
+        let room = "1b0016dbe43537733003e79293f26bd9";
+        let key = [7u8; 32];
+        let member = Device { id: "aaaaaaaaaaaaaaaa".into(), name: "노트북".into(), key: String::new(), added: 0, kind: Some("pc".into()), invite: Some(hex(&key)), via: None };
+        let saved = Saved { room: Some(room.into()), devices: vec![member.clone()], ..Default::default() };
+        let public = rc::b64u(&rc::public_of(&rc::new_secret().unwrap()));
+        let dev = "0123456789abcdef";
+        let inv = |room: &str, dev: &str, name: &str, by: &str| {
+            json!({ "by": by, "mac": rc::b64u(&rc::invite_mac(&key, room, dev, &public, name)), "pub": public, "name": name }).as_object().unwrap().clone()
+        };
+        let ok = admit(&saved, dev, &Value::Object(inv(room, dev, "iPhone", "aaaaaaaaaaaaaaaa"))).expect("묶인 PC 의 소개장");
+        assert_eq!((ok.name.as_str(), ok.kind.as_deref(), ok.via.as_deref()), ("iPhone", None, Some("노트북")));
+        // 다른 방·다른 기기 id 로 만든 소개장, 이름을 바꾼 소개장은 안 맞는다.
+        assert!(admit(&saved, dev, &Value::Object(inv("ffffffffffffffffffffffffffffffff", dev, "iPhone", "aaaaaaaaaaaaaaaa"))).is_none());
+        assert!(admit(&saved, "fedcba9876543210", &Value::Object(inv(room, dev, "iPhone", "aaaaaaaaaaaaaaaa"))).is_none());
+        let mut renamed = inv(room, dev, "iPhone", "aaaaaaaaaaaaaaaa");
+        renamed.insert("name".into(), json!("iPad"));
+        assert!(admit(&saved, dev, &Value::Object(renamed)).is_none());
+        // 묶이지 않은 기기(폰, 소개장 열쇠 없는 PC)가 만든 소개장은 받지 않는다. 이미 있는 기기 id 도 다시 들이지 않는다.
+        assert!(admit(&saved, dev, &Value::Object(inv(room, dev, "iPhone", "bbbbbbbbbbbbbbbb"))).is_none());
+        let phone = Saved { devices: vec![Device { kind: None, ..member.clone() }], ..saved.clone() };
+        assert!(admit(&phone, dev, &Value::Object(inv(room, dev, "iPhone", "aaaaaaaaaaaaaaaa"))).is_none());
+        let unlinked = Saved { devices: vec![Device { invite: None, ..member.clone() }], ..saved.clone() };
+        assert!(admit(&unlinked, dev, &Value::Object(inv(room, dev, "iPhone", "aaaaaaaaaaaaaaaa"))).is_none());
+        assert!(admit(&saved, "aaaaaaaaaaaaaaaa", &Value::Object(inv(room, "aaaaaaaaaaaaaaaa", "iPhone", "aaaaaaaaaaaaaaaa"))).is_none());
+    }
+
+    #[test]
+    fn rooms_and_keys_are_read_strictly() {
+        assert_eq!(room_of("https://relay.me.workers.dev/r/1b0016dbe43537733003e79293f26bd9/"), Some("1b0016dbe43537733003e79293f26bd9"));
+        assert_eq!(room_of("https://relay.me.workers.dev/r/short/"), None);
+        assert_eq!(unhex("0aff"), Some(vec![0x0a, 0xff]));
+        assert_eq!(unhex("0af"), None);
+        assert_eq!(unhex("zz"), None);
+        assert!(is_dev_id("0123456789abcdef") && !is_dev_id("0123456789abcde") && !is_dev_id("0123456789abcdeg"));
+    }
+
     fn pair_of_sessions() -> (Session, Session) {
         let pc = rc::new_secret().unwrap();
         let phone = rc::new_secret().unwrap();
-        let mk = || Session { dev: "d".into(), keys: rc::session_keys(&pc, &phone.public_key(), &[1; 16], &[2; 16], "d"), rx: 0, tx: 0, parts: Vec::new() };
+        let mk = || Session { dev: "d".into(), pc: false, keys: rc::session_keys(&pc, &phone.public_key(), &[1; 16], &[2; 16], "d"), rx: 0, tx: 0, parts: Vec::new() };
         (mk(), mk())
     }
 

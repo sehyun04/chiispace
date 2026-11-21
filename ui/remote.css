@@ -301,6 +301,14 @@
 .remote-peer-form input:focus {
   box-shadow: 0 0 0 2px var(--sky) inset;
 }
+/* 이 PC 이름. 묶인 PC·폰에 보이는 이름이라 창 맨 위에 둔다. */
+.remote-self {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
 .remote-tag {
   margin-left: 4px;
   padding: 1px 6px;
@@ -317,7 +325,8 @@
   display: flex;
   gap: 6px;
 }
-.remote-peer-name input {
+.remote-peer-name input,
+.remote-self-form input {
   flex: 1;
   min-width: 0;
   padding: 5px 9px;
@@ -347,9 +356,8 @@
   border-top: 1px solid var(--line);
 }
 .pc-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+  display: grid;
+  gap: 3px;
   min-width: 0;
   padding: 5px 8px;
   border: none;
@@ -359,7 +367,14 @@
   font: inherit;
   text-align: left;
 }
+.pc-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
 .pc-ico {
+  position: relative;
   flex: none;
   display: grid;
   place-items: center;
@@ -368,6 +383,62 @@
   border-radius: 8px;
   background: var(--paper);
   color: var(--ink-2);
+}
+/* 그 PC 가 지금 켜져 있는가. 끌기 전에 놓을 수 있는 PC 인지 알아보게 한다. */
+.pc-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--card);
+  background: var(--line);
+}
+.pc-dot.on {
+  background: var(--sky);
+}
+.pc-dot.wait {
+  background: var(--sun);
+}
+.pc-dot.forgot {
+  background: var(--bad);
+}
+/* 그 PC 에 열린 칸. 읽기만 하는 목록이라 칸 줄(.prow)보다 작게 둔다. */
+.pc-panes {
+  display: grid;
+  gap: 1px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding-left: 37px;
+}
+.pc-pane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.pc-pane .face {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.pc-pane-nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-pane .work {
+  margin-left: auto;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sun);
+  box-shadow: 0 0 0 2px var(--outline);
 }
 .side-pcs.dragging .pc-row {
   box-shadow: 0 0 0 2px var(--line) inset;

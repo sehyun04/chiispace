@@ -55,6 +55,8 @@ sha2 = "0.10"
 flate2 = "1"
 p256 = { version = "0.13", default-features = false, features = ["ecdh", "std"] }
 hkdf = "0.12"
+# 기기 묶음의 소개장(remote_crypto.rs `invite_mac`). hkdf 가 이미 쓰는 판이다.
+hmac = "0.12"
 aes-gcm = "0.10"
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 

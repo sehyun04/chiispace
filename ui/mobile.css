@@ -203,6 +203,46 @@ body {
   color: var(--bad);
 }
 
+/* 묶인 PC 가 여럿이면 PC 마다 묶는다. 머리글은 PC 이름과 켜짐/꺼짐 — 꺼진 PC 의 칸은 못 쓰니 먼저 보여야 한다. */
+.m-pc + .m-pc {
+  margin-top: 14px;
+}
+.m-pc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 8px;
+}
+.m-pc-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+.m-pc-state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.m-pc-state.on {
+  background: #e4f1f8;
+  color: var(--link);
+}
+.m-pc-state.off {
+  background: #f8e4e2;
+  color: var(--bad);
+}
+.m-pc-head ~ .m-empty {
+  padding: 14px 16px;
+}
 .m-empty {
   margin: 0;
   padding: 36px 24px;

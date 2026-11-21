@@ -2,7 +2,7 @@
  *  phone-link.ts)로 붙어 꾸러미를 넘기고, 받는 PC 가 받았다는 답이 오면 이 칸을 닫는다. 받는 쪽은 src-tauri/src/session_move.rs. */
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Link, socketUrl, type LinkStatus, type Paired } from "./phone-link";
+import { callOnce, socketUrl, type LinkStatus, type Paired } from "./phone-link";
 import { askBeforeSend, moveFailure, moveOffer, senderNotes, sizeLabel, type Pack } from "./session-move";
 
 export type { Peer } from "./session-move";
@@ -10,25 +10,7 @@ export type { Peer } from "./session-move";
 /** 그 PC 에 붙어 이사 꾸러미를 넘긴다. 받는 PC 의 답(받음·거절·시간 넘김)이 올 때까지 기다린다. */
 async function sendMove(peer: string, offer: unknown, onStatus: (s: LinkStatus) => void): Promise<{ session: string; cwd: string }> {
   const key = await invoke<{ name: string; page: string; paired: Paired }>("remote_peer_key", { peer });
-  return new Promise((resolve, reject) => {
-    const link = new Link({
-      url: socketUrl(key.page),
-      paired: key.paired,
-      onStatus: (s) => {
-        onStatus(s);
-        if (s !== "pc-offline") return;
-        link.stop();
-        reject(new Error(`${key.name} PC 가 중계에 안 붙어 있다 — 그 PC 의 chiispace 와 [폰 연결]이 켜져 있어야 한다`));
-      },
-      onEvent: () => {},
-      onUnpaired: () => reject(new Error(`${key.name} PC 가 이 PC 를 잊었다 — [폰 연결]에서 다시 이어 줘`)),
-    });
-    link.start();
-    link
-      .invoke("session_move_offer", offer)
-      .then((v) => resolve(v as { session: string; cwd: string }), reject)
-      .finally(() => link.stop());
-  });
+  return (await callOnce(socketUrl(key.page), key.paired, key.name, "session_move_offer", offer, onStatus)) as { session: string; cwd: string };
 }
 
 type Step = "packing" | "ready" | "sending" | "failed" | "unsure";

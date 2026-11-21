@@ -60,7 +60,8 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `ui/ClaudeStreamPane.tsx`, `ui/claude-stream.ts`, `ui/StreamBar.tsx`, `ui/FolderChip.tsx` | 터미널 없는 Claude 칸 · 통로 해석 · 두 칸 공통 입력바 위 줄 · 폴더 칩 |
 | `ui/claude-menus.ts` | Claude 대화창의 `/memory`·`/copy`·`/export` 값 다루기(단위 검증) |
 | `ui/images.ts` | 입력바에 붙인 그림을 claude 터미널판 한도로 줄여 base64 로 읽기(단위 검증) |
-| `ui/RemotePanel.tsx` | PC 쪽 [폰 연결] 창(중계 주소·QR·짝짓기·[PC 잇기])과 폰이 볼 칸 알리기 |
+| `ui/RemotePanel.tsx` | PC 쪽 [폰 연결] 창(이 PC 이름·중계 주소·QR·짝짓기·[PC 잇기])과 폰이 볼 칸 알리기 |
+| `ui/group.ts`, `ui/usePeers.ts` | 기기 묶음 — [PC 잇기] 뒤 서로 잇기(키·소개장 열쇠 주고받기) · 옆칸이 묶인 PC 에 늘 붙어 켜짐/꺼짐과 칸 목록 따라가기 |
 | `ui/MoveCard.tsx`, `ui/MoveOffer.tsx`, `ui/MoveDock.tsx`, `ui/session-move.ts` | 세션이사 — 보내는 칸의 카드, 받는 PC 의 받기(같은 레포면 묻지 않음)·[받기] 창, 옆칸 맨 아래의 다른 PC(늘 보이는 놓을 곳·잇기 길), 꾸러미·안내 글·묻지 않을 조건 |
 | `mobile.html`, `vite.mobile.config.ts`, `ui/phone-main.tsx`, `ui/Mobile.tsx`, `ui/phone-link.ts`, `ui/phone-crypto.ts`, `ui/remote-shim.ts`, `ui/phone.ts` | 폰 화면 — 따로 굽는 묶음(`dist/m`), PC 대화창 부품을 그대로 쓰고 `invoke`·`listen` 만 암호 통로로 바꿔 끼운다 |
 | `ui/usage.ts`, `ui/usePlanUsage.ts` | 구독 사용 한도·문맥 게이지 값 · 모든 Claude 칸이 같이 보는 한도 조회 |
@@ -140,6 +141,11 @@ chiispace 가 떠 있어야 한다. 짝지은 폰은 [폰 연결]에서 잊을 �
 한 번 묻는다 — 대화만 가고 그 변경은 안 간다. 받는 PC 는 같은 git 원격의 폴더가 하나로 정해지면(전에 고른 폴더 또는 열린 탭 가운데 그 레포
 하나) 묻지 않고 받아 새 탭에 열고 한 줄로 알린다. 못 정하거나 그 PC 의 같은 대화가 더 길거나 갈라졌으면 창을 띄워 폴더를 고르고 [받기].
 보낸 칸은 받았다는 답이 온 뒤에 닫힌다.
+
+**기기 묶음.** [PC 잇기] 한 번으로 두 PC 가 묶인다 — 양쪽 옆칸에 서로가 뜨고(켜짐/꺼짐 점, 그 PC 에 열린 칸) 양쪽으로 옮긴다. 폰은 어느 한
+PC 와만 짝지으면 된다. 붙을 때 그 PC 와 묶인 다른 PC 의 소개장을 받아 숫자 확인 없이 들어가고, 홈 화면 앱 하나에 PC 별로 칸이 보인다.
+[폰 연결] 맨 위의 "이 PC" [이름]으로 묶인 PC·폰에 보일 이름을 붙인다. 묶음 안 한 대가 털리면 나머지도 열린다 — 소개로 들어온 폰은
+[폰 연결]에 "○○ 소개"로 보이니 모르는 것은 잊는다.
 
 위 새 대화 기능은 9월 29일 고정 경로 앱·CLI에 반영했다. 기존 PTY Codex 훅 정리는 10월 16일 반영했다.
 
@@ -381,6 +387,8 @@ node scripts/test.mjs chat stream      # 파일 이름에 그 낱말이 든 검�
 세션이사(`session-move`)는 격리 앱 하나로 두 쪽을 다 본다. 받기는 Node 가 보내는 PC 노릇(`pair`·`Link`)을 하고, 보내기는 Node 가 받는 PC 의
 방을 흉내 낸다(같은 이 PC 안의 중계에 PC 로 붙어 짝짓기·인사·암호 통로를 받는다). `CHIISPACE_TEST_SCREENSHOT=1` 로 직접 돌리면 받는 창·
 [PC 잇기]·이사 카드·옆칸의 다른 PC(평소·끄는 중)를 검증 창에서 찍는다. 끌기는 프로브가 칸 머리줄·옆칸 칸 줄에 마우스 이벤트를 보내 흉내 낸다(OS 마우스는 쓰지 않는다).
+기기 묶음도 여기서 본다 — 흉내 낸 받는 PC 가 묶기(`group_link`)·칸 목록에 답하고 소개장을 든 폰을 들이며, Node 가 소개장을 그 열쇠로 다시
+계산해 견준다. Edge 가 있으면 폰 화면(헤드리스, `scripts/phone-browser.mjs`) 하나에 묶인 PC 가 다 뜨는지도 본다(`phone-group.png`).
 
 클립보드·편집기처럼 사용자 것을 건드리는 명령은 실제로 부르지 않는다. 프로브가 앱 명령이 지나는 IPC 요청(`fetch`)을
 가로채 적어 두기만 한다(`chat-stream`). `__TAURI_INTERNALS__.invoke` 는 바꿔 끼울 수 없게 막혀 있다. 가로채기가 되는지는

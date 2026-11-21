@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { watchUserFiles } from "./user-files.mjs";
+import { edge, phoneBrowser } from "./phone-browser.mjs";
 import { codexResponse } from "./fixtures/remote-codex-responses.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 import { paneHash } from "../ui/phone.ts";
@@ -22,15 +23,12 @@ const wrangler = path.join(relayDir, "node_modules", ".bin", "wrangler.cmd");
 /** 실제로 올린 중계로 돌릴 때(`CHIISPACE_LIVE_RELAY=https://…workers.dev`). 매번 새 난수 방을 쓰고, 그 방에는 PC 비밀의 해시 하나만 남는다.
  *  test.mjs 는 `CHIISPACE_TEST_` 로 시작하는 변수를 지우므로 이름을 따로 둔다. */
 const live = process.env.CHIISPACE_LIVE_RELAY?.trim().replace(/\/+$/, "");
-const edge = [
-  path.join(process.env["ProgramFiles(x86)"] ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
-  path.join(process.env.ProgramFiles ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
-].find((p) => existsSync(p));
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (ok, n = 300) => {
   for (let i = 0; i < n && !(await ok()); i++) await delay(100);
   return ok();
 };
+const killTree = (pid) => spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
 const freePort = () =>
   new Promise((resolve) => {
     const s = net.createServer().listen(0, "127.0.0.1", () => {
@@ -38,71 +36,12 @@ const freePort = () =>
       s.close(() => resolve(port));
     });
   });
-const killTree = (pid) => spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
 const userLine = (text) => JSON.stringify({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, session_id: "" });
 const answer = (requestId, toolUseId, behavior = "allow", input = {}) =>
   JSON.stringify({
     type: "control_response",
     response: { subtype: "success", request_id: requestId, response: behavior === "allow" ? { behavior, updatedInput: input, toolUseID: toolUseId } : { behavior, message: "no", toolUseID: toolUseId } },
   });
-
-/** 별도 프로필의 헤드리스 Edge 한 탭(아이폰 크기). 사용자 브라우저·OS 입력을 쓰지 않고 페이지 안에서만 누른다(CDP). */
-async function phoneBrowser(dir) {
-  const proc = spawn(edge, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${dir}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions", "about:blank"], {
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  const portFile = path.join(dir, "DevToolsActivePort");
-  assert.ok(await until(() => existsSync(portFile), 100), "Edge 디버깅 포트가 안 열림");
-  const port = readFileSync(portFile, "utf8").split(/\r?\n/)[0];
-  let page;
-  await until(async () => {
-    const list = await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json(), () => []);
-    page = list.find((t) => t.type === "page");
-    return !!page;
-  }, 100);
-  const ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((r, j) => {
-    ws.onopen = r;
-    ws.onerror = j;
-  });
-  let seq = 0;
-  const waiting = new Map();
-  ws.onmessage = (m) => {
-    const d = JSON.parse(m.data);
-    if (d.id && waiting.has(d.id)) {
-      waiting.get(d.id)(d);
-      waiting.delete(d.id);
-    }
-  };
-  const send = (method, params = {}) =>
-    new Promise((res, rej) => {
-      const id = ++seq;
-      waiting.set(id, (d) => (d.error ? rej(new Error(`${method}: ${d.error.message}`)) : res(d.result)));
-      ws.send(JSON.stringify({ id, method, params }));
-    });
-  const evaluate = async (expression) => {
-    const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-    return r.result.value;
-  };
-  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  await send("Emulation.setUserAgentOverride", {
-    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
-  });
-  await send("Emulation.setTouchEmulationEnabled", { enabled: true });
-  return {
-    send,
-    evaluate,
-    shot: async (file) => writeFileSync(file, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64")),
-    close: () => {
-      try {
-        ws.close();
-      } catch {}
-      killTree(proc.pid);
-    },
-  };
-}
 
 test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 통로로 말하기·권한 답하기, PC 와 카드 맞추기, 막기", { skip: !exe || !claude || (!live && !existsSync(wrangler)), timeout: 480000 }, async () => {
   // 격리: 별도 앱 세션·CLAUDE_CONFIG_DIR·폰 연결 설정(remote.json 은 세션 파일 옆), 가짜 키와 가짜 Anthropic 서버,

@@ -8,12 +8,15 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import qrcode from "qrcode-generator";
 import { bySlug } from "./roster";
 import { pair, socketUrl } from "./phone-link";
+import { linkBack } from "./group";
 import { roomOf } from "./session-move";
 import type { StreamChat } from "./stream-session";
 import "./remote.css";
 
 type Status = {
   on: boolean;
+  /** 이 PC 의 이름. 묶인 PC·폰에 이 이름으로 보인다. */
+  name: string;
   relay: string | null;
   page: string | null;
   connected: boolean;
@@ -25,9 +28,10 @@ type Status = {
   sasName: string | null;
   /** 짝지으려는 쪽이 PC 면 "pc" — 허락하면 그 PC 가 이 PC 로 대화를 이사 보낼 수 있다. */
   sasKind: string | null;
-  devices: { id: string; name: string; added: number; kind: string | null }[];
-  /** 이 PC 가 대화를 이사 보낼 다른 PC. */
-  peers: { id: string; name: string; page: string; added: number }[];
+  /** `via` 는 묶인 PC 가 소개해 들어온 폰이면 그 PC 이름. `linked` 는 묶인 PC 라 아래 PC 목록에 같이 보이는 것. */
+  devices: { id: string; name: string; added: number; kind: string | null; via: string | null; linked: boolean }[];
+  /** 이은 PC. `linked` 면 서로 이어 묶였고, 아니면 예전 판과의 한쪽 잇기(이 PC 에서 보내기만)다. */
+  peers: { id: string; name: string; page: string; added: number; linked: boolean }[];
 };
 
 /** 터미널이나 읽기 전용 자식 칸에는 폰이 열 수 있는 입력 경로가 없다. */
@@ -90,6 +94,8 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   const [peerErr, setPeerErr] = useState<string | null>(null);
   // 이름을 고치는 중인 PC. 짝지을 때 받은 컴퓨터 이름(`DESKTOP-…`)으로는 어느 PC 인지 알아보기 어렵다.
   const [naming, setNaming] = useState<{ id: string; name: string } | null>(null);
+  // 이 PC 이름을 고치는 중. 묶인 PC·폰에 보이는 이름이라 컴퓨터 이름(`DESKTOP-…`) 대신 알아보기 쉬운 것을 붙인다.
+  const [myName, setMyName] = useState<string | null>(null);
   const run = (p: Promise<Status>) =>
     p.then(
       (v) => {
@@ -128,7 +134,11 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
     try {
       const me = await invoke<string>("this_pc_name").catch(() => "PC");
       const paired = await pair(socketUrl(page), me, setPeerSas, "pc");
-      setS(await invoke<Status>("remote_peer_add", { name: paired.name ?? "PC", page, paired }));
+      setPeerSas(null);
+      // 서로 잇는다. 그 PC 가 예전 판이면 한쪽으로만 남는다 — 이 PC 에서 보내기는 되니 잇기는 살리고 까닭을 알린다.
+      const back = await linkBack(page, paired);
+      setS(await invoke<Status>("remote_peer_add", { name: paired.name ?? "PC", page, paired, invite: back.ok ? back.invite : null, device: back.ok ? back.device : null }));
+      if (!back.ok) setPeerErr(`그 PC 와 서로 잇지 못해 이 PC 에서 보내기만 된다(${back.why}). 그 PC 를 새 판으로 바꾼 뒤 다시 이어 줘.`);
       setPeerPage("");
     } catch (e) {
       setPeerErr(e instanceof Error ? e.message : String(e));
@@ -158,6 +168,30 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
         <p className="remote-lead">밖에서 폰으로 이 PC 의 Claude·Codex 대화창을 쓰고 권한에 답한다. 집 PC 에는 열린 포트가 없고, 폰과 PC 사이의 말은 암호화되어 중계를 지난다.</p>
         {s ? (
           <>
+            {myName !== null ? (
+              <form
+                className="remote-self remote-self-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void run(invoke<Status>("remote_set_name", { name: myName })).then(() => setMyName(null));
+                }}
+              >
+                <input autoFocus value={myName} maxLength={40} spellCheck={false} onChange={(e) => setMyName(e.target.value)} aria-label="이 PC 이름" />
+                <button className="remote-btn" type="submit" disabled={!myName.trim()}>
+                  저장
+                </button>
+              </form>
+            ) : (
+              <div className="remote-self">
+                <span>
+                  이 PC · <b>{s.name}</b>
+                  <small> · 묶인 PC·폰에 이 이름으로 보인다</small>
+                </span>
+                <button className="remote-btn" onClick={() => setMyName(s.name)}>
+                  이름
+                </button>
+              </div>
+            )}
             <div className="remote-switch">
               <span>
                 {s.on ? "켜짐" : "꺼짐"}
@@ -224,7 +258,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                       </span>
                       <small>
                         {s.sasKind === "pc"
-                          ? `다른 PC(${s.sasName ?? "이름 없음"})가 짝지으려 한다. 허락하면 그 PC 가 이 PC 로 대화를 이사 보낼 수 있다. 그 PC 화면에도 이 숫자가 보이면 [맞다].`
+                          ? `다른 PC(${s.sasName ?? "이름 없음"})가 묶으려 한다. 허락하면 두 PC 가 서로 대화를 옮기고 칸 목록을 보며, 한쪽에 짝지은 폰이 다른 쪽도 쓴다. 그 PC 화면에도 이 숫자가 보이면 [맞다].`
                           : `${s.sasName ?? "폰"} 화면에도 이 숫자가 보이면 [맞다]. 다르면 누가 끼어든 것이다.`}
                       </small>
                       <button className="remote-btn on" onClick={() => void run(invoke<Status>("remote_confirm", { ok: true }))}>
@@ -248,14 +282,16 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 <div className="remote-devs">
-                  <div className="remote-sub">짝지은 폰·PC{s.phones ? ` · 지금 붙은 화면 ${s.phones}` : ""}</div>
-                  {s.devices.length ? (
-                    s.devices.map((d) => (
+                  <div className="remote-sub">짝지은 폰{s.phones ? ` · 지금 붙은 화면 ${s.phones}` : ""}</div>
+                  {s.devices.some((d) => !d.linked) ? (
+                    s.devices.filter((d) => !d.linked).map((d) => (
                       <div className="remote-dev" key={d.id}>
                         <span>
                           {d.name}
                           {d.kind === "pc" ? <span className="remote-tag">PC · 이사 받기</span> : null}
-                          <small> · {day(d.added)}</small>
+                          <small>
+                            {d.via ? ` · ${d.via} 소개` : ""} · {day(d.added)}
+                          </small>
                         </span>
                         <button className="remote-btn" onClick={() => void run(invoke<Status>("remote_forget", { device: d.id }))}>
                           잊기
@@ -269,7 +305,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
               </>
             ) : null}
             <div className="remote-devs remote-peers">
-              <div className="remote-sub">이사 보낼 PC</div>
+              <div className="remote-sub">이은 PC</div>
               {s.peers.map((p) =>
                 naming?.id === p.id ? (
                   <form
@@ -289,6 +325,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                   <div className="remote-dev" key={p.id}>
                     <span>
                       {p.name}
+                      <span className="remote-tag">{p.linked ? "서로 이음" : "보내기만"}</span>
                       <small> · {day(p.added)}</small>
                     </span>
                     <div className="remote-dev-acts">
@@ -317,7 +354,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
                     void linkPeer();
                   }}
                 >
-                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [잇기]. 이으면 옆칸 맨 아래 "다른 PC" 에 그 PC 가 뜬다. 대화창 칸을 거기로 끌어 놓거나 /move 로 이사 보낸다.</small>
+                  <small>그 PC 의 [폰 연결]에서 [폰 짝짓기]를 누른 뒤, 거기 보이는 폰 주소를 넣고 [PC 잇기]. 한 번 이으면 두 PC 가 묶인다 — 옆칸 맨 아래 "다른 PC" 에 서로가 뜨고, 대화창 칸을 거기로 끌어 놓거나 /move 로 옮긴다. 한쪽에 짝지은 폰은 다른 쪽도 쓴다.</small>
                   <input value={peerPage} placeholder="https://chiispace-relay.이름.workers.dev/r/…/" spellCheck={false} onChange={(e) => setPeerPage(e.target.value)} aria-label="이사 보낼 PC 의 폰 주소" />
                   <button className="remote-btn" type="submit" disabled={peerBusy || !peerPage.trim()}>
                     {peerBusy ? "잇는 중" : "PC 잇기"}

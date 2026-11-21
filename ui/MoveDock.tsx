@@ -1,9 +1,13 @@
-/** 옆칸 맨 아래의 "다른 PC" — 짝지은 PC 를 늘 줄로 보이고, 칸(머리줄 또는 옆칸의 칸 줄)을 거기에 끌어 놓으면 그 칸이 이사를
+/** 옆칸 맨 아래의 "다른 PC" — 이은 PC 를 늘 보이고, 칸(머리줄 또는 옆칸의 칸 줄)을 거기에 끌어 놓으면 그 칸이 이사를
  *  보낸다(useDrag `onDropOut` → session-move.ts `dropMove` → ClaudeStreamPane 의 카드). 끌 때만 띄우면 이 길이 있는 줄도
- *  모른다(11월 21일 사용자 — "왼쪽 세션칸에 떠야 할 거 아니야"). 짝지은 PC 가 없으면 잇는 길을 대신 둔다. */
+ *  모른다(11월 21일 사용자 — "왼쪽 세션칸에 떠야 할 거 아니야"). 짝지은 PC 가 없으면 잇는 길을 대신 둔다.
+ *  묶인 PC 는 늘 붙어 있어(usePeers) 켜짐/꺼짐과 그 PC 에 열린 칸을 같이 보인다 — 세 기기를 한 묶음으로 보이게 한다(11월 22일). */
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { movableOf, pcNote, type Peer } from "./session-move";
+import { listen } from "@tauri-apps/api/event";
+import { Face } from "./roster";
+import { movableOf, pcNote, pcState, type Peer } from "./session-move";
+import { usePeers } from "./usePeers";
 import "./remote.css";
 
 export function MoveDock({ from, over, reload, onLink }: {
@@ -17,6 +21,12 @@ export function MoveDock({ from, over, reload, onLink }: {
   onLink: () => void;
 }) {
   const [peers, setPeers] = useState<Peer[] | null>(null);
+  // 다른 PC 가 이 PC 와 묶으면(그 PC 에서 [PC 잇기]) 이 PC 의 목록도 바뀐다.
+  const [changed, setChanged] = useState(0);
+  useEffect(() => {
+    const off = listen("remote:peers", () => setChanged((n) => n + 1));
+    return () => void off.then((f) => f());
+  }, []);
   useEffect(() => {
     let live = true;
     invoke<{ peers: Peer[] }>("remote_status").then(
@@ -26,7 +36,8 @@ export function MoveDock({ from, over, reload, onLink }: {
     return () => {
       live = false;
     };
-  }, [reload, from]);
+  }, [reload, from, changed]);
+  const live = usePeers(peers);
   if (peers === null) return null;
   const m = from ? movableOf(from) : undefined;
   return (
@@ -34,33 +45,52 @@ export function MoveDock({ from, over, reload, onLink }: {
       <div className="side-dev">다른 PC</div>
       {peers.length ? (
         peers.map((p) => {
-          const note = pcNote({ dragging: !!from, movable: !!m, lock: m?.lock ?? null, over: over === p.id });
+          const state = pcState(live[p.id]?.status);
+          const note = pcNote({ dragging: !!from, movable: !!m, lock: m?.lock ?? null, over: over === p.id, state });
+          const panes = live[p.id]?.panes ?? [];
           return (
             <div
               key={p.id}
               className={note.lock ? "pc-row off" : over === p.id ? "pc-row on" : "pc-row"}
               data-drop-out={p.id}
               data-locked={note.lock ? "" : undefined}
+              data-state={state}
               title={p.name}
             >
-              <span className="pc-ico">
-                <PcIcon />
-              </span>
-              <span className="pmeta">
-                <span className="nm">{p.name}</span>
-                <span className="sub">{note.text}</span>
-              </span>
+              <div className="pc-line">
+                <span className="pc-ico">
+                  <PcIcon />
+                  <i className={`pc-dot ${state}`} />
+                </span>
+                <span className="pmeta">
+                  <span className="nm">{p.name}</span>
+                  <span className="sub">{note.text}</span>
+                </span>
+              </div>
+              {panes.length ? (
+                <div className="pc-panes">
+                  {panes.map((x) => (
+                    <div key={x.id} className="pc-pane" title={x.title || x.name || undefined}>
+                      <Face slug={x.slug ?? undefined} agent />
+                      <span className="pc-pane-nm">{x.title || x.name || (x.agent === "codex" ? "Codex" : "Claude")}</span>
+                      {x.busy || x.tasks ? <span className="work" /> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           );
         })
       ) : (
         <button className="pc-row pc-link" onClick={onLink}>
-          <span className="pc-ico">
-            <PlusIcon />
-          </span>
-          <span className="pmeta">
-            <span className="nm">다른 PC 잇기</span>
-            <span className="sub">칸을 다른 PC 로 옮기려면 한 번 잇는다</span>
+          <span className="pc-line">
+            <span className="pc-ico">
+              <PlusIcon />
+            </span>
+            <span className="pmeta">
+              <span className="nm">다른 PC 잇기</span>
+              <span className="sub">한 번 이으면 두 PC 와 폰이 묶인다</span>
+            </span>
           </span>
         </button>
       )}

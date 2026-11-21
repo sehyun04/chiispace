@@ -95,10 +95,17 @@ export function setMovable(pane: string, m: Movable | null) {
   else movable.delete(pane);
 }
 export const movableOf = (pane: string) => movable.get(pane);
-/** 옆칸의 PC 줄 아래 작은 글. 늘 보이는 줄이라 끌지 않을 때는 쓰는 법을, 끄는 동안은 놓을 수 있는지와 그 까닭을 적는다.
- *  적어 두지 않은 칸(터미널·Codex)도 끌 수 있으니 못 옮기는 까닭을 보인다. */
-export function pcNote(p: { dragging: boolean; movable: boolean; lock: string | null; over: boolean }): { text: string; lock: boolean } {
-  if (!p.dragging) return { text: "칸을 끌어 여기에 놓으면 이사", lock: false };
+/** 옆칸의 다른 PC 가 지금 어떤가. 켜짐(그 PC 가 중계에 붙어 있음)·꺼짐·잇는 중·이 PC 를 잊음. */
+export type PcState = "on" | "off" | "wait" | "forgot";
+export const pcState = (status: string | undefined): PcState =>
+  status === "open" ? "on" : status === "pc-offline" ? "off" : status === "forgot" ? "forgot" : "wait";
+
+/** 옆칸의 PC 줄 아래 작은 글. 늘 보이는 줄이라 끌지 않을 때는 그 PC 의 상태와 쓰는 법을, 끄는 동안은 놓을 수 있는지와 그 까닭을
+ *  적는다. 적어 두지 않은 칸(터미널·Codex)도 끌 수 있으니 못 옮기는 까닭을 보인다. 꺼진 PC 에는 놓지 못한다 — 놓아 봐야 보내다 실패한다. */
+export function pcNote(p: { dragging: boolean; movable: boolean; lock: string | null; over: boolean; state: PcState }): { text: string; lock: boolean } {
+  if (p.state === "forgot") return { text: "이 PC 를 잊었다 — [폰 연결]에서 다시 이어 줘", lock: true };
+  if (!p.dragging) return { text: p.state === "on" ? "켜짐 · 칸을 끌어 놓으면 이사" : p.state === "off" ? "꺼져 있다" : "잇는 중", lock: false };
+  if (p.state === "off") return { text: "꺼져 있다 — 켜져 있어야 옮긴다", lock: true };
   if (!p.movable) return { text: "Claude 대화창 칸만 옮긴다", lock: true };
   if (p.lock) return { text: p.lock, lock: true };
   return { text: p.over ? "놓으면 옮기고 이 칸은 닫는다" : "여기에 놓는다", lock: false };

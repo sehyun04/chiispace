@@ -392,9 +392,13 @@ pub fn session_move_folders(app: AppHandle, origin: Option<String>, folder: Stri
     out
 }
 
-/// 짝지을 때 받는 PC 에 보일 이 PC 의 이름.
+/// 짝지을 때 받는 PC 에 보일 이 PC 의 이름. [폰 연결]에서 붙인 이름이 있으면 그것.
 #[tauri::command]
-pub fn this_pc_name() -> String {
+pub fn this_pc_name(app: tauri::AppHandle) -> String {
+    crate::remote::name_of(&app)
+}
+
+pub(crate) fn computer_name() -> String {
     std::env::var("COMPUTERNAME").ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "PC".into())
 }
 

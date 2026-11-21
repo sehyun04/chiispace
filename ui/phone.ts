@@ -68,14 +68,23 @@ export function folderName(cwd: string): string {
   return cwd.split(/[\\/]/).filter(Boolean).pop() ?? "홈";
 }
 
-/** `#/p/<칸 id>` — 칸 id 는 `%3` 처럼 주소에 못 쓰는 글자가 있다. */
-export const paneHash = (id: string) => `#/p/${encodeURIComponent(id)}`;
+/** `#/p/<칸 id>`, 묶인 다른 PC 의 칸이면 `#/pc/<방>/p/<칸 id>` — 칸 id 는 `%3` 처럼 주소에 못 쓰는 글자가 있고, PC 마다 겹친다. */
+export const paneHash = (id: string, room?: string | null) => `${room ? `#/pc/${room}` : "#"}/p/${encodeURIComponent(id)}`;
 export function paneFromHash(hash: string): string | null {
-  const m = /^#\/p\/(.+)$/.exec(hash);
+  const m = /^#(?:\/pc\/[0-9a-f]{32})?\/p\/(.+)$/.exec(hash);
   if (!m) return null;
   try {
     return decodeURIComponent(m[1]);
   } catch {
     return null;
   }
+}
+/** 주소가 가리키는 묶인 PC 의 방. 없으면 이 페이지를 내준 PC 다. */
+export function roomFromHash(hash: string): string | null {
+  return /^#\/pc\/([0-9a-f]{32})\//.exec(hash)?.[1] ?? null;
+}
+
+/** 폰 칸 목록의 PC 머리글에 붙는 상태. */
+export function pcLabel(status: string): string {
+  return status === "open" ? "켜짐" : status === "pc-offline" ? "꺼져 있다" : status === "retrying" ? "다시 잇는 중" : "잇는 중";
 }

@@ -366,6 +366,8 @@ pub fn run() {
             remote::remote_peer_add,
             remote::remote_peer_forget,
             remote::remote_peer_rename,
+            remote::remote_link_prepare,
+            remote::remote_set_name,
             remote::remote_peer_key,
             session_move::session_move_pack,
             session_move::session_move_answer,

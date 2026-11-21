@@ -16,7 +16,7 @@ import { codexPhoneEvent, type CodexPhoneAction, type CodexPhoneEvent, type Code
 import { Face } from "./roster";
 import { SubAgents } from "./SubAgents";
 import { answerLine, answeredStream, allowLine, denyLine, initialStream, interruptLine, reduceStream, sentStream, userLine, type Prompt, type StreamState } from "./claude-stream";
-import { folderName, fromSnapshot, paneFromHash, paneHash, paneState, type PhonePane, type Snapshot } from "./phone";
+import { folderName, fromSnapshot, paneFromHash, paneHash, paneState, pcLabel, roomFromHash, type PhonePane, type Snapshot } from "./phone";
 import type { LinkStatus } from "./phone-link";
 
 type LineEvent = { id: string; line: string };
@@ -97,40 +97,61 @@ function Link({ status, stale }: { status: LinkStatus; stale: boolean }) {
   );
 }
 
-/** 칸 목록과 고른 칸. 목록은 계속 새로 받아 둔다 — 칸 화면에서도 대화 id 가 바뀌면(`/clear`) 따라가야 한다. */
-export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: boolean; onForget: () => void }) {
-  const [panes, setPanes] = useState<PhonePane[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+/** 폰이 붙은 PC 하나. 이 페이지를 내준 PC(`own`)와 묶인 다른 PC 들이다(phone-main.tsx). */
+export type PhonePc = { room: string; name: string | null; status: LinkStatus; own: boolean };
+
+/** 칸 목록과 고른 칸. 목록은 계속 새로 받아 둔다 — 칸 화면에서도 대화 id 가 바뀌면(`/clear`) 따라가야 한다.
+ *  묶인 PC 가 여럿이면 PC 마다 묶어 보인다. 칸 id 는 PC 마다 겹치므로 주소에 PC 를 같이 적는다(`paneHash`). */
+export function Phone({ pcs, stale, call, on, onForget }: {
+  pcs: PhonePc[];
+  stale: boolean;
+  call: (room: string, cmd: string, args: unknown) => Promise<unknown>;
+  on: (room: string, fn: (event: string) => void) => () => void;
+  onForget: () => void;
+}) {
+  const [panes, setPanes] = useState<Record<string, PhonePane[]>>({});
+  const [errs, setErrs] = useState<Record<string, string>>({});
   const [hash, setHash] = useState(() => location.hash);
   useEffect(() => {
-    const on = () => setHash(location.hash);
-    window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
+    const onHash = () => setHash(location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  // 붙어 있는 PC 만 묻는다. 꺼진 PC 에 3초마다 물으면 답 없는 요청만 쌓인다.
+  const openRooms = pcs.filter((p) => p.status === "open").map((p) => p.room).join(",");
   useEffect(() => {
     let alive = true;
-    const load = () =>
-      invoke<PhonePane[]>("remote_panes").then(
-        (p) => {
-          if (!alive) return;
-          setPanes(p);
-          setErr(null);
-        },
-        (e) => alive && setErr(String(e)),
-      );
-    void load();
-    const timer = window.setInterval(() => document.visibilityState === "visible" && void load(), 3000);
-    const offs = [listen("remote:panes", () => void load()), listen("remote:resync", () => void load())];
+    const offs = (openRooms ? openRooms.split(",") : []).map((room) => {
+      const load = () =>
+        call(room, "remote_panes", {}).then(
+          (p) => {
+            if (!alive) return;
+            setPanes((x) => ({ ...x, [room]: p as PhonePane[] }));
+            setErrs(({ [room]: _, ...rest }) => rest);
+          },
+          (e) => alive && setErrs((x) => ({ ...x, [room]: String(e) })),
+        );
+      void load();
+      const timer = window.setInterval(() => document.visibilityState === "visible" && void load(), 3000);
+      const off = on(room, (e) => (e === "remote:panes" || e === "remote:resync") && void load());
+      return () => {
+        window.clearInterval(timer);
+        off();
+      };
+    });
     return () => {
       alive = false;
-      window.clearInterval(timer);
-      offs.forEach((o) => void o.then((f) => f()));
+      offs.forEach((f) => f());
     };
-  }, []);
+  }, [openRooms, call, on]);
 
+  const ownRoom = pcs.find((p) => p.own)?.room;
   const openId = paneFromHash(hash);
-  const open = openId ? panes?.find((p) => p.id === openId) : undefined;
-  if (openId && panes && !open) {
+  const openRoom = roomFromHash(hash) ?? ownRoom;
+  const openPc = pcs.find((p) => p.room === openRoom);
+  const list = openRoom ? panes[openRoom] : undefined;
+  const open = openId ? list?.find((p) => p.id === openId) : undefined;
+  if (openId && (!openPc || list) && !open) {
     return (
       <main className="m-app">
         <header className="m-head">
@@ -141,50 +162,68 @@ export function Phone({ status, stale, onForget }: { status: LinkStatus; stale: 
             <div className="m-title">닫힌 칸</div>
           </div>
         </header>
-        <p className="m-empty">PC 에서 이 칸을 닫았다.</p>
+        <p className="m-empty">{openPc ? "PC 에서 이 칸을 닫았다." : "이 폰과 묶이지 않은 PC 의 칸이다."}</p>
       </main>
     );
   }
-  if (open?.agent === "codex") return <MobileCodexPane key={`${open.id}:${open.session}`} pane={open} status={status} stale={stale} />;
-  if (open) return <MobileClaudePane key={open.id} pane={open} status={status} stale={stale} />;
+  const status = openPc?.status ?? "connecting";
+  if (open?.agent === "codex") return <MobileCodexPane key={`${openRoom}:${open.id}:${open.session}`} pane={open} status={status} stale={stale} />;
+  if (open) return <MobileClaudePane key={`${openRoom}:${open.id}`} pane={open} status={status} stale={stale} />;
+  const many = pcs.length > 1;
   return (
     <main className="m-app">
       <header className="m-head">
         <div className="m-head-text">
           <div className="m-title">chiispace</div>
-          <div className="m-sub">PC 의 대화창</div>
+          <div className="m-sub">{many ? `묶인 PC ${pcs.length}대의 대화창` : "PC 의 대화창"}</div>
         </div>
       </header>
-      <Link status={status} stale={stale} />
+      {many ? <Link status="open" stale={stale} /> : <Link status={pcs[0]?.status ?? "connecting"} stale={stale} />}
       <div className="m-list">
-        {err ? <p className="m-bad">{err}</p> : null}
-        {panes === null ? (
-          <p className="m-empty">칸을 받는 중</p>
-        ) : panes.length === 0 ? (
-          <p className="m-empty">PC 에 열린 대화창이 없다. PC 에서 Claude나 Codex 대화창을 열면 여기 뜬다.</p>
-        ) : (
-          panes.map((p) => {
-            const s = paneState(p);
-            return (
-              <a key={p.id} className="m-row" href={paneHash(p.id)}>
-                <span className="m-row-face">
-                  <Face slug={p.slug ?? undefined} agent />
-                </span>
-                <span className="m-row-text">
-                  <span className="m-row-title">{p.title || p.name || agentName(p)}</span>
-                  <span className="m-row-sub" title={p.cwd}>{folderName(p.cwd)} · {agentName(p)}</span>
-                </span>
-                <span className={`m-chip ${s.tone}`}>{s.text}</span>
-              </a>
-            );
-          })
-        )}
+        {pcs.map((pc) => {
+          const rows = panes[pc.room];
+          const err = errs[pc.room];
+          return (
+            <section key={pc.room} className="m-pc" aria-label={pc.name ?? "PC"}>
+              {many ? (
+                <div className="m-pc-head">
+                  <span className="m-pc-name">{pc.name ?? "PC"}</span>
+                  <span className={`m-pc-state ${pc.status === "open" ? "on" : pc.status === "pc-offline" ? "off" : "wait"}`}>{pcLabel(pc.status)}</span>
+                </div>
+              ) : null}
+              {err ? <p className="m-bad">{err}</p> : null}
+              {many && pc.status === "pc-offline" ? (
+                <p className="m-empty">그 PC 의 chiispace 와 [폰 연결]이 켜지면 여기 뜬다.</p>
+              ) : !rows ? (
+                <p className="m-empty">칸을 받는 중</p>
+              ) : rows.length === 0 ? (
+                <p className="m-empty">PC 에 열린 대화창이 없다. PC 에서 Claude나 Codex 대화창을 열면 여기 뜬다.</p>
+              ) : (
+                rows.map((p) => {
+                  const st = paneState(p);
+                  return (
+                    <a key={p.id} className="m-row" href={paneHash(p.id, pc.own ? null : pc.room)}>
+                      <span className="m-row-face">
+                        <Face slug={p.slug ?? undefined} agent />
+                      </span>
+                      <span className="m-row-text">
+                        <span className="m-row-title">{p.title || p.name || agentName(p)}</span>
+                        <span className="m-row-sub" title={p.cwd}>{folderName(p.cwd)} · {agentName(p)}</span>
+                      </span>
+                      <span className={`m-chip ${st.tone}`}>{st.text}</span>
+                    </a>
+                  );
+                })
+              )}
+            </section>
+          );
+        })}
       </div>
       <footer className="m-foot">
         <button
           className="m-forget"
           onClick={() => {
-            if (confirm("이 폰의 연결을 지울까? 다시 쓰려면 PC 에서 새 번호를 받아야 한다.")) onForget();
+            if (confirm(many ? "이 폰의 연결을 다 지울까? 다시 쓰려면 PC 에서 새 번호를 받아야 한다." : "이 폰의 연결을 지울까? 다시 쓰려면 PC 에서 새 번호를 받아야 한다.")) onForget();
           }}
         >
           이 폰 연결 지우기

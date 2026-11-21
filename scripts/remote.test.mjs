@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { listenerTable } from "../ui/remote-shim.ts";
-import { fromSnapshot, deviceName, folderName, paneState, paneHash, paneFromHash, updateAction } from "../ui/phone.ts";
+import { fromSnapshot, deviceName, folderName, paneState, paneHash, paneFromHash, pcLabel, roomFromHash, updateAction } from "../ui/phone.ts";
 import { b64u, unb64u, commitOf, loadKey, newKey, open, sasOf, seal, sessionKeys } from "../ui/phone-crypto.ts";
 import { socketUrl } from "../ui/phone-link.ts";
 
@@ -127,4 +127,13 @@ test("폰 이름과 칸 주소", () => {
   assert.equal(paneFromHash(paneHash("%3")), "%3");
   assert.equal(paneFromHash("#/"), null);
   assert.equal(paneFromHash("#/p/%E0"), null);
+  // 묶인 다른 PC 의 칸은 주소에 그 PC 의 방을 같이 적는다 — 칸 id 는 PC 마다 겹친다.
+  const room = "1b0016dbe43537733003e79293f26bd9";
+  assert.equal(paneHash("%3", room), `#/pc/${room}/p/%253`);
+  assert.equal(paneFromHash(paneHash("%3", room)), "%3");
+  assert.equal(roomFromHash(paneHash("%3", room)), room);
+  assert.equal(roomFromHash(paneHash("%3")), null);
+  assert.equal(roomFromHash("#/pc/short/p/%253"), null);
+  assert.equal(paneFromHash("#/pc/short/p/%253"), null);
+  assert.deepEqual(["open", "pc-offline", "retrying", "connecting"].map(pcLabel), ["켜짐", "꺼져 있다", "다시 잇는 중", "잇는 중"]);
 });
