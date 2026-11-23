@@ -13,7 +13,7 @@ import { watchUserFiles } from "./user-files.mjs";
 import { edge, phoneBrowser } from "./phone-browser.mjs";
 import { Link, pair, socketUrl } from "../ui/phone-link.ts";
 import { b64u, commitOf, newKey, open, random, sasOf, seal, sessionKeys, unb64u } from "../ui/phone-crypto.ts";
-import { askBeforeSend, autoFolder, dropMove, moveFailure, moveLock, moveOffer, pcNote, pcState, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
+import { askBeforeSend, autoFolder, cloneWanted, dropMove, moveFailure, moveLock, moveOffer, pcNote, pcState, receiverNotes, roomOf, senderNotes, setMovable, sizeLabel } from "../ui/session-move.ts";
 
 test("이사 꾸러미와 두 PC 화면의 안내", () => {
   const git = { origin: "github.com/a/b", branch: "main", head: "abcdef1234", dirty: 2 };
@@ -70,6 +70,15 @@ test("끌어 놓는 이사 — 막는 까닭, 묻지 않고 보내기·받기", 
   assert.equal(autoFolder(offer("split"), [g("C:/b", origin)]), null);
   assert.equal(autoFolder(offer("new", null), [g("C:/b", null)]), null);
   assert.equal(autoFolder(offer("new"), []), null);
+  // 같은 레포가 이 PC 에 하나도 없으면 받아 와서 받는다. 원격이 없거나 이 PC 의 대화가 더 길거나 갈라졌으면 받아 오지 않고 묻는다.
+  assert.equal(cloneWanted(offer("new"), []), true);
+  assert.equal(cloneWanted(offer("behind"), [g("C:/x", "github.com/x/y")]), true);
+  assert.equal(cloneWanted(offer("new"), [g("D:/old", "github.com/x/y", true)]), true);
+  assert.equal(cloneWanted(offer("new"), [g("C:/b", origin)]), false);
+  assert.equal(cloneWanted(offer("new"), [g("C:/b", origin), g("D:/b", origin)]), false);
+  assert.equal(cloneWanted(offer("new", null), []), false);
+  assert.equal(cloneWanted(offer("ahead"), []), false);
+  assert.equal(cloneWanted(offer("split"), []), false);
 
   // 놓인 칸이 잠겨 있으면 보내지 않는다. 적어 두지 않은 칸(터미널·Codex)은 아무 일도 없다.
   const got = [];
@@ -226,13 +235,23 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
   git("commit", "-q", "--allow-empty", "-m", "fixture");
   const home = path.join(root, "claude-state");
   mkdirSync(home);
-  const guard = watchUserFiles(["com.sehyun.chiispace", "com.sehyun.kasaspace"].flatMap((id) => ["session.json", "remote.json"].map((f) => path.join(process.env.APPDATA, id, f))), { root, exe });
+  // 이 PC 에 없는 레포를 받아 올 원격(검증은 임시 폴더). 앱은 이 아래 `<원격 주소>` 폴더에서 받고, 받아 둘 홈도 임시 폴더다.
+  const gitBase = path.join(root, "git-base");
+  const moveHome = path.join(root, "move-home");
+  const fixtureRemote = path.join(gitBase, "github.com", "example", "clone-fixture");
+  mkdirSync(fixtureRemote, { recursive: true });
+  const gitIn = (dir, ...a) => spawnSync("git", ["-C", dir, "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", ...a], { windowsHide: true, encoding: "utf8" });
+  gitIn(fixtureRemote, "init", "-q", "-b", "main");
+  gitIn(fixtureRemote, "commit", "-q", "--allow-empty", "-m", "fixture");
+  gitIn(fixtureRemote, "branch", "feature");
+  const cloned = path.join(moveHome, "work", "clone-fixture");
+  const guard =watchUserFiles(["com.sehyun.chiispace", "com.sehyun.kasaspace"].flatMap((id) => ["session.json", "remote.json"].map((f) => path.join(process.env.APPDATA, id, f))), { root, exe });
   const settings = {
     hasCompletedOnboarding: true,
     theme: "light",
     hasSeenAutoDefaultNudge: true,
     hasSeenAutoModeEntryWarning: true,
-    projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } },
+    projects: Object.fromEntries([project, cloned].flatMap((p) => [p, p.replaceAll("\\", "/")]).map((p) => [p, { hasTrustDialogAccepted: true }])),
     customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] },
   };
   for (const config of [path.join(home, ".claude.json"), home + ".json"]) writeFileSync(config, JSON.stringify(settings));
@@ -306,6 +325,7 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     if (key.startsWith("CHIISPACE_AUTO") || key.startsWith("CHIISPACE_PROBE") || key === "CHIISPACE_ROOT" || key === "CHIISPACE_PROXY" || /API_KEY|AUTH_TOKEN|CLAUDE_CODE_USE_|ENABLE_TOOL_SEARCH|CLAUDECODE|CLAUDE_CODE_ENTRYPOINT/.test(key)) delete env[key];
   }
   Object.assign(env, { ANTHROPIC_API_KEY: "chiispace-fixture-key", ANTHROPIC_BASE_URL: apiBase, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
+  Object.assign(env, { CHIISPACE_MOVE_HOME: moveHome, CHIISPACE_MOVE_GIT_BASE: gitBase });
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === "path");
   env[pathKey] = path.dirname(claude) + ";" + env[pathKey];
   env.CHIISPACE_PROBE_MS = "500";
@@ -516,6 +536,43 @@ test("세션이사 — PC 로 짝짓기, 받는 PC 에서 묻고 받기·묻지 
     await again;
     await delay(1000);
     assert.equal(dom().panes.filter((p) => p.bubbles.some((b) => b.includes("AUTO_MARK"))).length, 1, "같은 대화로 칸을 또 엶: " + seen());
+
+    // 4-2. 그 레포가 이 PC 에 없으면 원격에서 받아 와 묻지 않고 받는다 — 보낸 PC 의 홈 아래와 같은 자리에, 보낸 가지로.
+    // 다음 이사는 받아 둔 폴더를 기억해 바로 쓴다. 원격에 없으면 까닭을 보이며 묻는다.
+    const cloneOffer = (session, mark, repo = "clone-fixture") => {
+      const senderCwd = `C:\\Users\\someone\\work\\${repo}`;
+      return {
+        ...offerOf(session, [{ rel: `${session}.jsonl`, gz: gz(conversation(session, senderCwd, mark)) }]),
+        title: mark,
+        cwd: senderCwd,
+        git: { origin: `github.com/example/${repo}`, branch: "feature", head: null, dirty: 0 },
+      };
+    };
+    asked = false;
+    const watch2 = setInterval(() => (asked ||= !!dom().offer), 50);
+    try {
+      const S5 = randomUUID();
+      const r5 = await pc.link.invoke("session_move_offer", cloneOffer(S5, "CLONED_MARK"));
+      assert.ok(same(r5.cwd, cloned), "보낸 PC 와 같은 자리에 안 받아 옴: " + JSON.stringify(r5));
+      assert.equal(gitIn(cloned, "rev-parse", "--abbrev-ref", "HEAD").stdout.trim(), "feature", "보낸 PC 의 가지로 안 둠");
+      assert.ok(existsSync(path.join(home, "projects", slug(cloned), S5 + ".jsonl")), "받아 온 레포 자리에 대화를 안 씀");
+      assert.ok(await until(() => /CLONED_MARK" 대화가 이사 왔다 — 레포를 .+ 새로 받아/.test(dom().toast ?? ""), 50), "레포를 받아 온 것을 안 알림: " + seen());
+      assert.ok(await until(() => dom().panes?.some((p) => p.bubbles.some((b) => b.includes("CLONED_MARK"))), 200), "받아 온 레포의 대화가 안 열림: " + seen());
+      const S6 = randomUUID();
+      const r6 = await pc.link.invoke("session_move_offer", cloneOffer(S6, "CLONED_AGAIN"));
+      assert.ok(same(r6.cwd, cloned), "받아 둔 폴더를 다음 이사에 안 씀: " + JSON.stringify(r6));
+      assert.equal(asked, false, "레포를 받아 와 받을 이사에 창을 띄움: " + seen());
+      const S7 = randomUUID();
+      const missing = pc.link.invoke("session_move_offer", cloneOffer(S7, "MISSING_MARK", "missing"));
+      assert.ok(await until(() => /받아 오지 못했다/.test(dom().offer?.bad ?? ""), 150), "못 받아 온 까닭을 보이며 묻지 않음: " + seen());
+      commands.push({ in: "offer", button: "거절" });
+      await assert.rejects(missing, /거절했다/);
+      assert.ok(!existsSync(path.join(moveHome, "work", "missing")), "못 받아 온 자리를 남김");
+      // 보낸 쪽에 거절이 먼저 닿고 창은 그 뒤에 걷힌다. 다음 단계의 [거절]이 이 창에 눌리지 않게 걷힌 뒤에 넘어간다.
+      assert.ok(await until(() => dom().offer === null, 50), "거절한 창이 안 걷힘: " + seen());
+    } finally {
+      clearInterval(watch2);
+    }
 
     // 5. 거절. 원격이 없는 폴더의 대화는 묻는다.
     const S3 = randomUUID();

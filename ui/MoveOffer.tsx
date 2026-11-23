@@ -1,10 +1,11 @@
 /** 다른 PC 가 대화를 이사 보내 왔을 때. 같은 레포 폴더가 하나로 정해지면 묻지 않고 그 폴더로 받고(session-move.ts `autoFolder`),
- *  못 정하면 창을 띄워 사람이 폴더를 고르고 [받기]를 누른다(src-tauri/src/session_move.rs). 받으면 부른 쪽(App)이 그 대화를
+ *  그 레포가 이 PC 에 없으면 원격에서 받아 와 묻지 않고 받는다(`cloneWanted`). 못 정하거나 못 받아 오면 창을 띄워 사람이 폴더를
+ *  고르고 [받기]를 누른다(src-tauri/src/session_move.rs). 받으면 부른 쪽(App)이 그 대화를
  *  새 탭의 대화창으로 연다. 보내는 쪽은 사용자의 다른 PC 로, 숫자를 견주어 한 번 짝지은 기기만 보낼 수 있다(remote.rs). */
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { autoFolder, receiverNotes, sizeLabel, type FolderGuess, type MoveOffer as Offer } from "./session-move";
+import { autoFolder, cloneWanted, receiverNotes, sizeLabel, type FolderGuess, type MoveOffer as Offer } from "./session-move";
 import "./remote.css";
 
 export type MovedIn = { session: string; cwd: string; title: string; slug: string };
@@ -58,8 +59,10 @@ function OfferDialog({ offer, known, onOpen, onDone, onAuto }: {
   const [busy, setBusy] = useState(false);
   // 폴더 후보를 보고 묻지 않고 받을지 정하기 전에는 창을 그리지 않는다 — 바로 받을 이사에 창이 번쩍이지 않게.
   const [ask, setAsk] = useState(false);
+  // 그 레포를 원격에서 받아 오는 중. 창 대신 한 줄만 띄운다 — 받는 PC 앞에 사람이 없을 수 있다.
+  const [cloning, setCloning] = useState(false);
 
-  const look = (chosen: string | null) =>
+  const look =(chosen: string | null) =>
     invoke<FolderGuess[]>("session_move_folders", { origin: offer.git.origin ?? null, folder: offer.folder, known, chosen }).then(
       (g) => {
         setGuesses(g);
@@ -72,10 +75,21 @@ function OfferDialog({ offer, known, onOpen, onDone, onAuto }: {
       },
     );
   useEffect(() => {
-    void look(null).then((g) => {
+    void look(null).then(async (g) => {
       const auto = autoFolder(offer, g);
-      if (auto) void take(auto, true);
-      else setAsk(true);
+      if (auto) return void take(auto, true);
+      if (cloneWanted(offer, g)) {
+        setCloning(true);
+        try {
+          const path = await invoke<string>("session_move_clone", { origin: offer.git.origin, cwd: offer.cwd, branch: offer.git.branch ?? null });
+          setCloning(false);
+          return void take(path, true, true);
+        } catch (e) {
+          setCloning(false);
+          setErr(String(e));
+        }
+      }
+      setAsk(true);
     });
     // 창이 뜬 때의 후보만 본다. 앱이 아는 폴더가 바뀔 때마다 다시 찾으면 고르던 줄이 흔들린다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,14 +97,15 @@ function OfferDialog({ offer, known, onOpen, onDone, onAuto }: {
 
   const here = guesses?.find((g) => g.path === pick)?.git;
   const notes = receiverNotes(offer, here);
-  const take = async (path = pick, auto = false) => {
+  const take = async (path = pick, auto = false, cloned = false) => {
     if (!path) return;
     setBusy(true);
     setErr(null);
     try {
       const r = await invoke<{ session: string; cwd: string }>("session_move_answer", { offer: offer.offer, cwd: path });
       onOpen({ session: r.session, cwd: r.cwd, title: offer.title, slug: offer.slug });
-      if (auto) onAuto(`${offer.from} 에서 "${offer.title || "이름 없는 대화"}" 대화가 이사 왔다 — ${path.split(/[\\/]/).filter(Boolean).pop()} 에서 이어 쓴다`);
+      const name = path.split(/[\\/]/).filter(Boolean).pop();
+      if (auto) onAuto(`${offer.from} 에서 "${offer.title || "이름 없는 대화"}" 대화가 이사 왔다 — ${cloned ? `레포를 ${path} 에 새로 받아 이어 쓴다` : `${name} 에서 이어 쓴다`}`);
       onDone();
     } catch (e) {
       // 묻지 않고 받다 실패하면(폴더가 사라짐 등) 창을 띄워 사람이 정한다.
@@ -105,6 +120,12 @@ function OfferDialog({ offer, known, onOpen, onDone, onAuto }: {
     if (p) await look(p);
   };
 
+  if (cloning)
+    return (
+      <div className="move-toast" role="status">
+        {offer.from} 에서 대화가 이사 온다 — 이 PC 에 없는 레포({offer.git.origin})를 받아 오는 중
+      </div>
+    );
   if (!ask) return null;
   return (
     <div className="remote-back">

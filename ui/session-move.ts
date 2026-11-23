@@ -86,6 +86,14 @@ export function autoFolder(o: Pick<MoveOffer, "git" | "relation">, guesses: Fold
   return same.find((g) => g.remembered)?.path ?? (same.length === 1 ? same[0].path : null);
 }
 
+/** 그 레포가 이 PC 에 없어 원격에서 받아 온 뒤 묻지 않고 받을까(11월 23일 사용자 — 받는 PC 에서 [받기]를 일일이 누르지 않게).
+ *  이 PC 의 앱이 아는 폴더에 같은 레포가 하나도 없을 때만이다. 원격이 없거나 이 PC 의 같은 대화가 더 길거나 갈라졌으면
+ *  `autoFolder` 처럼 묻는다. */
+export function cloneWanted(o: Pick<MoveOffer, "git" | "relation">, guesses: FolderGuess[]): boolean {
+  if (!o.git.origin || o.relation === "ahead" || o.relation === "split") return false;
+  return !guesses.some((g) => g.git.origin === o.git.origin);
+}
+
 /** 끌어 다른 PC 에 놓을 수 있는 칸. 대화창 칸이 제 상태로 적어 두고, 놓였을 때 보내는 일도 그 칸이 한다 —
  *  끄는 쪽(useDrag)은 어느 칸이 어느 PC 에 놓였는지만 안다. */
 type Movable = { lock: string | null; drop: (peer: string) => void };

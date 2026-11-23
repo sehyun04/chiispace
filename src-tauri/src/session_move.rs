@@ -4,8 +4,9 @@
 //!   claude 는 `--resume <id>` 에 모든 프로젝트 폴더에서 그 id 를 찾아 이어 열고, 이어 쓴 줄에는 새 폴더를 적는다
 //!   (11월 19일 2.1.328 로 확인). 그래서 대화 안의 경로를 고쳐 쓰지 않는다.
 //! - 보내는 쪽(ui/session-move.ts)은 폰과 같은 길(짝짓기·암호 통로)로 받는 PC 의 방에 붙어 `session_move_offer` 를 부른다.
-//!   이 명령은 PC 로 짝지은 기기만 부를 수 있고(remote.rs `on_message`), 받는 PC 에서 사람이 폴더를 고르고 [받기]를
-//!   눌러야 파일을 쓴다.
+//!   이 명령은 PC 로 짝지은 기기만 부를 수 있다(remote.rs `on_message`). 받는 PC 는 같은 레포 폴더가 하나로 정해지거나,
+//!   그 레포가 이 PC 에 없어 원격에서 받아 왔을 때(`session_move_clone`) 묻지 않고 받는다. 그 밖에는 사람이 폴더를 고르고
+//!   [받기]를 눌러야 파일을 쓴다.
 //! - 같은 대화를 두 PC 에서 이어 쓰면 둘로 갈라져 합칠 수 없다. 보낸 쪽은 받았다는 답을 받은 뒤에 칸을 닫는다.
 //!   받는 쪽은 이 PC 에 이미 있는 같은 대화보다 짧은 것으로 덮지 않는다.
 
@@ -15,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
@@ -25,6 +26,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// 받는 PC 에서 사람이 답하기를 기다리는 시간. 넘기면 보낸 쪽에 거절로 돌려준다.
 const WAIT: Duration = Duration::from_secs(300);
+/// 레포를 받아 오는 데 쓰는 시간. 보낸 쪽은 `WAIT` 동안 기다리므로 받은 뒤 파일을 쓸 틈을 남긴다.
+const CLONE_WAIT: Duration = Duration::from_secs(240);
 /// 대화 하나의 파일 수·풀어 놓은 크기 한도. 그림이 많이 실린 긴 대화도 들어가게 넉넉히 둔다.
 const MAX_FILES: usize = 4000;
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -392,6 +395,160 @@ pub fn session_move_folders(app: AppHandle, origin: Option<String>, folder: Stri
     out
 }
 
+/// 원격 주소(`origin_key`)를 받아 올 https 주소로. 호스트·경로 조각을 좁혀 git 옵션이나 다른 프로토콜로 읽히지 않게 한다.
+/// 주소는 짝지은 PC 가 보낸 값이다.
+fn clone_url(origin: &str) -> Option<String> {
+    let parts: Vec<&str> = origin.split('/').collect();
+    let host = parts.first()?;
+    let host_ok = host.contains('.') && !host.starts_with(['.', '-']) && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'));
+    let path_ok = (3..=7).contains(&parts.len())
+        && parts[1..].iter().all(|p| !p.is_empty() && p.len() <= 100 && !p.starts_with(['.', '-']) && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')));
+    (host_ok && path_ok).then(|| format!("https://{origin}.git"))
+}
+
+fn plain_segment(p: &str) -> bool {
+    !p.is_empty()
+        && p != "."
+        && p != ".."
+        && p.chars().count() <= 128
+        && !p.ends_with(['.', ' '])
+        && !p.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+}
+
+/// 받아 온 레포를 둘 자리. 보낸 PC 에서 `C:\Users\<이름>\…` 아래였으면 이 PC 의 홈 아래 같은 자리에 둔다 — 두 PC 의 레포가 같은
+/// 모양으로 놓여 사람이 찾기 쉽다. 아니면 홈 바로 아래 그 폴더 이름으로. 홈 밖으로 나가는 조각은 받지 않는다.
+fn clone_target(home: &Path, sender_cwd: &str, origin: &str) -> Option<PathBuf> {
+    let norm = sender_cwd.replace('/', "\\");
+    let parts: Vec<&str> = norm.split('\\').filter(|p| !p.is_empty()).collect();
+    let repo = origin.rsplit('/').next().unwrap_or("");
+    let rel: Vec<&str> = match parts.as_slice() {
+        [drive, users, _, rest @ ..] if drive.ends_with(':') && users.eq_ignore_ascii_case("users") => {
+            if rest.is_empty() {
+                vec![repo]
+            } else {
+                rest.to_vec()
+            }
+        }
+        [drive, .., last] if drive.ends_with(':') => vec![*last],
+        _ => vec![repo],
+    };
+    (rel.len() <= 8 && rel.iter().all(|p| plain_segment(p))).then(|| rel.iter().fold(home.to_path_buf(), |p, s| p.join(s)))
+}
+
+fn plain_branch(b: &str) -> bool {
+    b != "HEAD"
+        && !b.is_empty()
+        && b.len() <= 200
+        && !b.starts_with(['-', '/', '.'])
+        && !b.ends_with(['/', '.'])
+        && !b.ends_with(".lock")
+        && !b.contains("..")
+        && !b.contains("//")
+        && b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+}
+
+/// 이사 온 대화의 레포가 이 PC 에 없을 때 원격에서 받아 오고 그 폴더를 돌려준다(11월 23일 사용자 — 받는 PC 에서 [받기]를
+/// 일일이 누르지 않게). 그 자리에 같은 레포가 이미 있으면 그대로 쓰고, 다른 것이 있으면 손대지 않는다. 인증을 묻지 않는다 —
+/// 받는 PC 앞에 사람이 없을 수 있어 묻는 창이 뜨면 시간만 넘긴다. 못 받으면 받는 창이 떠 사람이 정한다.
+#[tauri::command]
+pub async fn session_move_clone(origin: String, cwd: String, branch: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || clone_for(&origin, &cwd, branch.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+fn clone_for(origin: &str, cwd: &str, branch: Option<&str>) -> Result<String, String> {
+    // 검증 손잡이: 받아 둘 홈과 원격을 임시 폴더로 바꾼다. 검증 앱(CHIISPACE_STATE)이 사용자 홈에 레포를 받아 놓지 않게 막는다.
+    let home = match std::env::var_os("CHIISPACE_MOVE_HOME") {
+        Some(h) => PathBuf::from(h),
+        None if std::env::var_os("CHIISPACE_STATE").is_some() => return Err("검증 앱은 사용자 폴더에 레포를 받지 않는다".into()),
+        None => PathBuf::from(std::env::var_os("USERPROFILE").ok_or("홈 폴더를 모르겠다")?),
+    };
+    let base = std::env::var_os("CHIISPACE_MOVE_GIT_BASE").map(PathBuf::from);
+    clone_into(origin, cwd, branch, &home, base.as_deref())
+}
+
+/// `base` 가 있으면 원격 대신 그 아래 `<origin>` 폴더에서 받는다(검증).
+fn clone_into(origin: &str, cwd: &str, branch: Option<&str>, home: &Path, base: Option<&Path>) -> Result<String, String> {
+    let real = clone_url(origin).ok_or_else(|| format!("받아 올 수 없는 원격 주소다: {origin}"))?;
+    let (url, proto) = match base {
+        Some(b) => (b.join(origin.replace('/', "\\")).to_string_lossy().into_owned(), "protocol.file.allow=always"),
+        None => (real.clone(), "protocol.https.allow=always"),
+    };
+    let dest = clone_target(home, cwd, origin).ok_or("레포를 받아 둘 자리를 못 정했다")?;
+    let shown = dest.to_string_lossy().into_owned();
+    if dest.exists() {
+        if git_info(&dest).origin.as_deref() == Some(origin) {
+            return Ok(shown);
+        }
+        let empty = dest.is_dir() && std::fs::read_dir(&dest).is_ok_and(|mut d| d.next().is_none());
+        if !empty {
+            return Err(format!("{shown} 에 다른 것이 있어 {origin} 를 받지 않았다"));
+        }
+    }
+    let created = !dest.exists();
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("레포를 둘 폴더를 못 만들었다 — {e}"))?;
+    }
+    let mut cmd = Command::new("git");
+    cmd.args(["-c", "core.fsmonitor=false", "-c", "protocol.allow=never", "-c", proto, "clone", "--quiet", "--", &url])
+        .arg(&dest)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("git 을 못 띄웠다 — {e}"))?;
+    // 파이프가 차면 git 이 멈추므로 따로 읽는다. 시간이 넘어 죽인 뒤에는 손자(git-remote-https)가 파이프를 쥐고 있을 수 있어
+    // 기다리지 않는다.
+    let (tx, rx) = mpsc::channel();
+    if let Some(mut err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = err.read_to_string(&mut s);
+            let _ = tx.send(s);
+        });
+    }
+    let deadline = Instant::now() + CLONE_WAIT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Some(st),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(200)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    if !status.is_some_and(|s| s.success()) {
+        let said = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default();
+        // 죽인 git 은 반쯤 받은 폴더를 치우지 못한다. 이번에 새로 생긴 자리일 때만 지운다.
+        if status.is_none() && created {
+            let _ = std::fs::remove_dir_all(&dest);
+        }
+        let why = match status {
+            None => "4분 안에 끝나지 않았다".to_string(),
+            Some(_) => said.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git clone 이 실패했다").to_string(),
+        };
+        return Err(format!("{origin} 를 이 PC 에 받아 오지 못했다 — {why}"));
+    }
+    // 검증 원격에서 받았으면 원격 주소를 진짜 주소로 적어 둔다 — 다음 이사가 이 폴더를 같은 레포로 알아본다.
+    if base.is_some() {
+        let _ = git(&dest, &["remote", "set-url", "origin", &real]);
+    }
+    // 보낸 PC 의 가지가 원격에 있으면 그 가지로 둔다. 올리지 않은 가지면 기본 가지에 남는다.
+    if let Some(b) = branch.filter(|b| plain_branch(b)) {
+        if git(&dest, &["rev-parse", "--abbrev-ref", "HEAD"]).as_deref() != Some(b) {
+            let _ = git(&dest, &["switch", "--quiet", b]);
+        }
+    }
+    Ok(shown)
+}
+
 /// 짝지을 때 받는 PC 에 보일 이 PC 의 이름. [폰 연결]에서 붙인 이름이 있으면 그것.
 #[tauri::command]
 pub fn this_pc_name(app: tauri::AppHandle) -> String {
@@ -456,6 +613,90 @@ mod tests {
         assert!(ungz(&b, 100).is_err(), "한도를 넘는 것을 풀었다");
         assert!(ungz("not base64!", 100).is_err());
     }
+
+    #[test]
+    fn only_plain_https_remotes_are_cloned() {
+        assert_eq!(clone_url("github.com/sehyun04/chiispace").as_deref(), Some("https://github.com/sehyun04/chiispace.git"));
+        assert_eq!(clone_url("gitlab.com/a/b/c").as_deref(), Some("https://gitlab.com/a/b/c.git"));
+        for bad in ["host:2222/a/b", "localhost/a/b", "github.com/a", "github.com/-c/x", "github.com/a/../b", "github.com/a/.git", "ext::sh -c x/a/b", "github.com/a b/c", "github.com//c", ""] {
+            assert_eq!(clone_url(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_cloned_repo_lands_where_it_was_on_the_other_pc() {
+        let home = Path::new(r"C:\Users\gagu1");
+        let o = "github.com/sehyun04/chiispace";
+        assert_eq!(clone_target(home, r"C:\Users\kshkj\desktop\sehyun\kasaspace", o), Some(home.join("desktop").join("sehyun").join("kasaspace")));
+        assert_eq!(clone_target(home, "c:/users/kshkj/work/repo", o), Some(home.join("work").join("repo")));
+        assert_eq!(clone_target(home, r"C:\chiiOS", o), Some(home.join("chiiOS")));
+        assert_eq!(clone_target(home, r"D:\src\한글 폴더", o), Some(home.join("한글 폴더")));
+        // 홈 자체·빈 폴더·네트워크 경로는 레포 이름으로.
+        for cwd in [r"C:\Users\kshkj", "", r"\\server\share\x"] {
+            assert_eq!(clone_target(home, cwd, o), Some(home.join("chiispace")), "{cwd}");
+        }
+        for cwd in [r"C:\Users\kshkj\a\..\b", r"C:\Users\kshkj\a\.", r"C:\Users\kshkj\a\b.", r"C:\Users\k\a:b"] {
+            assert_eq!(clone_target(home, cwd, o), None, "{cwd}");
+        }
+    }
+
+    #[test]
+    fn only_plain_branch_names_are_switched_to() {
+        for ok in ["main", "feature/x", "hachi/1122-b857121b", "v1.2"] {
+            assert!(plain_branch(ok), "{ok}");
+        }
+        for bad in ["HEAD", "", "-x", "/x", "x/", "a..b", "a//b", "x.lock", "a b", "a:b", ".x"] {
+            assert!(!plain_branch(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_missing_repo_is_cloned_once_and_nothing_else_is_touched() {
+        let run = |dir: &Path, args: &[&str]| {
+            let ok = Command::new("git")
+                .args(["-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "-C"])
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        let root = std::env::temp_dir().join(format!("chiispace-clone-{}-{}", std::process::id(), NEXT_TMP.fetch_add(1, Ordering::Relaxed)));
+        let base = root.join("remote");
+        let home = root.join("home");
+        let src = base.join("github.com").join("example").join("r");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        run(&src, &["init", "-q", "-b", "main"]);
+        run(&src, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        run(&src, &["branch", "feature"]);
+        let origin = "github.com/example/r";
+        let got = clone_into(origin, r"C:\Users\someone\work\r", Some("feature"), &home, Some(&base)).unwrap();
+        let dest = home.join("work").join("r");
+        assert_eq!(Path::new(&got), dest);
+        let info = git_info(&dest);
+        assert_eq!(info.origin.as_deref(), Some(origin), "받은 레포가 같은 레포로 안 보임");
+        assert_eq!(info.branch.as_deref(), Some("feature"), "보낸 PC 의 가지로 안 둠");
+        // 같은 레포가 이미 있으면 다시 받지 않고 그 자리를 쓴다.
+        std::fs::write(dest.join("local.txt"), "mine").unwrap();
+        assert_eq!(clone_into(origin, r"C:\Users\someone\work\r", None, &home, Some(&base)).unwrap(), got);
+        assert!(dest.join("local.txt").exists());
+        // 그 자리에 다른 것이 있으면 손대지 않는다.
+        let other = home.join("busy");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("keep.txt"), "x").unwrap();
+        assert!(clone_into(origin, r"C:\Users\someone\busy", None, &home, Some(&base)).unwrap_err().contains("다른 것이 있어"));
+        assert_eq!(std::fs::read_dir(&other).unwrap().count(), 1);
+        // 원격에 없으면 까닭을 돌려주고 자리를 남기지 않는다.
+        let e = clone_into("github.com/example/missing", r"C:\Users\someone\work\missing", None, &home, Some(&base)).unwrap_err();
+        assert!(e.contains("받아 오지 못했다"), "{e}");
+        assert!(!home.join("work").join("missing").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn project_dirs_follow_claude() {

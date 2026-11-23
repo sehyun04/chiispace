@@ -372,6 +372,7 @@ pub fn run() {
             session_move::session_move_pack,
             session_move::session_move_answer,
             session_move::session_move_folders,
+            session_move::session_move_clone,
             session_move::this_pc_name,
             codex_stream::codex_stream_start,
             codex_stream::codex_stream_request,
