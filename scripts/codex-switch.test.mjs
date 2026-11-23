@@ -59,7 +59,17 @@ test("Codex 대화창과 터미널은 현재 대화로 왕복하고 빈 대화�
     shell: path.join(process.env.SystemRoot, "System32", "cmd.exe"), layout }],
   active: 0, nextPane: 1, nextTab: 1, procs: {}, restoreMode: "native-continue",
   streams: { "%0": { agent: "codex", session: "", cwd: project } } }));
-  const saved = () => JSON.parse(readFileSync(state, "utf8"));
+  // 앱은 세션 파일을 통째로 다시 쓴다(state_save). 쓰는 도중에 읽으면 빈 파일·반쪽이 보여 잠깐 뒤 다시 읽는다.
+  const saved = () => {
+    for (let i = 0; ; i++) {
+      try {
+        return JSON.parse(readFileSync(state, "utf8"));
+      } catch (e) {
+        if (i >= 20) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+    }
+  };
   const pane = id => latest[id] ?? {};
   const until = async (fn, message, timeout = 30000) => {
     const end = Date.now() + timeout;
