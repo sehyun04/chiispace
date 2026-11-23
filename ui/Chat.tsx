@@ -100,7 +100,9 @@ export function Chat({
 
   useEffect(() => {
     if (direct) return;
-    if ((!root && agent === "claude") || !id) return;
+    // 폴더 없이 연 대화창(홈)은 root 가 비어 있다. 대화 파일은 모든 프로젝트 폴더에서 id 로 찾으므로(claude_files.rs
+    // `session_file`) id 만 있으면 읽는다 — root 를 요구하면 홈 대화창이 "대화를 여는 중"에서 멈추고 보낸 말이 "보내는 중"으로 남는다.
+    if (!id) return;
     let alive = true;
     setRaw(null);
     const load = () => {

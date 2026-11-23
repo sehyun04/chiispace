@@ -29,6 +29,16 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     { ...common, type: "user", uuid: userId, parentUuid: null, message: { role: "user", content: "ASK_LIVE_START" } },
     { ...common, type: "assistant", uuid: randomUUID(), parentUuid: userId, message: { id: "msg_0", type: "message", role: "assistant", model: "claude-sonnet-4-6", content: [{ type: "text", text: "LIVE_READY_MARK" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } },
   ].map(v => JSON.stringify(v)).join("\n") + "\n");
+  // 폴더 없이 연 대화창(홈). claude 는 홈에서 돌고 대화를 홈의 프로젝트 폴더에 쌓는다. 칸의 폴더 값은 비어 있다 —
+  // 11월 23일 데스크톱에서 이 칸이 "대화를 여는 중"에 멈추고 보낸 말이 "보내는 중"으로 남았다(Chat.tsx 가 빈 폴더면 안 읽었다).
+  const homeDir = process.env.USERPROFILE;
+  const homeSid = randomUUID(), homeUser = randomUUID();
+  const homeCommon = { ...common, sessionId: homeSid, cwd: homeDir };
+  mkdirSync(path.join(home, "projects", homeDir.replace(/[^a-zA-Z0-9]/g, "-")), { recursive: true });
+  writeFileSync(path.join(home, "projects", homeDir.replace(/[^a-zA-Z0-9]/g, "-"), homeSid + ".jsonl"), [
+    { ...homeCommon, type: "user", uuid: homeUser, parentUuid: null, message: { role: "user", content: "ASK_HOME_START" } },
+    { ...homeCommon, type: "assistant", uuid: randomUUID(), parentUuid: homeUser, message: { id: "msg_h", type: "message", role: "assistant", model: "claude-sonnet-4-6", content: [{ type: "text", text: "HOME_READY_MARK" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } },
+  ].map(v => JSON.stringify(v)).join("\n") + "\n");
   // claude 2.1.285 부터 환경의 API 키를 끝 20글자로 승인했는지 보고, 시작할 때 auto 모드를 기본으로 하라는 창을 띄운다.
   // 둘 다 미리 답해 둔다. 안 그러면 확인창·권유 창이 TUI 를 막아 대화창에서 보낸 말이 제출되지 않는다.
   const settings = { hasCompletedOnboarding: true, theme: "light", hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true, projects: { [project]: { hasTrustDialogAccepted: true }, [project.replaceAll("\\", "/")]: { hasTrustDialogAccepted: true } }, customApiKeyResponses: { approved: ["chiispace-fixture-key", "chiispace-fixture-key".slice(-20)], rejected: [] } };
@@ -38,10 +48,10 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
   const state = path.join(root, "session.json");
   const shell = path.join(process.env.SystemRoot, "System32", "cmd.exe");
   writeFileSync(state, JSON.stringify({
-    tabs: [{ key: "t0", focus: "%0", root: project, shell, layout: { kind: "leaf", id: "%0" } }],
-    active: 0, nextPane: 1, nextTab: 1, restoreMode: "native-continue", procs: {},
+    tabs: [{ key: "t0", focus: "%0", root: project, shell, layout: { kind: "leaf", id: "%0" } }, { key: "t1", focus: "%1", root: "", shell, layout: { kind: "leaf", id: "%1" } }],
+    active: 0, nextPane: 2, nextTab: 2, restoreMode: "native-continue", procs: {},
     // 대화창 칸으로 그 대화를 이어 연다. 10월 17일까지는 터미널 칸의 claude 위에 덮은 대화창으로 봤다.
-    streams: { "%0": { agent: "claude", session: sid, cwd: project } },
+    streams: { "%0": { agent: "claude", session: sid, cwd: project }, "%1": { agent: "claude", session: homeSid, cwd: "" } },
   }));
 
   const probe = "/" + randomUUID();
@@ -114,8 +124,23 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
       const slot = document.querySelector('[data-pane="%0"]');
       const over = slot?.querySelector('.chat-over');
       const input = over?.querySelector('.composer textarea');
-      const texts = (sel) => [...(over?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
+      const texts = (sel, root = over) => [...(root?.querySelectorAll(sel) ?? [])].map(e => e.textContent);
+      const homeOver = document.querySelector('[data-pane="%1"] .chat-over');
+      const homeInput = homeOver?.querySelector('.composer textarea');
+      const type = async (el, text) => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 50));
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      };
       const dom = {
+        home: {
+          empty: homeOver?.querySelector('.chat-empty')?.textContent ?? null,
+          theirs: texts('.msg:not(.mine):not(.live) .bubble', homeOver),
+          mine: texts('.msg.mine:not(.sending) .bubble', homeOver),
+          sending: texts('.msg.sending .bubble', homeOver),
+          input: !!homeInput && !homeInput.disabled,
+        },
         over: !!over,
         mine: texts('.msg.mine:not(.sending) .bubble'),
         sending: texts('.msg.sending .bubble'),
@@ -127,12 +152,8 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
       };
       const r = await fetch(${JSON.stringify(apiBase + probe)}, {method:'POST',body:JSON.stringify({dom})});
       for (const c of await r.json()) {
-        if (c.send && input) {
-          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, c.send);
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          await new Promise(r => setTimeout(r, 50));
-          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-        }
+        if (c.send && input) await type(input, c.send);
+        if (c.sendHome && homeInput) await type(homeInput, c.sendHome);
       }
     } finally { pending = false; }
   }, 100); return 'isolated live test'; })()`;
@@ -164,6 +185,12 @@ test("답이 쓰이는 동안 대화창에 글자가 흐르고, 끝나면 대화
     assert.equal(dom().sending.length, 0, "보내는 중 표시가 걷히지 않음");
     // 일하는 중은 통로의 결과 줄이 와야 풀린다. 끝내 남아 있으면 안 된다.
     assert.ok(await until(() => !dom().stop, 150), "답이 끝났는데 중단 단추가 남음");
+
+    // 폴더 없이 연 대화창(홈)도 대화를 그리고, 보낸 말이 파일에 적히면 "보내는 중"이 걷힌다.
+    assert.ok(await until(() => dom().home?.theirs?.some(t => t.includes("HOME_READY_MARK")), 100), "홈 대화창이 대화를 안 그림: " + JSON.stringify(dom().home));
+    assert.ok(await until(() => dom().home?.input, 300), "홈 대화창의 claude 가 안 켜짐: " + JSON.stringify(dom().home));
+    commands.push({ sendHome: "HOME_ASK" });
+    assert.ok(await until(() => dom().home?.mine?.includes("HOME_ASK") && !dom().home.sending.length, 300), "홈 대화창에 보낸 말이 보내는 중에 남음: " + JSON.stringify(dom().home));
 
     assert.ok(seen.main >= 1, "본 대화 요청이 가짜 모델에 닿지 않음");
     assert.ok(seen.keyArrived, "인증 헤더가 프록시를 지나 도착하지 않음");
