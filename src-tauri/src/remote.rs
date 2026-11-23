@@ -453,7 +453,7 @@ impl Remote {
     fn save(inner: &Inner) {
         let Some(file) = &inner.file else { return };
         if let Ok(json) = serde_json::to_string_pretty(&inner.saved) {
-            let _ = std::fs::write(file, json);
+            let _ = crate::workspace::write_whole(file, json.as_bytes());
         }
     }
 

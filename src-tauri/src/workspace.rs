@@ -185,8 +185,21 @@ pub(crate) fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
 #[tauri::command]
 pub fn state_save(app: AppHandle, json: String) {
     if let Some(p) = state_file(&app) {
-        let _ = std::fs::write(p, json);
+        let _ = write_whole(&p, json.as_bytes());
     }
+}
+
+/// 옆 파일에 다 쓴 뒤 이름을 바꿔 통째로 갈아 끼운다. 그대로 덮어쓰면 쓰는 도중에 읽는 쪽(켤 때의 앱·검증)이 빈 파일이나
+/// 반쪽을 보고, 그 사이 앱이 꺼지면 탭·짝지은 기기가 통째로 사라진다. 이름 바꾸기가 막히면(백신이 잠깐 쥐는 등) 그대로 덮어쓴다.
+pub(crate) fn write_whole(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".saving");
+    let tmp = path.with_file_name(name);
+    if std::fs::write(&tmp, data).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(path, data)
 }
 
 /// 이름이 chiispace 가 되기 전에 쓰던 자리.
@@ -214,4 +227,25 @@ pub fn state_load(app: AppHandle) -> Option<String> {
         }
     }
     std::fs::read_to_string(legacy_state_file(&app)?).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_saved_file_is_replaced_whole_and_leaves_nothing_beside_it() {
+        let dir = std::env::temp_dir().join(format!("chiispace-write-whole-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("session.json");
+        std::fs::write(&p, "{\"old\":true,\"long\":\"xxxxxxxxxxxxxxxx\"}").unwrap();
+        super::write_whole(&p, b"{\"new\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"new\":1}");
+        // 처음 쓰는 파일도 된다.
+        let q = dir.join("remote.json");
+        super::write_whole(&q, b"{}").unwrap();
+        assert_eq!(std::fs::read_to_string(&q).unwrap(), "{}");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 2, "옆에 남은 파일: {names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
