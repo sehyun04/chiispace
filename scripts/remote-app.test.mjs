@@ -427,7 +427,9 @@ test("폰 연결 — Cloudflare 중계(로컬), 숫자 비교 짝짓기, 암호 
       assert.deepEqual(panes.filter(p => p.agent === "claude").map(p => [p.id, p.session, p.cwd, p.alive, p.waiting]), [["%0", sid, cwd, true, 0]], JSON.stringify(panes));
 
       // 5. 폰에서 말하면 PC 칸의 claude 가 받고, PC 대화창에도 그 말과 답이 남는다.
-      await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서") });
+      // 폰에 주는 원문은 화면이 안 읽는 것을 걷고 줄인 것이라(phone_transcript.rs) 짧은 대화는 압축 문턱(4KB)을 못 넘는다.
+      // 사람이 친 말은 그대로 남으니, 말을 길게 보내 아래에서 긴 원문이 줄여져 가는지 본다.
+      await call("claude_chat_send", { id: "%0", line: userLine("HELLO_A 폰에서 " + "긴 말을 폰에서 보낸다 ".repeat(300)) });
       assert.ok(await until(() => dom().theirs?.some((t) => t.includes("HELLO_A_REPLY")) && dom().mine?.some((t) => t.includes("HELLO_A")), 400), "폰에서 보낸 말이 PC 칸에 안 남음: " + JSON.stringify(dom()));
       const seen = () => JSON.stringify({ statuses, events: Object.entries(events.reduce((n, x) => ((n[x.e] = (n[x.e] ?? 0) + 1), n), {})), wire: wire.length, live: events.filter((x) => x.e === "chat:live").map((x) => x.p.phase) });
       assert.ok(await until(() => events.some((x) => x.e === "chat:live" && JSON.stringify(x.p).includes("HELLO_A_REPLY")), 50), "쓰이는 중인 답이 폰에 안 옴: " + seen());

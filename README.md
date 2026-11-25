@@ -42,6 +42,7 @@ xterm.js 같은 소비자를 처음부터 상정하고 만들어져 있다.
 | `src-tauri/src/claude_menus.rs` | 대화창 `/memory` 의 메모리 파일 열기 · `/export` 저장(새 파일만) |
 | `src-tauri/src/claude_chat.rs` | 터미널 없는 Claude 칸의 `claude -p` stream-json 통로 · 뒤늦게 붙는 폰에 건넬 칸의 지금 상태 |
 | `src-tauri/src/remote.rs`, `src-tauri/src/remote_crypto.rs` | 폰 연결 — 중계에 붙기, 숫자 비교 짝짓기, 암호 통로, 폰이 부를 수 있는 명령 목록, 폰 화면 파일 |
+| `src-tauri/src/phone_transcript.rs` | 폰에 줄 대화 원문 — 화면이 안 읽는 칸·큰 글을 걷고 끝 2MB, 새로 붙은 줄만 읽기 |
 | `src-tauri/src/session_move.rs` | 세션이사 — 보낼 꾸러미, 받는 PC 의 [받기]·파일 쓰기·폴더 후보 |
 | `relay/` | 사용자 Cloudflare 에 올리는 중계 — PC 와 폰을 잇고 암호문만 나른다 |
 | `src-tauri/src/proxy.rs` | 루프백 프록시 — 쓰이는 중인 답(SSE)을 옆에서 읽는다 |

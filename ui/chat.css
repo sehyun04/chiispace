@@ -412,6 +412,8 @@
 .md-link {
   color: var(--link);
   text-decoration: underline;
+  /* 긴 주소가 폰 폭에서 말풍선을 밀어 넓히지 않게. */
+  overflow-wrap: anywhere;
 }
 
 .md-table {

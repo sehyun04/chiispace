@@ -12,26 +12,62 @@
  *  전혀 다른 이름으로 읽힌다. */
 import { Fragment, useState, type ReactNode } from "react";
 
+/** 맨 주소. 한글이 바로 붙어 와도("…/chiiOS입니다") 주소에 먹히지 않게 주소 글자는 ASCII 로만 받고,
+ *  문장 끝 마침표·쉼표는 뒤에서 떼어 낸다(`URL_END`). `*` 는 뺀다 — 굵게 표시의 별이 주소에 붙어 들어간다. */
+const URL_SRC = String.raw`https?:\/\/[\w\-.~:/?#@!$&+,;=%]+`;
+const URL_END = /[.,;:!?]+$/;
+
+/** 링크는 새 창으로 연다. PC 앱은 opener 플러그인이 `target=_blank` 를 기본 브라우저로 넘기고, 폰은 사파리가 연다. */
+function link(href: string, label: ReactNode, key: string): ReactNode {
+  return (
+    <a key={key} className="md-link" href={href} target="_blank" rel="noreferrer">
+      {label}
+    </a>
+  );
+}
+
+/** 주소만 링크로 바꾼다. 마크다운으로 해석하면 안 되는 글(내가 친 말)에 쓴다. */
+export function Linkify({ text }: { text: string }) {
+  const out: ReactNode[] = [];
+  const re = new RegExp(URL_SRC, "g");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const url = m[0].replace(URL_END, "");
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(link(url, url, `u${m.index}`));
+    last = m.index + url.length;
+    re.lastIndex = last;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <Fragment>{out}</Fragment>;
+}
+
 function inline(text: string, keyBase: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(\*\*([^*]+)\*\*|`([^`]+)`|~~([^~]+)~~|\[([^\]]+)\]\(([^)\s]+)\)|\*([^*\n]+)\*|(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_]))/gu;
+  const re = new RegExp(
+    String.raw`(\*\*([^*]+)\*\*|` + "`([^`]+)`" + String.raw`|~~([^~]+)~~|\[([^\]]+)\]\(([^)\s]+)\)|(${URL_SRC})|\*([^*\n]+)\*|(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_]))`,
+    "gu",
+  );
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[2] != null) out.push(<strong key={`${keyBase}-b${i}`}>{m[2]}</strong>);
+    let end = m.index + m[0].length;
+    // 굵게·지움 안의 주소도 링크가 되게 안쪽을 한 번 더 편다.
+    if (m[2] != null) out.push(<strong key={`${keyBase}-b${i}`}>{inline(m[2], `${keyBase}-b${i}`)}</strong>);
     else if (m[3] != null) out.push(<code key={`${keyBase}-c${i}`} className="md-code">{m[3]}</code>);
-    else if (m[4] != null) out.push(<del key={`${keyBase}-s${i}`}>{m[4]}</del>);
-    else if (m[5] != null)
-      out.push(
-        <a key={`${keyBase}-l${i}`} className="md-link" href={m[6]} target="_blank" rel="noreferrer">
-          {m[5]}
-        </a>,
-      );
-    else if (m[7] != null) out.push(<em key={`${keyBase}-i${i}`}>{m[7]}</em>);
-    else if (m[8] != null) out.push(<em key={`${keyBase}-u${i}`}>{m[8]}</em>);
-    last = m.index + m[0].length;
+    else if (m[4] != null) out.push(<del key={`${keyBase}-s${i}`}>{inline(m[4], `${keyBase}-s${i}`)}</del>);
+    else if (m[5] != null) out.push(link(m[6], m[5], `${keyBase}-l${i}`));
+    else if (m[7] != null) {
+      const url = m[7].replace(URL_END, "");
+      out.push(link(url, url, `${keyBase}-a${i}`));
+      end = m.index + url.length;
+      re.lastIndex = end;
+    } else if (m[8] != null) out.push(<em key={`${keyBase}-i${i}`}>{m[8]}</em>);
+    else if (m[9] != null) out.push(<em key={`${keyBase}-u${i}`}>{m[9]}</em>);
+    last = end;
     i++;
   }
   if (last < text.length) out.push(text.slice(last));

@@ -3,7 +3,7 @@
  *  그리기만 한다. 대화 파일을 읽고 무엇을 그릴지 고르는 일은 Chat.tsx 가, 무엇을 보낼지는
  *  Composer.tsx 가 한다. 서브에이전트 대화 보기(SubagentView)도 같은 `Row` 로 그린다. */
 import { useContext, useState } from "react";
-import { Markdown } from "./Markdown";
+import { Linkify, Markdown } from "./Markdown";
 import { faceUrl, bySlug } from "./roster";
 import { fmtClock, fmtDuration, fmtTokens, resultText, type Item } from "./transcript";
 import { shortToolName, toolSummary, toolStats, diffLines } from "./tools";
@@ -144,8 +144,8 @@ export function Row({
             <div className="msg-row">
               <div className={`bubble${item.queued ? " queued" : ""}`}>
                 {item.images?.map((src, i) => <img key={i} className="msg-img" src={src} alt="" />)}
-                {/* 내가 친 말은 그대로 보인다 — 마크다운으로 해석하면 쓴 것과 달라진다. */}
-                {item.text && (mine ? <span style={{ whiteSpace: "pre-wrap" }}>{item.text}</span> : <Markdown text={item.text} />)}
+                {/* 내가 친 말은 그대로 보인다 — 마크다운으로 해석하면 쓴 것과 달라진다. 주소만 누를 수 있게 한다. */}
+                {item.text && (mine ? <span style={{ whiteSpace: "pre-wrap" }}><Linkify text={item.text} /></span> : <Markdown text={item.text} />)}
               </div>
               {clock && <span className="msg-clock">{clock}</span>}
             </div>

@@ -39,7 +39,8 @@ use crate::remote_crypto as rc;
 /// 짝짓기를 받는 시간. [폰 짝짓기]를 누른 뒤에만, 그동안만 받는다.
 const PAIR_LIFE: Duration = Duration::from_secs(300);
 /// 폰이 받는 대화 원문의 끝부분. 대화창은 파일이 자랄 때마다 원문을 통째로 다시 받는다 — 휴대폰 망에서는 짧게.
-const PHONE_TAIL: u64 = 2 * 1024 * 1024;
+/// 화면에 안 나오는 것을 걷은 뒤에 잰다(phone_transcript.rs). 날것으로 재면 긴 대화에서 두어 턴만 남는다.
+const PHONE_TAIL: usize = 2 * 1024 * 1024;
 /// 웹소켓 한 통에 싣는 암호문·파일 조각. Cloudflare 웹소켓 한 통의 한도(1MiB)보다 넉넉히 작다.
 const CHUNK: usize = 240_000;
 /// 조각을 모아 만드는 말 하나의 한도. 그림 몇 장이 실린 말까지다(입력바가 한 장을 3.75MB 안으로 줄인다, ui/images.ts).

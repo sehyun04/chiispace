@@ -24,6 +24,7 @@ mod codex_stream;
 mod codex_switch;
 mod remote;
 mod remote_crypto;
+mod phone_transcript;
 mod session_move;
 
 use std::collections::HashMap;

@@ -224,9 +224,9 @@ pub fn claude_transcript_raw(app: AppHandle, root: String, id: String) -> String
     session_file(&app, &root, &id).map(|p| read_tail(&p)).unwrap_or_default()
 }
 
-/// 폰이 받는 대화 원문. 파일이 자랄 때마다 통째로 다시 받으므로 휴대폰 망에서는 더 짧게 자른다(remote.rs).
-pub(crate) fn transcript_tail(app: &AppHandle, root: &str, id: &str, max: u64) -> String {
-    session_file(app, root, id).map(|p| read_tail_max(&p, max)).unwrap_or_default()
+/// 폰이 받는 대화 원문. 파일이 자랄 때마다 통째로 다시 받으므로, 화면에 안 나오는 것을 걷고 끝에서 `max` 만큼(phone_transcript.rs).
+pub(crate) fn transcript_tail(app: &AppHandle, root: &str, id: &str, max: usize) -> String {
+    session_file(app, root, id).map(|p| crate::phone_transcript::tail(&p, max)).unwrap_or_default()
 }
 
 /// 대화 파일의 끝부분을 줄 단위로. 본 대화와 서브에이전트 대화가 같이 쓴다.
