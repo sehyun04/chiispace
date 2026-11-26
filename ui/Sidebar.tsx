@@ -112,7 +112,8 @@ export function Sidebar({
 
   return (
     <aside className="side">
-        <div className="side-section">
+        {/* OS 제목줄이 없으니 옆칸 맨 윗줄의 빈 자리가 창 손잡이다 */}
+        <div className="side-section" data-tauri-drag-region>
           <button
             className="folderbtn"
             onClick={onPickFolder}

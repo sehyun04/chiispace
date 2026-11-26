@@ -1051,3 +1051,50 @@ body.dragging .slot {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
+
+/* ── 창 단추 ─────────────────────────────────────────────── */
+
+/* OS 제목줄을 걷고(decorations: false) 창 단추를 맨 위 오른쪽 칸의 머리줄 끝에 얹는다.
+   높이는 머리줄(얼굴 34px + 위아래 2px)과 같게 두어 한 줄로 읽히게 한다. 왼쪽 세로선은 그 칸의 ×(칸 닫기)와
+   이쪽 ×(창 닫기)를 가른다 — 둘이 붙어 있으면 칸을 닫으려다 창을 닫는다. */
+.winctl {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 10px;
+  background: var(--paper);
+  box-shadow: inset 1px 0 0 var(--line);
+  border-bottom: 1px solid var(--line);
+  /* 단추가 아닌 틈은 창을 끌어 옮기는 손잡이다 */
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.winctl button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.winctl button:hover {
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.winctl button.close:hover {
+  background: var(--bad);
+  color: var(--card);
+}
+/* 창 단추 묶음 폭(10 + 30*3 + 2*2 + 6)만큼 그 칸 머리줄을 비켜 준다 */
+.slot.corner .pane-head {
+  padding-right: 120px;
+}
