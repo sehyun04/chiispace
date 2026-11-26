@@ -4,14 +4,16 @@
  *  손으로 하던 절차를 그대로 옮겼다(작업 정리 4절). 하나라도 빠지면 실제로 사고가 났던 단계들이다:
  *  - 작업본이 아니라 그 커밋 그대로의 임시 워크트리에서 굽는다. 작업본에는 다른 세션의 미커밋 변경이 섞여 있다.
  *  - `CONPTY-LICENSE.txt` 가 체크아웃 때 CRLF 로 바뀌면 앱이 켜자마자 죽는다. 커밋의 바이트와 대조한다.
- *  - 그 exe 그대로 전체 검증을 돌린다. 실패가 하나라도 있으면 바꾸지 않는다(--force 로만 넘는다).
- *  - 바꾸기 전에 앱·CLI·사용자 세션 파일을 백업하고, 바꾼 뒤 해시가 검증한 파일과 같은지 본다.
+ *  - 굽고 나면 전체 검증 없이 바로 바꾼다. 쓰는 사람이 사용자 하나라 10분 넘는 검증 대기보다 빨리 받아 써 보는
+ *    쪽을 골랐다(11월 26일 사용자). 검증은 --verify 를 줄 때만 돌고, 그때는 실패가 있으면 바꾸지 않는다(--force 로만 넘는다).
+ *  - 바꾸기 전에 앱·CLI·사용자 세션 파일을 백업하고, 바꾼 뒤 해시가 구운 파일과 같은지 본다.
  *  - 사용자 앱을 임의로 끄지 않는다. 떠 있으면 멈추고, --allow-running 이면 실행 중인 exe 를 *.old-<시각>
  *    으로 옮겨 낸 뒤 놓는다(새 코드는 다음 실행부터).
  *
  *    node scripts/deploy.mjs                      origin/master 로 굽고 바꾼다
  *    node scripts/deploy.mjs --ref <커밋>          그 커밋으로
- *    node scripts/deploy.mjs --dry-run            굽고 검증까지만
+ *    node scripts/deploy.mjs --verify             바꾸기 전에 그 exe 로 전체 검증(실제 앱 포함)
+ *    node scripts/deploy.mjs --dry-run            굽기까지만(--verify 와 같이 주면 검증까지)
  *    node scripts/deploy.mjs --label <이름>        백업 폴더 이름(before-<이름>-<시각>)
  *
  *    node scripts/deploy.mjs --no-release         GitHub 릴리스는 올리지 않는다
@@ -107,24 +109,28 @@ const staged = { app: path.join(stage, "chiispace.exe"), cli: path.join(stage, "
 copyFileSync(built.app, staged.app);
 copyFileSync(built.cli, staged.cli);
 
-// 5. 그 exe 그대로 전체 검증
-say("검증 중(실제 앱 포함, 10분 남짓)");
-const tester = existsSync(path.join(wt, "scripts", "test.mjs")) ? path.join(wt, "scripts", "test.mjs") : path.join(repo, "scripts", "test.mjs");
-const tests = sh(process.execPath, [tester, "--exe", staged.app], wt);
-console.log(tests.out.split(/\r?\n/).filter((l) => l.startsWith("[test]") || l.startsWith("  ")).join("\n"));
-const summary = tests.out.match(/전체 \S+ · 통과 \S+ · 실패 \S+ · 건너뜀 \S+/)?.[0] ?? "요약 없음";
-const cargoTest = sh("cargo", ["test", "--release", "--features", "custom-protocol", "--target-dir", target], path.join(wt, "src-tauri"));
-const rustPassed = [...(cargoTest.out + cargoTest.err).matchAll(/test result: ok\. (\d+) passed/g)].reduce((n, m) => n + Number(m[1]), 0);
-say(`JS ${summary} · Rust ${cargoTest.ok ? `${rustPassed}개 통과` : "실패"}`);
-if ((!tests.ok || !cargoTest.ok) && !flag("--force")) die("검증 실패가 있어 바꾸지 않는다(--force 로만 넘는다)");
+// 5. 검증은 --verify 일 때만 — 그 exe 그대로
+let checked = "검증 안 함";
+if (flag("--verify")) {
+  say("검증 중(실제 앱 포함, 10분 남짓)");
+  const tester = existsSync(path.join(wt, "scripts", "test.mjs")) ? path.join(wt, "scripts", "test.mjs") : path.join(repo, "scripts", "test.mjs");
+  const tests = sh(process.execPath, [tester, "--exe", staged.app], wt);
+  console.log(tests.out.split(/\r?\n/).filter((l) => l.startsWith("[test]") || l.startsWith("  ")).join("\n"));
+  const summary = tests.out.match(/전체 \S+ · 통과 \S+ · 실패 \S+ · 건너뜀 \S+/)?.[0] ?? "요약 없음";
+  const cargoTest = sh("cargo", ["test", "--release", "--features", "custom-protocol", "--target-dir", target], path.join(wt, "src-tauri"));
+  const rustPassed = [...(cargoTest.out + cargoTest.err).matchAll(/test result: ok\. (\d+) passed/g)].reduce((n, m) => n + Number(m[1]), 0);
+  checked = `JS ${summary} · Rust ${rustPassed}`;
+  say(`JS ${summary} · Rust ${cargoTest.ok ? `${rustPassed}개 통과` : "실패"}`);
+  if ((!tests.ok || !cargoTest.ok) && !flag("--force")) die("검증 실패가 있어 바꾸지 않는다(--force 로만 넘는다)");
+}
 if (dry) {
-  say("--dry-run: 굽기·검증까지만 했다");
+  say("--dry-run: 바꾸지 않고 여기서 멈춘다");
   process.exit(0);
 }
-// 검증하는 10분 사이에 사용자가 앱을 켤 수 있다(10월 16일 실제로 켰다). 시작할 때만 보면 백업까지 해 놓고
+// 굽는 몇 분 사이에 사용자가 앱을 켤 수 있다(10월 16일 실제로 켰다). 시작할 때만 보면 백업까지 해 놓고
 // 잠긴 exe 에 막혀 끝나므로, 바꾸기 직전에 다시 보고 그때의 상태로 옮겨 낸다.
 const upNow = running("chiispace.exe") || running("chiispace-cli.exe");
-if (upNow && !flag("--allow-running")) die("검증하는 사이 앱이 켜졌다. 사용자가 끈 뒤 다시 하거나 --allow-running 을 준다");
+if (upNow && !flag("--allow-running")) die("굽는 사이 앱이 켜졌다. 사용자가 끈 뒤 다시 하거나 --allow-running 을 준다");
 
 // 6. 백업 — 앱·CLI·사용자 세션
 const when = stamp();
@@ -152,7 +158,7 @@ for (const [name, from] of [["chiispace.exe", staged.app], ["chiispace-cli.exe",
   const to = path.join(release, name);
   if (upNow && existsSync(to)) renameSync(to, `${to}.old-${when}`);
   copyFileSync(from, to);
-  if (sha256(to) !== sha256(from)) die(`바꾼 ${name} 가 검증한 파일과 다르다`);
+  if (sha256(to) !== sha256(from)) die(`바꾼 ${name} 가 구운 파일과 다르다`);
 }
 const hashes = { app: sha256(path.join(release, "chiispace.exe")), cli: sha256(path.join(release, "chiispace-cli.exe")) };
 const sessionAfter = existsSync(sessionFile) ? sha256(sessionFile) : null;
@@ -161,7 +167,7 @@ say(`바꿈 ${when} · 앱 ${hashes.app} · CLI ${hashes.cli}`);
 
 // 8. 기록 한 줄 — 커밋은 부른 쪽이 한다
 const log = path.join(repo, "docs", "DEPLOYS.md");
-const row = `| ${when.slice(0, 4)}-${when.slice(4, 6)}-${when.slice(6, 8)} ${when.slice(9, 11)}:${when.slice(11, 13)} | \`${short}\` ${subject} | ${upNow ? "떠 있음(.old 로 옮김)" : "꺼짐"} | JS ${summary} · Rust ${rustPassed} | \`${path.basename(backup)}/\` | \`${hashes.app.slice(0, 16)}…\` / \`${hashes.cli.slice(0, 16)}…\` |\n`;
+const row = `| ${when.slice(0, 4)}-${when.slice(4, 6)}-${when.slice(6, 8)} ${when.slice(9, 11)}:${when.slice(11, 13)} | \`${short}\` ${subject} | ${upNow ? "떠 있음(.old 로 옮김)" : "꺼짐"} | ${checked} |\`${path.basename(backup)}/\` | \`${hashes.app.slice(0, 16)}…\` / \`${hashes.cli.slice(0, 16)}…\` |\n`;
 if (existsSync(log)) {
   appendFileSync(log, row);
   say(`기록 docs/DEPLOYS.md 에 한 줄 붙임 — 커밋은 따로 한다`);

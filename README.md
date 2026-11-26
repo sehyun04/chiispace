@@ -322,9 +322,9 @@ cd src-tauri; cargo build --release --features custom-protocol --bins
 ```
 
 사용자가 쓰는 고정 경로의 두 exe 를 바꾸는 일(배포)은 손으로 하지 않고 `node scripts/deploy.mjs` 로 한다.
-origin/master 를 커밋 그대로의 임시 워크트리에서 굽고(작업본에는 다른 세션의 미커밋 변경이 섞여 있다), 그 exe 로
-전체 검증을 돌린 뒤 앱·CLI·세션을 백업하고 바꾸고 해시를 확인해 [배포 기록](docs/DEPLOYS.md)에 한 줄을 붙인다.
-앱이 떠 있으면 멈춘다. `--dry-run` 은 굽기·검증까지만 한다.
+origin/master 를 커밋 그대로의 임시 워크트리에서 굽고(작업본에는 다른 세션의 미커밋 변경이 섞여 있다), 전체 검증 없이
+앱·CLI·세션을 백업하고 바꾸고 해시를 확인해 [배포 기록](docs/DEPLOYS.md)에 한 줄을 붙인다. 전체 검증은 `--verify` 를 줄 때만
+돌린다(쓰는 사람이 사용자 하나라 빨리 받아 써 보는 쪽을 골랐다). 앱이 떠 있으면 멈춘다. `--dry-run` 은 굽기까지만 한다.
 
 Windows 첫 빌드에서는 `scripts/prepare-conpty.ps1`이 Microsoft NuGet에서 고정 버전의
 ConPTY 패키지를 받아 SHA-256을 검사하고 `OUT_DIR`에 풀어 둔다. 이후 빌드는 검증한 캐시를
