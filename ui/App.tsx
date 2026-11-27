@@ -404,7 +404,9 @@ export default function App() {
       >
         <SideMark open={sideOpen} />
       </button>
-      <WindowControls />
+      {/* 창 단추는 맨 위 오른쪽 칸의 머리줄 안에 앉는다. 칸이 없을 때(켜는 중·셸이 다 닫힌 탭)만 따로 띄운다 —
+          아니면 창을 닫거나 옮길 길이 없다. */}
+      {!(booted && tabs[active]?.layout) && <WindowControls float />}
 
       <Sidebar
         tabs={tabs}
@@ -453,12 +455,13 @@ export default function App() {
                       data-proc={stat[s.id]?.proc ?? ""}
                       data-agent={stat[s.id]?.agent ?? ""}
                       data-title={titles[s.id] ?? ""}
-                      className={atCorner(s.rect) ? "slot corner" : "slot"}
+                      className="slot"
                       style={pct(s.rect)}
                     >
                       <Pane
                         id={s.id}
                         on={ti === active && t.focus === s.id}
+                        corner={atCorner(s.rect)}
                         root={t.root}
                         shell={t.shell ?? shellList[0]?.path}
                         fontSize={fontSize}
@@ -574,12 +577,12 @@ export default function App() {
 }
 
 
-/** 옆칸 접기·펴기. 왼쪽 칸이 채워졌는지로 지금 상태를 말한다. */
-/** 창 단추가 얹히는 맨 위 오른쪽 칸인가. 그 칸 머리줄만 단추 자리를 비켜 준다. */
+/** 창 단추가 머리줄에 앉는 맨 위 오른쪽 칸인가. */
 function atCorner(r: L.Rect) {
   return r.y < 1e-6 && r.x + r.w > 1 - 1e-6;
 }
 
+/** 옆칸 접기·펴기. 왼쪽 칸이 채워졌는지로 지금 상태를 말한다. */
 function SideMark({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">

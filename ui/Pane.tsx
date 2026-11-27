@@ -12,6 +12,7 @@ import { Term } from "./Term";
 import { ClaudeStreamPane } from "./ClaudeStreamPane";
 import { CodexStreamPane } from "./CodexStreamPane";
 import { SubPane } from "./SubPane";
+import { WindowControls } from "./WindowControls";
 import type { SubPaneInfo } from "./saved";
 
 type CodexChat = Extract<StreamChat, { agent: "codex" }>;
@@ -20,6 +21,8 @@ export type PaneProps = {
   id: string;
   /** 지금 보는 탭의 포커스 칸인가. */
   on: boolean;
+  /** 맨 위 오른쪽 칸인가. 창 단추(내리기·키우기·닫기)가 이 칸 머리줄 끝에 앉는다. */
+  corner?: boolean;
   root: string | null;
   shell?: string;
   fontSize: number;
@@ -79,6 +82,13 @@ export function Pane(p: PaneProps) {
         className="pane-head"
         onMouseDown={(e) => {
           if (e.button !== 0) return;
+          // 창 단추 묶음은 칸 끌기가 아니라 창 끌기 자리다. stopPropagation 으로 막으면 문서에서 듣는
+          // Tauri 의 창 끌기까지 끊기므로 여기서 비켜 준다. 기본 동작은 막는다 — 단추가 포커스를 가져가면
+          // 내리기·키우기 뒤 터미널에 친 글자가 아무 데도 안 간다.
+          if ((e.target as Element).closest(".winctl")) {
+            e.preventDefault();
+            return;
+          }
           // 이걸 안 하면 헤더를 잡는 순간 포커스가 터미널에서
           // 헤더로 빠진다.
           e.preventDefault();
@@ -138,6 +148,7 @@ export function Pane(p: PaneProps) {
         >
           ×
         </button>
+        {p.corner && <WindowControls />}
       </header>
       {!p.stream && (p.switching || p.switchError) && <div className="mode-note note" role={p.switching ? "status" : "alert"}>
         {p.switching ? "현재 대화를 확인하고 대화창으로 옮기는 중" : p.switchError}
